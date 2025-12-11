@@ -1,15 +1,22 @@
-
-import React, { createContext, useContext, useEffect, useState, ReactNode } from 'react';
-import { User, Session } from '@supabase/supabase-js';
-import { supabase } from '@/integrations/supabase/client';
+import React, {
+  createContext,
+  useContext,
+  useEffect,
+  useState,
+  useCallback,
+  ReactNode,
+} from "react";
+import { LocalUser, LocalSession } from "@/integrations/supabase/client";
+import { localStorageService } from "@/services/localStorageService";
 
 interface AuthContextType {
-  user: User | null;
-  session: Session | null;
+  user: LocalUser | null;
+  session: LocalSession | null;
   loading: boolean;
   error: string | null;
   isAuthenticated: boolean;
   signOut: () => Promise<void>;
+  signIn: (user: LocalUser, session: LocalSession) => void;
 }
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
@@ -17,7 +24,7 @@ const AuthContext = createContext<AuthContextType | undefined>(undefined);
 export const useAuth = () => {
   const context = useContext(AuthContext);
   if (context === undefined) {
-    throw new Error('useAuth must be used within an AuthProvider');
+    throw new Error("useAuth must be used within an AuthProvider");
   }
   return context;
 };
@@ -27,64 +34,77 @@ interface AuthProviderProps {
 }
 
 export const AuthProvider = ({ children }: AuthProviderProps) => {
-  const [user, setUser] = useState<User | null>(null);
-  const [session, setSession] = useState<Session | null>(null);
+  const [user, setUser] = useState<LocalUser | null>(null);
+  const [session, setSession] = useState<LocalSession | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
-  const updateAuthState = (newSession: Session | null) => {
-    console.log('AuthContext: Updating auth state:', newSession?.user?.email || 'No session');
-    setSession(newSession);
-    setUser(newSession?.user ?? null);
-    
-    // Clear any previous errors on successful auth
-    if (newSession && error) {
-      setError(null);
-    }
-  };
+  const updateAuthState = useCallback(
+    (newUser: LocalUser | null, newSession: LocalSession | null) => {
+      console.log(
+        "AuthContext: Updating auth state:",
+        newUser?.email || "No user",
+      );
+      setUser(newUser);
+      setSession(newSession);
 
-  const clearAuthState = () => {
-    console.log('AuthContext: Clearing auth state');
-    setSession(null);
+      // Clear any previous errors on successful auth in a way that doesn't
+      // create a dependency on the `error` variable (so this callback stays stable).
+      setError((prev) => (newUser && prev ? null : prev));
+    },
+    [],
+  );
+
+  const clearAuthState = useCallback(() => {
+    console.log("AuthContext: Clearing auth state");
     setUser(null);
+    setSession(null);
     setError(null);
+  }, []);
+
+  const signIn = (user: LocalUser, session: LocalSession) => {
+    console.log("AuthContext: Starting sign in process...", user.email);
+
+    try {
+      // Store the session and user in localStorage
+      localStorage.setItem("currentSession", JSON.stringify(session));
+      localStorageService.setCurrentUser(user);
+
+      // Update internal state immediately
+      updateAuthState(user, session);
+
+      console.log("AuthContext: Sign in successful for", user.email);
+    } catch (err) {
+      console.error("AuthContext: Sign in error:", err);
+      setError(err instanceof Error ? err.message : "Sign in error");
+    }
   };
 
   const signOut = async () => {
     try {
-      console.log('AuthContext: Starting logout process...');
-      
-      // Clear local state immediately to provide instant feedback
+      console.log("AuthContext: Starting logout process...");
+
+      // Clear local storage
+      localStorageService.setCurrentUser(null);
+      localStorage.removeItem("currentSession");
+
+      // Clear local state immediately
       clearAuthState();
-      
-      // Attempt to sign out from server
-      const { error } = await supabase.auth.signOut();
-      
-      if (error) {
-        console.log('AuthContext: Logout error:', error);
-        
-        // If session is invalid on server, we've already cleared local state
-        if (error.message.includes('session_not_found') || 
-            error.message.includes('Session not found') ||
-            error.status === 403) {
-          console.log('AuthContext: Session already invalid on server');
-          return;
-        }
-        
-        // For other errors, still ensure local session is cleared
-        await supabase.auth.signOut({ scope: 'local' });
-        return;
-      }
-      
-      console.log('AuthContext: Logout successful');
+
+      console.log("AuthContext: Logout successful");
     } catch (err) {
-      console.error('AuthContext: Unexpected logout error:', err);
-      
+      console.error("AuthContext: Unexpected logout error:", err);
+
       // Even if there's an error, try to clear local session
       try {
-        await supabase.auth.signOut({ scope: 'local' });
+        localStorageService.setCurrentUser(null);
+        localStorage.removeItem("currentSession");
+        clearAuthState();
       } catch (localError) {
-        console.error('AuthContext: Failed to clear local session:', localError);
+        console.error(
+          "AuthContext: Failed to clear local session:",
+          localError,
+        );
       }
     }
   };
@@ -92,86 +112,56 @@ export const AuthProvider = ({ children }: AuthProviderProps) => {
   useEffect(() => {
     let mounted = true;
 
-    // Set up auth state listener FIRST
-    const { data: { subscription } } = supabase.auth.onAuthStateChange(
-      (event, newSession) => {
-        if (!mounted) return;
-        
-        console.log('AuthContext: Auth state changed:', event, newSession?.user?.email || 'No session');
-        
-        // Handle sign out events
-        if (event === 'SIGNED_OUT') {
-          clearAuthState();
-          setLoading(false);
-          return;
-        }
-        
-        // Handle sign in events
-        if (event === 'SIGNED_IN' || event === 'TOKEN_REFRESHED') {
-          updateAuthState(newSession);
-          setLoading(false);
-          return;
-        }
-        
-        // For other events, update state if there's an actual change
-        if (session?.access_token !== newSession?.access_token) {
-          updateAuthState(newSession);
-          if (loading) setLoading(false);
-        }
-      }
-    );
-
-    const initializeAuth = async () => {
+    const initializeAuth = () => {
       try {
-        console.log('AuthContext: Initializing auth...');
-        
-        // Get initial session
-        const { data: { session: initialSession }, error: sessionError } = await supabase.auth.getSession();
-        
-        if (sessionError) {
-          console.error('AuthContext: Error getting initial session:', sessionError);
-          
-          // If the session is invalid, clear local state
-          if (sessionError.message.includes('session_not_found') || 
-              sessionError.message.includes('Session not found')) {
-            console.log('AuthContext: Session not found on server, clearing local session');
-            await supabase.auth.signOut({ scope: 'local' });
+        console.log("AuthContext: Initializing auth...");
+
+        // Get user from local storage
+        const currentUser = localStorageService.getCurrentUser();
+        const sessionData = localStorage.getItem("currentSession");
+
+        if (currentUser && sessionData) {
+          try {
+            const session = JSON.parse(sessionData);
             if (mounted) {
-              clearAuthState();
-              setLoading(false);
+              console.log(
+                "AuthContext: Found existing session:",
+                currentUser.email,
+              );
+              updateAuthState(currentUser, session);
             }
-            return;
+          } catch (parseError) {
+            console.error("Error parsing session data:", parseError);
+            if (mounted) {
+              // Clear corrupted session data
+              localStorage.removeItem("currentSession");
+              updateAuthState(null, null);
+            }
           }
-          
-          if (mounted) {
-            setError(sessionError.message);
-            setLoading(false);
-          }
-          return;
+        } else if (mounted) {
+          console.log("AuthContext: No existing session found");
+          updateAuthState(null, null);
         }
-        
+
         if (mounted) {
-          console.log('AuthContext: Initial session:', initialSession?.user?.email || 'No session');
-          updateAuthState(initialSession);
           setLoading(false);
         }
       } catch (err) {
-        console.error('AuthContext: Auth initialization error:', err);
+        console.error("AuthContext: Auth initialization error:", err);
         if (mounted) {
-          setError(err instanceof Error ? err.message : 'Authentication error');
+          setError(err instanceof Error ? err.message : "Authentication error");
           setLoading(false);
         }
       }
     };
 
-    // Initialize auth state after setting up listener
+    // Initialize auth state synchronously
     initializeAuth();
 
     return () => {
       mounted = false;
-      subscription.unsubscribe();
     };
-  }, []); // Empty dependency array to run only once
+  }, [updateAuthState]); // updateAuthState is stable via useCallback
 
   const value: AuthContextType = {
     user,
@@ -180,6 +170,7 @@ export const AuthProvider = ({ children }: AuthProviderProps) => {
     error,
     isAuthenticated: !!user && !!session,
     signOut,
+    signIn,
   };
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;

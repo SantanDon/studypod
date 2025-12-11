@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
-import { Send, Upload, FileText, Loader2, RefreshCw } from 'lucide-react';
+// import { Send, Upload, FileText, Loader2, RefreshCw } from 'lucide-react'; // Removed Lucide imports
 import { Card } from '@/components/ui/card';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Carousel, CarouselContent, CarouselItem, CarouselNext, CarouselPrevious } from '@/components/ui/carousel';
@@ -10,7 +10,7 @@ import { useSources } from '@/hooks/useSources';
 import MarkdownRenderer from '@/components/chat/MarkdownRenderer';
 import SaveToNoteButton from './SaveToNoteButton';
 import AddSourcesDialog from './AddSourcesDialog';
-import { Citation } from '@/types/message';
+import { Citation, EnhancedChatMessage } from '@/types/message';
 
 interface ChatAreaProps {
   hasSource: boolean;
@@ -38,11 +38,12 @@ const ChatArea = ({
   const [clickedQuestions, setClickedQuestions] = useState<Set<string>>(new Set());
   const [showAddSourcesDialog, setShowAddSourcesDialog] = useState(false);
   
-  const isGenerating = notebook?.generation_status === 'generating';
+  const isGenerating = notebook?.generation_status === 'generating' || notebook?.generation_status === 'processing';
   
   const {
     messages,
     sendMessage,
+    sendMessageAsync,
     isSending,
     deleteChatHistory,
     isDeletingChatHistory
@@ -94,20 +95,30 @@ const ChatArea = ({
   const handleSendMessage = async (messageText?: string) => {
     const textToSend = messageText || message.trim();
     if (textToSend && notebookId) {
+      console.log('📤 Sending message:', textToSend);
+
       try {
         // Store the pending message to display immediately
         setPendingUserMessage(textToSend);
-        await sendMessage({
+        setMessage('');
+
+        // Show AI loading immediately
+        setShowAiLoading(true);
+
+        // Use sendMessageAsync to properly await the response
+        await sendMessageAsync({
           notebookId: notebookId,
           role: 'user',
           content: textToSend
         });
-        setMessage('');
 
-        // Show AI loading after user message is sent
-        setShowAiLoading(true);
+        console.log('✅ Message sent successfully');
+
+        // Clear pending message and loading state after response
+        setPendingUserMessage(null);
+        setShowAiLoading(false);
       } catch (error) {
-        console.error('Failed to send message:', error);
+        console.error('❌ Failed to send message:', error);
         // Clear pending message on error
         setPendingUserMessage(null);
         setShowAiLoading(false);
@@ -133,15 +144,15 @@ const ChatArea = ({
   };
 
   // Helper function to determine if message is from user
-  const isUserMessage = (msg: any) => {
-    const messageType = msg.message?.type || msg.message?.role;
-    return messageType === 'human' || messageType === 'user';
+  const isUserMessage = (msg: EnhancedChatMessage) => {
+    const messageType = msg.message?.type;
+    return messageType === 'human';
   };
 
   // Helper function to determine if message is from AI
-  const isAiMessage = (msg: any) => {
-    const messageType = msg.message?.type || msg.message?.role;
-    return messageType === 'ai' || messageType === 'assistant';
+  const isAiMessage = (msg: EnhancedChatMessage) => {
+    const messageType = msg.message?.type;
+    return messageType === 'ai';
   };
 
   // Get the index of the last message for auto-scrolling
@@ -173,7 +184,7 @@ const ChatArea = ({
             <div className="max-w-4xl mx-auto flex items-center justify-between">
               <h2 className="text-lg font-medium text-gray-900">Chat</h2>
               {shouldShowRefreshButton && <Button variant="ghost" size="sm" onClick={handleRefreshChat} disabled={isDeletingChatHistory || isChatDisabled} className="flex items-center space-x-2">
-                  <RefreshCw className={`h-4 w-4 ${isDeletingChatHistory ? 'animate-spin' : ''}`} />
+                  <i className={`fi fi-rr-refresh h-4 w-4 ${isDeletingChatHistory ? 'animate-spin' : ''}`}></i>
                   <span>{isDeletingChatHistory ? 'Clearing...' : 'Clear Chat'}</span>
                 </Button>}
             </div>
@@ -185,7 +196,7 @@ const ChatArea = ({
               <div className="max-w-4xl mx-auto">
                 <div className="flex items-center space-x-4 mb-6">
                   <div className="w-10 h-10 flex items-center justify-center bg-transparent">
-                    {isGenerating ? <Loader2 className="text-black font-normal w-10 h-10 animate-spin" /> : <span className="text-[40px] leading-none">{notebook?.icon || '☕'}</span>}
+                    {isGenerating ? <i className="fi fi-rr-spinner text-black font-normal w-10 h-10 animate-spin"></i> : <span className="text-[40px] leading-none">{notebook?.icon || '☕'}</span>}
                   </div>
                   <div>
                     <h1 className="text-2xl font-medium text-gray-900">
@@ -224,12 +235,12 @@ const ChatArea = ({
                     
                     {/* AI Loading Indicator */}
                     {showAiLoading && <div className="flex justify-start" ref={latestMessageRef}>
-                        <div className="flex items-center space-x-2 px-4 py-3 bg-gray-100 rounded-lg">
-                          <div className="w-2 h-2 bg-gray-400 rounded-full animate-bounce"></div>
-                          <div className="w-2 h-2 bg-gray-400 rounded-full animate-bounce" style={{
+                        <div className="flex items-center space-x-2 px-4 py-3 bg-muted rounded-lg">
+                          <div className="w-2 h-2 bg-muted-foreground rounded-full animate-bounce"></div>
+                          <div className="w-2 h-2 bg-muted-foreground rounded-full animate-bounce" style={{
                     animationDelay: '0.1s'
                   }}></div>
-                          <div className="w-2 h-2 bg-gray-400 rounded-full animate-bounce" style={{
+                          <div className="w-2 h-2 bg-muted-foreground rounded-full animate-bounce" style={{
                     animationDelay: '0.2s'
                   }}></div>
                         </div>
@@ -243,17 +254,17 @@ const ChatArea = ({
           </ScrollArea>
 
           {/* Chat Input - Fixed at bottom */}
-          <div className="p-6 border-t border-gray-200 flex-shrink-0">
+          <div className="p-6 border-t border-border flex-shrink-0 bg-background">
             <div className="max-w-4xl mx-auto">
               <div className="flex space-x-4">
                 <div className="flex-1 relative">
                   <Input placeholder={getPlaceholderText()} value={message} onChange={e => setMessage(e.target.value)} onKeyDown={e => e.key === 'Enter' && !isChatDisabled && !isSending && !pendingUserMessage && handleSendMessage()} className="pr-12" disabled={isChatDisabled || isSending || !!pendingUserMessage} />
-                  <div className="absolute right-3 top-1/2 transform -translate-y-1/2 text-sm text-gray-500">
+                  <div className="absolute right-3 top-1/2 transform -translate-y-1/2 text-sm text-muted-foreground">
                     {sourceCount} source{sourceCount !== 1 ? 's' : ''}
                   </div>
                 </div>
                 <Button onClick={() => handleSendMessage()} disabled={!message.trim() || isChatDisabled || isSending || !!pendingUserMessage}>
-                  {isSending || pendingUserMessage ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
+                  {isSending || pendingUserMessage ? <i className="fi fi-rr-spinner h-4 w-4 animate-spin"></i> : <i className="fi fi-rr-paper-plane-top h-4 w-4"></i>}
                 </Button>
               </div>
               
@@ -280,11 +291,11 @@ const ChatArea = ({
     <div className="flex-1 flex flex-col items-center justify-center p-8 overflow-hidden">
           <div className="text-center mb-8">
             <div className="w-16 h-16 rounded-full mx-auto mb-4 flex items-center justify-center bg-gray-100">
-              <Upload className="h-8 w-8 text-slate-600" />
+              <i className="fi fi-rr-upload h-8 w-8 text-slate-600"></i>
             </div>
             <h2 className="text-xl font-medium text-gray-900 mb-4">Add a source to get started</h2>
             <Button onClick={() => setShowAddSourcesDialog(true)}>
-              <Upload className="h-4 w-4 mr-2" />
+              <i className="fi fi-rr-upload h-4 w-4 mr-2"></i>
               Upload a source
             </Button>
           </div>
@@ -297,15 +308,15 @@ const ChatArea = ({
                 0 sources
               </div>
               <Button disabled>
-                <Send className="h-4 w-4" />
+                <i className="fi fi-rr-paper-plane-top h-4 w-4"></i>
               </Button>
             </div>
           </div>
         </div>}
       
       {/* Footer */}
-      <div className="p-4 border-t border-gray-200 flex-shrink-0">
-        <p className="text-center text-sm text-gray-500">InsightsLM can be inaccurate; please double-check its responses.</p>
+      <div className="p-4 border-t border-border flex-shrink-0 bg-background">
+        <p className="text-center text-sm text-muted-foreground">StudyLM can be inaccurate; please double-check its responses.</p>
       </div>
       
       {/* Add Sources Dialog */}

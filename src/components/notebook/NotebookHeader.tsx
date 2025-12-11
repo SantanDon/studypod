@@ -1,17 +1,15 @@
 import React, { useState } from 'react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
-import { User, LogOut } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { useNotebookUpdate } from '@/hooks/useNotebookUpdate';
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuTrigger,
-} from '@/components/ui/dropdown-menu';
-import { useLogout } from '@/services/authService';
+import { useNotebooks } from '@/hooks/useNotebooks';
+import { useSources } from '@/hooks/useSources';
+import { useNotes } from '@/hooks/useNotes';
 import Logo from '@/components/ui/Logo';
+import { ProfileMenu } from '@/components/profile/ProfileMenu';
+import ExportDialog from './ExportDialog';
+// import { Download } from 'lucide-react'; // Removed Lucide imports
 
 interface NotebookHeaderProps {
   title: string;
@@ -20,10 +18,15 @@ interface NotebookHeaderProps {
 
 const NotebookHeader = ({ title, notebookId }: NotebookHeaderProps) => {
   const navigate = useNavigate();
-  const { logout } = useLogout();
   const [isEditing, setIsEditing] = useState(false);
   const [editedTitle, setEditedTitle] = useState(title);
+  const [isExportOpen, setIsExportOpen] = useState(false);
   const { updateNotebook, isUpdating } = useNotebookUpdate();
+  const { notebooks } = useNotebooks();
+  const { sources } = useSources(notebookId);
+  const { notes } = useNotes(notebookId);
+  
+  const notebook = notebooks?.find(n => n.id === notebookId);
 
   const handleTitleClick = () => {
     if (notebookId) {
@@ -60,13 +63,13 @@ const NotebookHeader = ({ title, notebookId }: NotebookHeaderProps) => {
   };
 
   return (
-    <header className="bg-white border-b border-gray-200 px-6 py-4">
+    <header className="bg-background border-b border-border px-6 py-4">
       <div className="flex items-center justify-between">
         <div className="flex items-center space-x-4">
           <div className="flex items-center space-x-2">
-            <button 
+            <button
               onClick={handleIconClick}
-              className="hover:bg-gray-50 rounded transition-colors p-1"
+              className="hover:bg-accent rounded transition-colors p-1"
             >
               <Logo />
             </button>
@@ -76,13 +79,13 @@ const NotebookHeader = ({ title, notebookId }: NotebookHeaderProps) => {
                 onChange={(e) => setEditedTitle(e.target.value)}
                 onKeyDown={handleKeyDown}
                 onBlur={handleBlur}
-                className="text-lg font-medium text-gray-900 border-none shadow-none p-0 h-auto focus-visible:ring-0 min-w-[300px] w-auto"
+                className="text-lg font-medium text-foreground border-none shadow-none p-0 h-auto focus-visible:ring-0 min-w-[300px] w-auto bg-transparent"
                 autoFocus
                 disabled={isUpdating}
               />
             ) : (
-              <span 
-                className="text-lg font-medium text-gray-900 cursor-pointer hover:bg-gray-50 rounded px-2 py-1 transition-colors"
+              <span
+                className="text-lg font-medium text-foreground cursor-pointer hover:bg-accent rounded px-2 py-1 transition-colors"
                 onClick={handleTitleClick}
               >
                 {title}
@@ -92,25 +95,29 @@ const NotebookHeader = ({ title, notebookId }: NotebookHeaderProps) => {
         </div>
         
         <div className="flex items-center space-x-4">
-          <div className="flex items-center space-x-2">
-            <DropdownMenu>
-              <DropdownMenuTrigger asChild>
-                <Button variant="ghost" size="sm" className="p-0">
-                  <div className="w-8 h-8 bg-purple-500 rounded-full flex items-center justify-center cursor-pointer hover:bg-purple-600 transition-colors">
-                    <User className="h-4 w-4 text-white" />
-                  </div>
-                </Button>
-              </DropdownMenuTrigger>
-              <DropdownMenuContent align="end" className="w-48">
-                <DropdownMenuItem onClick={logout} className="cursor-pointer">
-                  <LogOut className="h-4 w-4 mr-2" />
-                  Sign Out
-                </DropdownMenuItem>
-              </DropdownMenuContent>
-            </DropdownMenu>
-          </div>
+          {notebook && (
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => setIsExportOpen(true)}
+            >
+              <i className="fi fi-rr-download h-4 w-4 mr-2"></i>
+              Export
+            </Button>
+          )}
+          <ProfileMenu />
         </div>
       </div>
+      
+      {notebook && (
+        <ExportDialog
+          notebook={notebook as LocalNotebook}
+          sources={sources || []}
+          notes={notes || []}
+          isOpen={isExportOpen}
+          onClose={() => setIsExportOpen(false)}
+        />
+      )}
     </header>
   );
 };

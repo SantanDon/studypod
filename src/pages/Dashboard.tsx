@@ -1,14 +1,16 @@
-
-import React from 'react';
-import DashboardHeader from '@/components/dashboard/DashboardHeader';
-import NotebookGrid from '@/components/dashboard/NotebookGrid';
-import EmptyDashboard from '@/components/dashboard/EmptyDashboard';
-import { useNotebooks } from '@/hooks/useNotebooks';
-import { useAuth } from '@/contexts/AuthContext';
+import React from "react";
+import DashboardHeader from "@/components/dashboard/DashboardHeader";
+import NotebookGrid from "@/components/dashboard/NotebookGrid";
+import EmptyDashboard from "@/components/dashboard/EmptyDashboard";
+import MetallicText from "@/components/ui/MetallicText";
+import { useNotebooks } from "@/hooks/useNotebooks";
+import { useAuth } from "@/contexts/AuthContext";
+import { useVisualEffectsStore } from "@/stores/visualEffectsStore";
 
 const Dashboard = () => {
   const { user, loading: authLoading, error: authError } = useAuth();
   const { notebooks, isLoading, error, isError } = useNotebooks();
+  const { metallicTextEnabled, metallicTextSpeed, useCustomFonts } = useVisualEffectsStore();
   const hasNotebooks = notebooks && notebooks.length > 0;
 
   // Show loading while auth is initializing
@@ -18,7 +20,9 @@ const Dashboard = () => {
         <DashboardHeader userEmail={user?.email} />
         <main className="max-w-7xl mx-auto px-6 py-8">
           <div className="mb-8">
-            <h1 className="text-4xl font-medium text-gray-900 mb-2">Welcome to InsightsLM</h1>
+            <h1 className="text-4xl font-medium text-gray-900 mb-2">
+              Welcome to StudyLM
+            </h1>
           </div>
           <div className="text-center py-16">
             <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600 mx-auto mb-4"></div>
@@ -36,12 +40,14 @@ const Dashboard = () => {
         <DashboardHeader userEmail={user?.email} />
         <main className="max-w-7xl mx-auto px-6 py-8">
           <div className="mb-8">
-            <h1 className="text-4xl font-medium text-gray-900 mb-2">Welcome to InsightsLM</h1>
+            <h1 className="text-4xl font-medium text-gray-900 mb-2">
+              Welcome to StudyLM
+            </h1>
           </div>
           <div className="text-center py-16">
             <p className="text-red-600">Authentication error: {authError}</p>
-            <button 
-              onClick={() => window.location.reload()} 
+            <button
+              onClick={() => window.location.reload()}
               className="mt-4 px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700"
             >
               Retry
@@ -59,7 +65,9 @@ const Dashboard = () => {
         <DashboardHeader userEmail={user?.email} />
         <main className="max-w-7xl mx-auto px-6 py-8">
           <div className="mb-8">
-            <h1 className="text-4xl font-medium text-gray-900 mb-2">Welcome to InsightsLM</h1>
+            <h1 className="text-4xl font-medium text-gray-900 mb-2">
+              Welcome to StudyLM
+            </h1>
           </div>
           <div className="text-center py-16">
             <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600 mx-auto mb-4"></div>
@@ -77,12 +85,14 @@ const Dashboard = () => {
         <DashboardHeader userEmail={user?.email} />
         <main className="max-w-7xl mx-auto px-6 py-8">
           <div className="mb-8">
-            <h1 className="text-4xl font-medium text-gray-900 mb-2">Welcome to InsightsLM</h1>
+            <h1 className="text-4xl font-medium text-gray-900 mb-2">
+              Welcome to StudyLM
+            </h1>
           </div>
           <div className="text-center py-16">
             <p className="text-red-600">Error loading notebooks: {error}</p>
-            <button 
-              onClick={() => window.location.reload()} 
+            <button
+              onClick={() => window.location.reload()}
               className="mt-4 px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700"
             >
               Retry
@@ -96,10 +106,14 @@ const Dashboard = () => {
   return (
     <div className="min-h-screen bg-white">
       <DashboardHeader userEmail={user?.email} />
-      
+
       <main className="max-w-7xl mx-auto px-6 py-[60px]">
         <div className="mb-8">
-          <h1 className="font-medium text-gray-900 mb-2 text-5xl">Welcome to InsightsLM</h1>
+          <h1 className={`font-medium text-gray-900 mb-2 text-5xl ${useCustomFonts ? 'font-heading' : ''}`}>
+            <MetallicText enabled={metallicTextEnabled} speed={metallicTextSpeed}>
+              Welcome to StudyLM
+            </MetallicText>
+          </h1>
         </div>
 
         {hasNotebooks ? <NotebookGrid /> : <EmptyDashboard />}

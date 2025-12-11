@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Trash2 } from 'lucide-react';
+// import { Trash2 } from 'lucide-react'; // Removed Lucide imports
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, AlertDialogTrigger } from '@/components/ui/alert-dialog';
 import { useNotebookDelete } from '@/hooks/useNotebookDelete';
 
@@ -51,7 +51,7 @@ const NotebookCard = ({
         <AlertDialog open={showDeleteDialog} onOpenChange={setShowDeleteDialog}>
           <AlertDialogTrigger asChild>
             <button onClick={handleDeleteClick} className="p-1 hover:bg-red-50 rounded text-gray-400 hover:text-red-500 transition-colors delete-button" disabled={isDeleting} data-delete-action="true">
-              <Trash2 className="h-4 w-4" />
+              <i className="fi fi-rr-trash h-4 w-4"></i>
             </button>
           </AlertDialogTrigger>
           <AlertDialogContent>

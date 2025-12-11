@@ -4,7 +4,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/u
 import { Button } from '@/components/ui/button';
 import { Textarea } from '@/components/ui/textarea';
 import { Label } from '@/components/ui/label';
-import { Link } from 'lucide-react';
+// import { Link } from 'lucide-react'; // Removed Lucide imports
 
 interface MultipleWebsiteUrlsDialogProps {
   open: boolean;
@@ -61,7 +61,7 @@ const MultipleWebsiteUrlsDialog = ({
       <DialogContent className="max-w-2xl">
         <DialogHeader>
           <DialogTitle className="flex items-center space-x-2">
-            <Link className="h-5 w-5 text-green-600" />
+            <i className="fi fi-rr-link h-5 w-5 text-green-600"></i>
             <span>Add Multiple Website URLs</span>
           </DialogTitle>
         </DialogHeader>

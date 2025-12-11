@@ -98,4 +98,64 @@
   body {
     @apply bg-background text-foreground;
   }
+
+  /* Ensure all major containers respect dark mode */
+  #root {
+    @apply bg-background text-foreground min-h-screen;
+  }
+
+  /* Fix white backgrounds in dark mode */
+  .dark {
+    color-scheme: dark;
+  }
+
+  /* Override any hardcoded white backgrounds */
+  .dark .bg-white {
+    @apply bg-background;
+  }
+
+  .dark .text-gray-900 {
+    @apply text-foreground;
+  }
+
+  .dark .text-gray-800 {
+    @apply text-foreground;
+  }
+
+  .dark .text-gray-700 {
+    @apply text-muted-foreground;
+  }
+
+  .dark .text-gray-600 {
+    @apply text-muted-foreground;
+  }
+
+  .dark .text-gray-500 {
+    @apply text-muted-foreground;
+  }
+
+  .dark .border-gray-200 {
+    @apply border-border;
+  }
+
+  .dark .border-gray-300 {
+    @apply border-border;
+  }
+
+  /* Fix specific component backgrounds */
+  .dark header {
+    @apply bg-card border-border;
+  }
+
+  .dark .bg-gray-50 {
+    @apply bg-background;
+  }
+
+  .dark .bg-gray-100 {
+    @apply bg-muted;
+  }
+
+  .dark .bg-gray-200 {
+    @apply bg-muted;
+  }
 }

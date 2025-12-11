@@ -1,8 +1,7 @@
-
-import { useMutation, useQueryClient } from '@tanstack/react-query';
-import { supabase } from '@/integrations/supabase/client';
-import { useAuth } from '@/contexts/AuthContext';
-import { useToast } from '@/hooks/use-toast';
+import { useMutation, useQueryClient } from "@tanstack/react-query";
+import { localStorageService } from "@/services/localStorageService";
+import { useAuth } from "@/contexts/AuthContext";
+import { useToast } from "@/hooks/use-toast";
 
 export const useSourceUpdate = () => {
   const queryClient = useQueryClient();
@@ -10,34 +9,38 @@ export const useSourceUpdate = () => {
   const { toast } = useToast();
 
   const updateSource = useMutation({
-    mutationFn: async ({ sourceId, title }: { sourceId: string; title: string }) => {
-      console.log('Updating source:', sourceId, 'with title:', title);
-      
-      const { data, error } = await supabase
-        .from('sources')
-        .update({ title })
-        .eq('id', sourceId)
-        .select()
-        .single();
+    mutationFn: async ({
+      sourceId,
+      title,
+    }: {
+      sourceId: string;
+      title: string;
+    }) => {
+      console.log("Updating source:", sourceId, "with title:", title);
 
-      if (error) {
-        console.error('Error updating source:', error);
-        throw error;
+      // Update the source in local storage
+      const updatedSource = localStorageService.updateSource(sourceId, {
+        title,
+      });
+
+      if (!updatedSource) {
+        console.error("Error updating source:", sourceId);
+        throw new Error("Source not found");
       }
-      
-      console.log('Source updated successfully');
-      return data;
+
+      console.log("Source updated successfully");
+      return updatedSource;
     },
     onSuccess: () => {
-      console.log('Update mutation success, invalidating queries');
-      queryClient.invalidateQueries({ queryKey: ['sources'] });
+      console.log("Update mutation success, invalidating queries");
+      queryClient.invalidateQueries({ queryKey: ["sources"] });
       toast({
         title: "Source renamed",
         description: "The source has been successfully renamed.",
       });
     },
     onError: (error) => {
-      console.error('Update mutation error:', error);
+      console.error("Update mutation error:", error);
       toast({
         title: "Error",
         description: "Failed to rename the source. Please try again.",

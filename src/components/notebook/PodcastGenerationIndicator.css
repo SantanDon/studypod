@@ -1,0 +1,166 @@
+/* Global Podcast Generation Indicator */
+
+.podcast-generation-indicator {
+  position: fixed;
+  bottom: 20px;
+  right: 20px;
+  background: linear-gradient(145deg, #1a1a2e 0%, #16213e 100%);
+  border: 1px solid rgba(102, 126, 234, 0.3);
+  border-radius: 12px;
+  padding: 12px 16px;
+  box-shadow: 
+    0 4px 20px rgba(0, 0, 0, 0.4),
+    0 0 20px rgba(102, 126, 234, 0.2);
+  z-index: 1000;
+  min-width: 240px;
+  animation: slideIn 0.3s ease-out;
+}
+
+@keyframes slideIn {
+  from {
+    opacity: 0;
+    transform: translateY(20px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.indicator-content {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.indicator-icon {
+  position: relative;
+  width: 36px;
+  height: 36px;
+  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  border-radius: 10px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+
+.indicator-icon svg {
+  width: 16px;
+  height: 16px;
+  color: white;
+}
+
+.indicator-pulse {
+  position: absolute;
+  inset: -4px;
+  border-radius: 14px;
+  border: 2px solid rgba(102, 126, 234, 0.5);
+  animation: pulse 1.5s ease-in-out infinite;
+}
+
+@keyframes pulse {
+  0%, 100% {
+    opacity: 0;
+    transform: scale(1);
+  }
+  50% {
+    opacity: 1;
+    transform: scale(1.1);
+  }
+}
+
+.indicator-info {
+  flex: 1;
+  cursor: pointer;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.indicator-info:hover .indicator-title {
+  color: #c4b5fd;
+}
+
+.indicator-title {
+  font-size: 13px;
+  font-weight: 600;
+  color: #e2e8f0;
+  transition: color 0.2s ease;
+}
+
+.indicator-progress {
+  font-size: 11px;
+  color: #64748b;
+  font-variant-numeric: tabular-nums;
+}
+
+.indicator-actions {
+  display: flex;
+  gap: 6px;
+}
+
+.indicator-btn {
+  width: 28px;
+  height: 28px;
+  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 6px;
+  color: #94a3b8;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: all 0.2s ease;
+}
+
+.indicator-btn:hover {
+  background: rgba(255, 255, 255, 0.1);
+  color: #e2e8f0;
+}
+
+.indicator-btn.play {
+  background: rgba(102, 126, 234, 0.2);
+  border-color: rgba(102, 126, 234, 0.3);
+  color: #a5b4fc;
+}
+
+.indicator-btn.play:hover {
+  background: rgba(102, 126, 234, 0.3);
+  color: #c4b5fd;
+}
+
+.indicator-btn.cancel:hover {
+  background: rgba(239, 68, 68, 0.2);
+  border-color: rgba(239, 68, 68, 0.3);
+  color: #ef4444;
+}
+
+.indicator-btn svg {
+  width: 12px;
+  height: 12px;
+}
+
+.indicator-progress-bar {
+  height: 3px;
+  background: rgba(255, 255, 255, 0.1);
+  border-radius: 2px;
+  margin-top: 10px;
+  overflow: hidden;
+}
+
+.indicator-progress-fill {
+  height: 100%;
+  background: linear-gradient(90deg, #667eea, #764ba2);
+  border-radius: 2px;
+  transition: width 0.3s ease;
+}
+
+/* Responsive */
+@media (max-width: 480px) {
+  .podcast-generation-indicator {
+    left: 20px;
+    right: 20px;
+    min-width: auto;
+  }
+}

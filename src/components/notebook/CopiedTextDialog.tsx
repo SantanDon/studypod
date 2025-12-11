@@ -5,22 +5,24 @@ import { Button } from '@/components/ui/button';
 import { Textarea } from '@/components/ui/textarea';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
-import { Copy, ClipboardPaste } from 'lucide-react';
+// import { Copy, ClipboardPaste, AlertTriangle } from 'lucide-react'; // Removed Lucide imports
+import { useTextPaste } from '@/hooks/useTextPaste';
 
 interface CopiedTextDialogProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
-  onSubmit: (title: string, content: string) => void;
+  notebookId?: string; // Add notebook ID to allow direct text paste
 }
 
 const CopiedTextDialog = ({
   open,
   onOpenChange,
-  onSubmit
+  notebookId
 }: CopiedTextDialogProps) => {
   const [title, setTitle] = useState('');
   const [content, setContent] = useState('');
-  const [isSubmitting, setIsSubmitting] = useState(false);
+  const { pasteTextAsSource, isProcessing } = useTextPaste();
+  const [validationWarning, setValidationWarning] = useState<string | null>(null);
 
   // Auto-populate with clipboard content when dialog opens
   useEffect(() => {
@@ -41,26 +43,27 @@ const CopiedTextDialog = ({
   }, [open]);
 
   const handleSubmit = async () => {
-    if (!title.trim() || !content.trim()) {
+    if (!title.trim() || !content.trim() || !notebookId) {
       return;
     }
 
-    setIsSubmitting(true);
     try {
-      await onSubmit(title.trim(), content.trim());
-      setTitle('');
-      setContent('');
-      onOpenChange(false);
+      // Use the validated text paste function
+      const success = await pasteTextAsSource(content.trim(), notebookId, title.trim());
+      if (success) {
+        setTitle('');
+        setContent('');
+        onOpenChange(false);
+      }
     } catch (error) {
       console.error('Error submitting copied text:', error);
-    } finally {
-      setIsSubmitting(false);
     }
   };
 
   const handleClose = () => {
     setTitle('');
     setContent('');
+    setValidationWarning(null);
     onOpenChange(false);
   };
 
@@ -79,15 +82,22 @@ const CopiedTextDialog = ({
     }
   };
 
-  const isValid = title.trim() !== '' && content.trim() !== '';
+  const isValid = title.trim() !== '' && content.trim() !== '' && !!notebookId;
   const characterCount = content.length;
+
+  // Optional: Real-time validation as user types
+  useEffect(() => {
+    if (content.trim() && validationWarning) {
+      setValidationWarning(null); // Clear warning when user starts typing
+    }
+  }, [content, validationWarning]);
 
   return (
     <Dialog open={open} onOpenChange={handleClose}>
       <DialogContent className="max-w-2xl">
         <DialogHeader>
           <DialogTitle className="flex items-center space-x-2">
-            <Copy className="h-5 w-5 text-purple-600" />
+            <i className="fi fi-rr-copy h-5 w-5 text-purple-600"></i>
             <span>Add Copied Text</span>
           </DialogTitle>
         </DialogHeader>
@@ -122,7 +132,7 @@ const CopiedTextDialog = ({
                 onClick={handlePasteFromClipboard}
                 className="flex items-center space-x-1"
               >
-                <ClipboardPaste className="h-4 w-4" />
+                <i className="fi fi-rr-clipboard h-4 w-4"></i>
                 <span>Paste from Clipboard</span>
               </Button>
             </div>
@@ -141,15 +151,22 @@ const CopiedTextDialog = ({
             </div>
           </div>
 
+          {validationWarning && (
+            <div className="flex items-start space-x-2 p-3 bg-amber-50 border border-amber-200 rounded-md">
+              <i className="fi fi-rr-exclamation h-4 w-4 text-amber-600 mt-0.5 flex-shrink-0"></i>
+              <p className="text-sm text-amber-800">{validationWarning}</p>
+            </div>
+          )}
+
           <div className="flex justify-end space-x-2 pt-4">
-            <Button variant="outline" onClick={handleClose}>
+            <Button variant="outline" onClick={handleClose} disabled={isProcessing}>
               Cancel
             </Button>
-            <Button 
-              onClick={handleSubmit} 
-              disabled={!isValid || isSubmitting}
+            <Button
+              onClick={handleSubmit}
+              disabled={!isValid || isProcessing}
             >
-              {isSubmitting ? 'Adding...' : 'Add Copied Text'}
+              {isProcessing ? 'Adding...' : 'Add Copied Text'}
             </Button>
           </div>
         </div>

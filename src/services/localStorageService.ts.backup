@@ -1,0 +1,395 @@
+﻿// Local storage service to replace Supabase database operations
+export interface LocalUser {
+  id: string;
+  email: string;
+  created_at: string;
+}
+
+export interface LocalSession {
+  access_token: string;
+  refresh_token: string;
+  user: LocalUser;
+  expires_at: number;
+}
+
+export interface LocalNotebook {
+  id: string;
+  title: string;
+  description?: string;
+  user_id: string;
+  created_at: string;
+  updated_at: string;
+  generation_status: "pending" | "processing" | "completed" | "failed";
+  audio_overview_url?: string;
+  audio_url_expires_at?: string;
+}
+
+export interface LocalSource {
+  id: string;
+  notebook_id: string;
+  title: string;
+  type: "pdf" | "text" | "website" | "youtube" | "audio";
+  content?: string;
+  url?: string;
+  file_path?: string;
+  file_size?: number;
+  processing_status?: string;
+  metadata?: Record<string, unknown>;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface LocalNote {
+  id: string;
+  notebook_id: string;
+  title: string;
+  content: string;
+  source_type: "user" | "ai_response";
+  extracted_text?: string;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface LocalChatMessage {
+  id: string;
+  notebook_id: string;
+  message: string | { type: "human" | "ai"; content: string };
+  response: string;
+  citations?: unknown;
+  created_at: string;
+}
+
+class LocalStorageService {
+  private generateId(): string {
+    return Date.now().toString(36) + Math.random().toString(36).substr(2);
+  }
+
+  private getFromStorage<T>(key: string): T[] {
+    try {
+      const data = localStorage.getItem(key);
+      return data ? JSON.parse(data) : [];
+    } catch {
+      return [];
+    }
+  }
+
+  private saveToStorage<T>(key: string, data: T[]): void {
+    try {
+      localStorage.setItem(key, JSON.stringify(data));
+    } catch (error) {
+      console.error("Failed to save to localStorage:", error);
+    }
+  }
+
+  private async hashPassword(password: string): Promise<string> {
+    const msgBuffer = new TextEncoder().encode(password);
+    const hashBuffer = await crypto.subtle.digest("SHA-256", msgBuffer);
+    const hashArray = Array.from(new Uint8Array(hashBuffer));
+    return hashArray.map((b) => b.toString(16).padStart(2, "0")).join("");
+  }
+
+  // User and Session Management
+  getCurrentUser(): LocalUser | null {
+    const user = localStorage.getItem("currentUser");
+    return user ? JSON.parse(user) : null;
+  }
+
+  setCurrentUser(user: LocalUser | null): void {
+    if (user) {
+      localStorage.setItem("currentUser", JSON.stringify(user));
+    } else {
+      localStorage.removeItem("currentUser");
+    }
+  }
+
+  getUsers(): LocalUser[] {
+    return this.getFromStorage<LocalUser>("users");
+  }
+
+  async addUser(user: LocalUser, password: string): Promise<void> {
+    const users = this.getFromStorage<LocalUser>("users");
+    
+    // Check if user already exists
+    if (users.some(u => u.email === user.email)) {
+      throw new Error("User already exists");
+    }
+
+    const hashedPassword = await this.hashPassword(password);
+
+    const passwords = this.getFromStorage<{
+      user_id: string;
+      password: string;
+    }>("passwords");
+    
+    passwords.push({
+      user_id: user.id,
+      password: hashedPassword,
+    });
+
+    users.push(user);
+    this.saveToStorage("users", users);
+    this.saveToStorage("passwords", passwords);
+  }
+
+  async authenticate(email: string, password: string): Promise<LocalUser | null> {
+    const users = this.getFromStorage<LocalUser>("users");
+    const passwords = this.getFromStorage<{
+      user_id: string;
+      password: string;
+    }>("passwords");
+
+    const user = users.find((u) => u.email === email);
+    if (!user) {
+      return null;
+    }
+
+    const passwordEntry = passwords.find((p) => p.user_id === user.id);
+    if (!passwordEntry) {
+      return null;
+    }
+
+    const hashedPassword = await this.hashPassword(password);
+    if (passwordEntry.password !== hashedPassword) {
+      return null;
+    }
+
+    return user;
+  }
+
+  // Notebooks
+  getNotebooks(userId: string): LocalNotebook[] {
+    const notebooks = this.getFromStorage<LocalNotebook>("notebooks");
+    return notebooks.filter((n) => n.user_id === userId);
+  }
+
+  getNotebook(id: string): LocalNotebook | null {
+    const notebooks = this.getFromStorage<LocalNotebook>("notebooks");
+    return notebooks.find((n) => n.id === id) || null;
+  }
+
+  // Alias for getNotebook (for test compatibility)
+  getNotebookById(id: string): LocalNotebook | null {
+    return this.getNotebook(id);
+  }
+  createNotebook(
+    data: Omit<LocalNotebook, "id" | "created_at" | "updated_at">,
+  ): LocalNotebook {
+    const notebooks = this.getFromStorage<LocalNotebook>("notebooks");
+    const newNotebook: LocalNotebook = {
+      ...data,
+      id: this.generateId(),
+      created_at: new Date().toISOString(),
+      updated_at: new Date().toISOString(),
+    };
+    notebooks.push(newNotebook);
+    this.saveToStorage("notebooks", notebooks);
+    return newNotebook;
+  }
+
+  updateNotebook(
+    id: string,
+    updates: Partial<LocalNotebook>,
+  ): LocalNotebook | null {
+    const notebooks = this.getFromStorage<LocalNotebook>("notebooks");
+    const index = notebooks.findIndex((n) => n.id === id);
+    if (index === -1) return null;
+
+    notebooks[index] = {
+      ...notebooks[index],
+      ...updates,
+      updated_at: new Date().toISOString(),
+    };
+    this.saveToStorage("notebooks", notebooks);
+    return notebooks[index];
+  }
+
+  deleteNotebook(id: string): boolean {
+    const notebooks = this.getFromStorage<LocalNotebook>("notebooks");
+    const filtered = notebooks.filter((n) => n.id !== id);
+    if (filtered.length === notebooks.length) return false;
+
+    this.saveToStorage("notebooks", filtered);
+
+    // Also delete related sources and notes
+    const sources = this.getFromStorage<LocalSource>("sources");
+    const filteredSources = sources.filter((s) => s.notebook_id !== id);
+    this.saveToStorage("sources", filteredSources);
+
+    const notes = this.getFromStorage<LocalNote>("notes");
+    const filteredNotes = notes.filter((n) => n.notebook_id !== id);
+    this.saveToStorage("notes", filteredNotes);
+
+    const messages = this.getFromStorage<LocalChatMessage>("chat_messages");
+    const filteredMessages = messages.filter((m) => m.notebook_id !== id);
+    this.saveToStorage("chat_messages", filteredMessages);
+
+    return true;
+  }
+
+  // Sources
+  getSources(notebookId: string): LocalSource[] {
+    const sources = this.getFromStorage<LocalSource>("sources");
+    return sources.filter((s) => s.notebook_id === notebookId);
+  }
+
+  getSourceById(id: string): LocalSource | null {
+    const sources = this.getFromStorage<LocalSource>("sources");
+    return sources.find((s) => s.id === id) || null;
+  }
+
+  createSource(
+    data: Omit<LocalSource, "id" | "created_at" | "updated_at">,
+  ): LocalSource {
+    const sources = this.getFromStorage<LocalSource>("sources");
+    const newSource: LocalSource = {
+      ...data,
+      id: this.generateId(),
+      created_at: new Date().toISOString(),
+      updated_at: new Date().toISOString(),
+    };
+    sources.push(newSource);
+    this.saveToStorage("sources", sources);
+    return newSource;
+  }
+
+  updateSource(id: string, updates: Partial<LocalSource>): LocalSource | null {
+    const sources = this.getFromStorage<LocalSource>("sources");
+    const index = sources.findIndex((s) => s.id === id);
+    if (index === -1) return null;
+
+    sources[index] = {
+      ...sources[index],
+      ...updates,
+      updated_at: new Date().toISOString(),
+    };
+    this.saveToStorage("sources", sources);
+    return sources[index];
+  }
+
+  deleteSource(id: string): boolean {
+    const sources = this.getFromStorage<LocalSource>("sources");
+    const filtered = sources.filter((s) => s.id !== id);
+    if (filtered.length === sources.length) return false;
+    this.saveToStorage("sources", filtered);
+    return true;
+  }
+
+  // Notes
+  getNotes(notebookId: string): LocalNote[] {
+    const notes = this.getFromStorage<LocalNote>("notes");
+    return notes.filter((n) => n.notebook_id === notebookId);
+  }
+
+  // Get note by ID
+  getNoteById(id: string): LocalNote | null {
+    const notes = this.getFromStorage<LocalNote>("notes");
+    return notes.find((n) => n.id === id) || null;
+  }
+  createNote(
+    data: Omit<LocalNote, "id" | "created_at" | "updated_at">,
+  ): LocalNote {
+    const notes = this.getFromStorage<LocalNote>("notes");
+    const newNote: LocalNote = {
+      ...data,
+      id: this.generateId(),
+      created_at: new Date().toISOString(),
+      updated_at: new Date().toISOString(),
+    };
+    notes.push(newNote);
+    this.saveToStorage("notes", notes);
+    return newNote;
+  }
+
+  updateNote(id: string, updates: Partial<LocalNote>): LocalNote | null {
+    const notes = this.getFromStorage<LocalNote>("notes");
+    const index = notes.findIndex((n) => n.id === id);
+    if (index === -1) return null;
+
+    notes[index] = {
+      ...notes[index],
+      ...updates,
+      updated_at: new Date().toISOString(),
+    };
+    this.saveToStorage("notes", notes);
+    return notes[index];
+  }
+
+  deleteNote(id: string): boolean {
+    const notes = this.getFromStorage<LocalNote>("notes");
+    const filtered = notes.filter((n) => n.id !== id);
+    if (filtered.length === notes.length) return false;
+    this.saveToStorage("notes", filtered);
+    return true;
+  }
+
+  // Chat Messages
+  getChatMessages(notebookId: string): LocalChatMessage[] {
+    const messages = this.getFromStorage<LocalChatMessage>("chat_messages");
+    return messages.filter((m) => m.notebook_id === notebookId);
+  }
+
+  createChatMessage(
+    data: Omit<LocalChatMessage, "id" | "created_at">,
+  ): LocalChatMessage {
+    const messages = this.getFromStorage<LocalChatMessage>("chat_messages");
+    const newMessage: LocalChatMessage = {
+      ...data,
+      id: this.generateId(),
+      created_at: new Date().toISOString(),
+    };
+    messages.push(newMessage);
+    this.saveToStorage("chat_messages", messages);
+    return newMessage;
+  }
+
+  deleteChatMessage(id: string): boolean {
+    const messages = this.getFromStorage<LocalChatMessage>("chat_messages");
+    const filtered = messages.filter((m) => m.id !== id);
+    if (filtered.length === messages.length) return false;
+    this.saveToStorage("chat_messages", filtered);
+    return true;
+  }
+
+  // Utility methods
+  clearAllData(): void {
+    const keys = [
+      "notebooks",
+      "sources",
+      "notes",
+      "chat_messages",
+      "currentUser",
+      "users",
+      "passwords",
+    ];
+    keys.forEach((key) => localStorage.removeItem(key));
+  }
+
+  exportData(): string {
+    const data = {
+      notebooks: this.getFromStorage<LocalNotebook>("notebooks"),
+      sources: this.getFromStorage<LocalSource>("sources"),
+      notes: this.getFromStorage<LocalNote>("notes"),
+      chat_messages: this.getFromStorage<LocalChatMessage>("chat_messages"),
+      currentUser: this.getCurrentUser(),
+    };
+    return JSON.stringify(data, null, 2);
+  }
+
+  importData(jsonData: string): void {
+    try {
+      const data = JSON.parse(jsonData);
+      if (data.notebooks) this.saveToStorage("notebooks", data.notebooks);
+      if (data.sources) this.saveToStorage("sources", data.sources);
+      if (data.notes) this.saveToStorage("notes", data.notes);
+      if (data.chat_messages)
+        this.saveToStorage("chat_messages", data.chat_messages);
+      if (data.currentUser) this.setCurrentUser(data.currentUser);
+    } catch (error) {
+      console.error("Failed to import data:", error);
+      throw new Error("Invalid data format");
+    }
+  }
+}
+
+export const localStorageService = new LocalStorageService();
+

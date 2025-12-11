@@ -2,7 +2,7 @@
 import React, { useState, useMemo } from 'react';
 import { Button } from '@/components/ui/button';
 import NotebookCard from './NotebookCard';
-import { Check, Grid3X3, List, ChevronDown } from 'lucide-react';
+// import { Check, Grid3X3, List, ChevronDown } from 'lucide-react'; // Removed Lucide imports
 import { useNotebooks } from '@/hooks/useNotebooks';
 import { useNavigate } from 'react-router-dom';
 import {
@@ -11,6 +11,7 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
+import { useToast } from "@/hooks/use-toast";
 
 const NotebookGrid = () => {
   const [viewMode, setViewMode] = useState<'grid' | 'list'>('grid');
@@ -37,6 +38,7 @@ const NotebookGrid = () => {
     return sorted;
   }, [notebooks, sortBy]);
 
+  const { toast } = useToast();
   const handleCreateNotebook = () => {
     createNotebook({
       title: 'Untitled notebook',
@@ -48,6 +50,11 @@ const NotebookGrid = () => {
       },
       onError: error => {
         console.error('Failed to create notebook:', error);
+        toast({
+          title: "Error creating notebook",
+          description: error instanceof Error ? error.message : "Unknown error",
+          variant: "destructive",
+        });
       }
     });
   };
@@ -80,17 +87,17 @@ const NotebookGrid = () => {
             <DropdownMenuTrigger asChild>
               <div className="flex items-center space-x-2 bg-white rounded-lg border px-3 py-2 cursor-pointer hover:bg-gray-50 transition-colors">
                 <span className="text-sm text-gray-600">{sortBy}</span>
-                <ChevronDown className="h-4 w-4 text-gray-400" />
+                <i className="fi fi-rr-angle-down h-4 w-4 text-gray-400"></i>
               </div>
             </DropdownMenuTrigger>
             <DropdownMenuContent align="end" className="w-48">
               <DropdownMenuItem onClick={() => setSortBy('Most recent')} className="flex items-center justify-between">
                 Most recent
-                {sortBy === 'Most recent' && <Check className="h-4 w-4" />}
+                {sortBy === 'Most recent' && <i className="fi fi-rr-check h-4 w-4"></i>}
               </DropdownMenuItem>
               <DropdownMenuItem onClick={() => setSortBy('Title')} className="flex items-center justify-between">
                 Title
-                {sortBy === 'Title' && <Check className="h-4 w-4" />}
+                {sortBy === 'Title' && <i className="fi fi-rr-check h-4 w-4"></i>}
               </DropdownMenuItem>
             </DropdownMenuContent>
           </DropdownMenu>

@@ -1,7 +1,7 @@
 
 import React from 'react';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
-import { FileText, MessageCircle, NotebookPen } from 'lucide-react';
+// import { FileText, MessageCircle, NotebookPen } from 'lucide-react'; // Removed Lucide imports
 import SourcesSidebar from './SourcesSidebar';
 import ChatArea from './ChatArea';
 import StudioSidebar from './StudioSidebar';
@@ -40,21 +40,21 @@ const MobileNotebookTabs = ({
           value="sources" 
           className="flex items-center space-x-2 text-sm data-[state=active]:bg-white data-[state=active]:shadow-sm"
         >
-          <FileText className="h-4 w-4" />
+          <i className="fi fi-rr-file h-4 w-4"></i>
           <span className="hidden sm:inline">Sources</span>
         </TabsTrigger>
         <TabsTrigger 
           value="chat" 
           className="flex items-center space-x-2 text-sm data-[state=active]:bg-white data-[state=active]:shadow-sm"
         >
-          <MessageCircle className="h-4 w-4" />
+          <i className="fi fi-rr-comment h-4 w-4"></i>
           <span className="hidden sm:inline">Chat</span>
         </TabsTrigger>
         <TabsTrigger 
           value="studio" 
           className="flex items-center space-x-2 text-sm data-[state=active]:bg-white data-[state=active]:shadow-sm"
         >
-          <NotebookPen className="h-4 w-4" />
+          <i className="fi fi-rr-notebook h-4 w-4"></i>
           <span className="hidden sm:inline">Notes</span>
         </TabsTrigger>
       </TabsList>

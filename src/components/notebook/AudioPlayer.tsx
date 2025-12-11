@@ -1,10 +1,27 @@
-import React, { useState, useRef, useEffect } from 'react';
-import { Button } from '@/components/ui/button';
-import { Card } from '@/components/ui/card';
-import { Slider } from '@/components/ui/slider';
-import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from '@/components/ui/dropdown-menu';
-import { Play, Pause, RotateCcw, Volume2, Download, MoreVertical, Trash2, Loader2, RefreshCw, AlertTriangle } from 'lucide-react';
-import { useToast } from '@/hooks/use-toast';
+import React, { useState, useRef, useEffect } from "react";
+import { Button } from "@/components/ui/button";
+import { Card } from "@/components/ui/card";
+import { Slider } from "@/components/ui/slider";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
+import {
+  Play,
+  Pause,
+  RotateCcw,
+  Volume2,
+  Download,
+  MoreVertical,
+  Trash2,
+  Loader2,
+  RefreshCw,
+  AlertTriangle,
+} from "lucide-react";
+import { useToast } from "@/hooks/use-toast";
+import { localStorageService } from "@/services/localStorageService";
 
 interface AudioPlayerProps {
   audioUrl: string;
@@ -17,15 +34,15 @@ interface AudioPlayerProps {
   onUrlRefresh?: (notebookId: string) => void;
 }
 
-const AudioPlayer = ({ 
-  audioUrl, 
-  title = "Deep Dive Conversation", 
+const AudioPlayer = ({
+  audioUrl,
+  title = "Deep Dive Conversation",
   notebookId,
   expiresAt,
   onError,
   onDeleted,
   onRetry,
-  onUrlRefresh
+  onUrlRefresh,
 }: AudioPlayerProps) => {
   const [isPlaying, setIsPlaying] = useState(false);
   const [currentTime, setCurrentTime] = useState(0);
@@ -56,28 +73,40 @@ const AudioPlayer = ({
     };
     const handleEnded = () => setIsPlaying(false);
     const handleError = async (e: Event) => {
-      console.error('Audio error:', e);
+      console.error("Audio error:", e);
       setLoading(false);
       setIsPlaying(false);
-      
+
       // If the URL has expired and we have a notebookId, try to refresh it automatically
-      if ((isExpired || audioError?.includes('403') || audioError?.includes('expired')) && 
-          notebookId && onUrlRefresh && retryCount < 2 && !autoRetryInProgress) {
-        console.log('Audio URL expired or access denied, attempting automatic refresh...');
+      if (
+        (isExpired ||
+          audioError?.includes("403") ||
+          audioError?.includes("expired")) &&
+        notebookId &&
+        onUrlRefresh &&
+        retryCount < 2 &&
+        !autoRetryInProgress
+      ) {
+        console.log(
+          "Audio URL expired or access denied, attempting automatic refresh...",
+        );
         setAutoRetryInProgress(true);
-        setRetryCount(prev => prev + 1);
+        setRetryCount((prev) => prev + 1);
         onUrlRefresh(notebookId);
         return;
       }
 
       if (retryCount < 2 && !autoRetryInProgress) {
         // Auto-retry up to 2 times for transient errors
-        setTimeout(() => {
-          setRetryCount(prev => prev + 1);
-          audio.load();
-        }, 1000 * (retryCount + 1)); // Exponential backoff
+        setTimeout(
+          () => {
+            setRetryCount((prev) => prev + 1);
+            audio.load();
+          },
+          1000 * (retryCount + 1),
+        ); // Exponential backoff
       } else {
-        setAudioError('Failed to load audio');
+        setAudioError("Failed to load audio");
         setAutoRetryInProgress(false);
         onError?.();
       }
@@ -96,28 +125,36 @@ const AudioPlayer = ({
       }
     };
 
-    audio.addEventListener('timeupdate', updateTime);
-    audio.addEventListener('loadedmetadata', updateDuration);
-    audio.addEventListener('canplay', handleCanPlay);
-    audio.addEventListener('loadstart', handleLoadStart);
-    audio.addEventListener('ended', handleEnded);
-    audio.addEventListener('error', handleError);
+    audio.addEventListener("timeupdate", updateTime);
+    audio.addEventListener("loadedmetadata", updateDuration);
+    audio.addEventListener("canplay", handleCanPlay);
+    audio.addEventListener("loadstart", handleLoadStart);
+    audio.addEventListener("ended", handleEnded);
+    audio.addEventListener("error", handleError);
 
     return () => {
-      audio.removeEventListener('timeupdate', updateTime);
-      audio.removeEventListener('loadedmetadata', updateDuration);
-      audio.removeEventListener('canplay', handleCanPlay);
-      audio.removeEventListener('loadstart', handleLoadStart);
-      audio.removeEventListener('ended', handleEnded);
-      audio.removeEventListener('error', handleError);
+      audio.removeEventListener("timeupdate", updateTime);
+      audio.removeEventListener("loadedmetadata", updateDuration);
+      audio.removeEventListener("canplay", handleCanPlay);
+      audio.removeEventListener("loadstart", handleLoadStart);
+      audio.removeEventListener("ended", handleEnded);
+      audio.removeEventListener("error", handleError);
     };
-  }, [onError, isExpired, retryCount, notebookId, onUrlRefresh, audioError, autoRetryInProgress]);
+  }, [
+    onError,
+    isExpired,
+    retryCount,
+    notebookId,
+    onUrlRefresh,
+    audioError,
+    autoRetryInProgress,
+  ]);
 
   // Reload audio when URL changes (for automatic refresh)
   useEffect(() => {
     const audio = audioRef.current;
     if (audio && autoRetryInProgress) {
-      console.log('Reloading audio with new URL...');
+      console.log("Reloading audio with new URL...");
       audio.load();
     }
   }, [audioUrl, autoRetryInProgress]);
@@ -131,9 +168,9 @@ const AudioPlayer = ({
     } else {
       const playPromise = audio.play();
       if (playPromise !== undefined) {
-        playPromise.catch(error => {
-          console.error('Play failed:', error);
-          setAudioError('Playback failed');
+        playPromise.catch((error) => {
+          console.error("Play failed:", error);
+          setAudioError("Playback failed");
         });
       }
     }
@@ -180,42 +217,42 @@ const AudioPlayer = ({
   const formatTime = (time: number) => {
     const minutes = Math.floor(time / 60);
     const seconds = Math.floor(time % 60);
-    return `${minutes}:${seconds.toString().padStart(2, '0')}`;
+    return `${minutes}:${seconds.toString().padStart(2, "0")}`;
   };
 
   const downloadAudio = async () => {
     setIsDownloading(true);
-    
+
     try {
       // Fetch the audio file
       const response = await fetch(audioUrl);
       if (!response.ok) {
-        throw new Error('Failed to fetch audio file');
+        throw new Error("Failed to fetch audio file");
       }
-      
+
       // Create a blob from the response
       const blob = await response.blob();
-      
+
       // Create a temporary URL for the blob
       const blobUrl = URL.createObjectURL(blob);
-      
+
       // Create a temporary anchor element and trigger download
-      const link = document.createElement('a');
+      const link = document.createElement("a");
       link.href = blobUrl;
       link.download = `${title}.mp3`;
       document.body.appendChild(link);
       link.click();
-      
+
       // Clean up
       document.body.removeChild(link);
       URL.revokeObjectURL(blobUrl);
-      
+
       toast({
         title: "Download Started",
         description: "Your audio file is being downloaded.",
       });
     } catch (error) {
-      console.error('Download failed:', error);
+      console.error("Download failed:", error);
       toast({
         title: "Download Failed",
         description: "Failed to download the audio file. Please try again.",
@@ -237,66 +274,34 @@ const AudioPlayer = ({
     }
 
     setIsDeleting(true);
-    
+
     try {
-      const { supabase } = await import('@/integrations/supabase/client');
-      
-      // First, try to remove all files in the notebook folder from storage
-      try {
-        console.log('Attempting to list files in folder:', notebookId);
-        
-        // List all files in the notebook folder
-        const { data: files, error: listError } = await supabase.storage
-          .from('audio')
-          .list(notebookId);
-
-        if (listError) {
-          console.error('Error listing files:', listError);
-        } else if (files && files.length > 0) {
-          // Delete all files in the folder
-          const filePaths = files.map(file => `${notebookId}/${file.name}`);
-          console.log('Deleting files:', filePaths);
-          
-          const { error: deleteError } = await supabase.storage
-            .from('audio')
-            .remove(filePaths);
-
-          if (deleteError) {
-            console.error('Error deleting files from storage:', deleteError);
-          } else {
-            console.log('Successfully deleted files from storage');
-          }
-        }
-      } catch (storageError) {
-        console.error('Storage operation failed:', storageError);
-        // Continue with database update even if storage deletion fails
-      }
+      // In a local implementation, we don't need to worry about storage operations
+      // Just update the notebook using local storage
 
       // Update the notebook to clear audio overview fields
-      const { error } = await supabase
-        .from('notebooks')
-        .update({
+      const notebook = localStorageService.getNotebook(notebookId);
+      if (notebook) {
+        localStorageService.updateNotebook(notebookId, {
           audio_overview_url: null,
           audio_url_expires_at: null,
-          audio_overview_generation_status: null
-        })
-        .eq('id', notebookId);
+          generation_status: "pending",
+        });
 
-      if (error) {
-        console.error('Error updating notebook:', error);
-        throw error;
+        console.log("Successfully updated notebook with local storage");
+
+        toast({
+          title: "Audio Deleted",
+          description: "The audio overview has been successfully deleted.",
+        });
+
+        // Call the onDeleted callback to update parent component
+        onDeleted?.();
+      } else {
+        throw new Error("Notebook not found");
       }
-
-      toast({
-        title: "Audio Deleted",
-        description: "The audio overview and associated files have been successfully deleted.",
-      });
-
-      // Call the onDeleted callback to update parent component
-      onDeleted?.();
-
     } catch (error) {
-      console.error('Failed to delete audio:', error);
+      console.error("Failed to delete audio:", error);
       toast({
         title: "Delete Failed",
         description: "Failed to delete the audio overview. Please try again.",
@@ -310,7 +315,7 @@ const AudioPlayer = ({
   return (
     <Card className="p-4 space-y-4">
       <audio ref={audioRef} src={audioUrl} preload="metadata" />
-      
+
       <div className="flex items-center justify-between">
         <div className="flex-1">
           <h4 className="font-medium text-gray-900">{title}</h4>
@@ -332,9 +337,9 @@ const AudioPlayer = ({
               ) : (
                 <Download className="h-4 w-4 mr-2" />
               )}
-              {isDownloading ? 'Downloading...' : 'Download'}
+              {isDownloading ? "Downloading..." : "Download"}
             </DropdownMenuItem>
-            <DropdownMenuItem 
+            <DropdownMenuItem
               onClick={deleteAudio}
               className="text-red-600 focus:text-red-600"
               disabled={isDeleting}
@@ -351,7 +356,9 @@ const AudioPlayer = ({
         <div className="flex items-center justify-between p-3 bg-blue-50 rounded-md border border-blue-200">
           <div className="flex items-center space-x-2">
             <Loader2 className="h-4 w-4 text-blue-600 animate-spin" />
-            <span className="text-sm text-blue-600">Refreshing audio access...</span>
+            <span className="text-sm text-blue-600">
+              Refreshing audio access...
+            </span>
           </div>
         </div>
       )}
@@ -402,7 +409,7 @@ const AudioPlayer = ({
           >
             <RotateCcw className="h-4 w-4" />
           </Button>
-          
+
           <Button
             variant="default"
             size="sm"

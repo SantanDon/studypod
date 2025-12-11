@@ -1,16 +1,26 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState } from 'react';
 import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
 import { ScrollArea } from '@/components/ui/scroll-area';
-import { MoreVertical, Plus, Edit, Bot, User, Loader2, AlertCircle, CheckCircle2, RefreshCw } from 'lucide-react';
+// import { Plus, Edit, Bot, User, Brain, ChevronDown, ChevronUp, Layers, GitBranch, Loader2, Trash2, GitCompare } from 'lucide-react'; // Removed Lucide imports
 import { useNotes, Note } from '@/hooks/useNotes';
-import { useAudioOverview } from '@/hooks/useAudioOverview';
 import { useNotebooks } from '@/hooks/useNotebooks';
 import { useSources } from '@/hooks/useSources';
+import { useQuiz } from '@/hooks/useQuiz';
+import { useOllamaModels } from '@/hooks/useOllamaModels';
+import { useConceptMap } from '@/hooks/useConceptMap';
 import { useQueryClient } from '@tanstack/react-query';
 import NoteEditor from './NoteEditor';
-import AudioPlayer from './AudioPlayer';
+import PodcastView from './PodcastView';
+import FlashcardDeckComponent from './FlashcardDeck';
+import ConceptMapView from './ConceptMapView';
+import SourceComparisonView from './SourceComparisonView';
+import QuizSelector, { QuizConfig } from './QuizSelector';
+import QuizView from './QuizView';
+import QuizResults from './QuizResults';
 import { Citation } from '@/types/message';
+import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible';
+import { GlareCard } from '@/components/ui/glare-card';
 
 interface StudioSidebarProps {
   notebookId?: string;
@@ -25,7 +35,11 @@ const StudioSidebar = ({
 }: StudioSidebarProps) => {
   const [editingNote, setEditingNote] = useState<Note | null>(null);
   const [isCreatingNote, setIsCreatingNote] = useState(false);
-  const [audioError, setAudioError] = useState(false);
+  const [isQuizSectionOpen, setIsQuizSectionOpen] = useState(true);
+  const [isFlashcardSectionOpen, setIsFlashcardSectionOpen] = useState(false);
+  const [isConceptMapSectionOpen, setIsConceptMapSectionOpen] = useState(false);
+  const [isComparisonOpen, setIsComparisonOpen] = useState(false);
+  const [showQuizResults, setShowQuizResults] = useState(false);
   const {
     notes,
     isLoading,
@@ -43,41 +57,44 @@ const StudioSidebar = ({
     sources
   } = useSources(notebookId);
   const {
-    generateAudioOverview,
-    refreshAudioUrl,
-    autoRefreshIfExpired,
+    currentSession,
     isGenerating,
-    isAutoRefreshing,
-    generationStatus,
-    checkAudioExpiry
-  } = useAudioOverview(notebookId);
+    generationError,
+    generateQuiz,
+    answerQuestion,
+    nextQuestion,
+    completeQuiz,
+    resetQuiz,
+    retryQuiz,
+    getCurrentQuestion,
+    getProgress,
+  } = useQuiz({ notebookId });
+  const { installedModels } = useOllamaModels();
+  const {
+    conceptMaps,
+    isLoading: isLoadingMaps,
+    generatingProgress,
+    generateMap,
+    isGenerating: isGeneratingMap,
+    deleteMap,
+    isDeleting: isDeletingMap,
+  } = useConceptMap(notebookId);
   const queryClient = useQueryClient();
   const notebook = notebooks?.find(n => n.id === notebookId);
-  const hasValidAudio = notebook?.audio_overview_url && !checkAudioExpiry(notebook.audio_url_expires_at);
-  const currentStatus = generationStatus || notebook?.audio_overview_generation_status;
-  
-  // Check if at least one source has been successfully processed
-  const hasProcessedSource = sources?.some(source => source.processing_status === 'completed') || false;
 
-  // Auto-refresh expired URLs
-  useEffect(() => {
-    if (!notebookId || !notebook?.audio_overview_url) return;
+  const handleGenerateConceptMap = () => {
+    if (!notebookId || !sources || sources.length === 0) return;
     
-    const checkAndRefresh = async () => {
-      if (checkAudioExpiry(notebook.audio_url_expires_at)) {
-        console.log('Detected expired audio URL, initiating auto-refresh...');
-        await autoRefreshIfExpired(notebookId, notebook.audio_url_expires_at);
-      }
-    };
-
-    // Check immediately
-    checkAndRefresh();
-
-    // Set up periodic check every 5 minutes
-    const interval = setInterval(checkAndRefresh, 5 * 60 * 1000);
-
-    return () => clearInterval(interval);
-  }, [notebookId, notebook?.audio_overview_url, notebook?.audio_url_expires_at, autoRefreshIfExpired, checkAudioExpiry]);
+    const combinedContent = sources
+      .map(s => `${s.title}:\n${s.content || s.summary || ''}`)
+      .join('\n\n');
+    
+    generateMap({
+      content: combinedContent,
+      title: notebook?.title || 'Concept Map',
+      notebookId,
+    });
+  };
 
   const handleCreateNote = () => {
     setIsCreatingNote(true);
@@ -126,68 +143,36 @@ const StudioSidebar = ({
     setIsCreatingNote(false);
   };
 
-  const handleGenerateAudio = () => {
-    if (notebookId) {
-      generateAudioOverview(notebookId);
-      setAudioError(false);
-    }
-  };
-
-  const handleAudioError = () => {
-    setAudioError(true);
-  };
-
-  const handleAudioRetry = () => {
-    // Regenerate the audio overview
-    handleGenerateAudio();
-  };
-
-  const handleAudioDeleted = () => {
-    // Refresh the notebooks data to update the UI
-    if (notebookId) {
-      queryClient.invalidateQueries({
-        queryKey: ['notebooks']
-      });
-    }
-    setAudioError(false);
-  };
-
-  const handleUrlRefresh = (notebookId: string) => {
-    refreshAudioUrl(notebookId);
-  };
-
-  const getStatusDisplay = () => {
-    if (isAutoRefreshing) {
-      return {
-        icon: null,
-        text: "Refreshing URL...",
-        description: "Updating audio access"
-      };
-    }
+  const handleStartQuiz = (config: QuizConfig) => {
+    if (!sources || sources.length === 0) return;
     
-    if (currentStatus === 'generating' || isGenerating) {
-      return {
-        icon: <Loader2 className="h-4 w-4 animate-spin text-blue-600" />,
-        text: "Generating audio...",
-        description: "This may take a few minutes"
-      };
-    } else if (currentStatus === 'failed') {
-      return {
-        icon: <AlertCircle className="h-4 w-4 text-red-600" />,
-        text: "Generation failed",
-        description: "Please try again"
-      };
-    } else if (currentStatus === 'completed' && hasValidAudio) {
-      return {
-        icon: <CheckCircle2 className="h-4 w-4 text-green-600" />,
-        text: "Ready to play",
-        description: "Audio overview available"
-      };
-    }
-    return null;
+    generateQuiz({
+      sources,
+      numQuestions: config.numQuestions,
+      difficulty: config.difficulty,
+      questionType: config.questionType,
+      model: config.model,
+    });
+  };
+
+  const handleQuizComplete = () => {
+    completeQuiz();
+    setShowQuizResults(true);
+  };
+
+  const handleQuizRetry = () => {
+    setShowQuizResults(false);
+    retryQuiz();
+  };
+
+  const handleQuizClose = () => {
+    setShowQuizResults(false);
+    resetQuiz();
   };
 
   const isEditingMode = editingNote || isCreatingNote;
+  const isQuizActive = currentSession && !currentSession.isComplete;
+  const isQuizCompleted = currentSession && currentSession.isComplete;
   const getPreviewText = (note: Note) => {
     if (note.source_type === 'ai_response') {
       // Use extracted_text if available, otherwise parse the content
@@ -215,122 +200,247 @@ const StudioSidebar = ({
       </div>;
   }
 
-  return <div className="w-full bg-gray-50 border-l border-gray-200 flex flex-col h-full overflow-hidden">
-      <div className="p-4 border-b border-gray-200 flex-shrink-0">
-        <h2 className="text-lg font-medium text-gray-900 mb-4">Studio</h2>
-        
-        {/* Audio Overview */}
-        <Card className="p-4 mb-4 border border-gray-200">
-          <div className="flex items-center justify-between mb-3">
-            <h3 className="font-medium text-gray-900">Audio Overview</h3>
-          </div>
+  if (isQuizActive && currentSession) {
+    const currentQuestion = getCurrentQuestion();
+    const progress = getProgress();
+    
+    if (currentQuestion) {
+      return (
+        <div className="w-full bg-gray-50 border-l border-gray-200 flex flex-col h-full overflow-hidden">
+          <QuizView
+            question={currentQuestion}
+            questionNumber={progress.current}
+            totalQuestions={progress.total}
+            onAnswer={answerQuestion}
+            onNext={nextQuestion}
+            onComplete={handleQuizComplete}
+            isLastQuestion={progress.current === progress.total}
+          />
+        </div>
+      );
+    }
+  }
 
-          {hasValidAudio && !audioError && currentStatus !== 'generating' && !isAutoRefreshing ? <AudioPlayer 
-              audioUrl={notebook.audio_overview_url} 
-              title="Deep Dive Conversation" 
-              notebookId={notebookId} 
-              expiresAt={notebook.audio_url_expires_at} 
-              onError={handleAudioError} 
-              onRetry={handleAudioRetry} 
-              onDeleted={handleAudioDeleted}
-              onUrlRefresh={handleUrlRefresh}
-            /> : <Card className="p-3 border border-gray-200">
-              {/* Hide this div when generating or auto-refreshing */}
-              {currentStatus !== 'generating' && !isGenerating && !isAutoRefreshing && <div className="flex items-center space-x-3 mb-3">
-                  <div className="w-8 h-8 rounded flex items-center justify-center">
-                    <svg xmlns="http://www.w3.org/2000/svg" height="24px" viewBox="0 -960 960 960" width="24px" fill="#111827">
-                      <path d="M280-120v-123q-104-14-172-93T40-520h80q0 83 58.5 141.5T320-320h10q5 0 10-1 13 20 28 37.5t32 32.5q-10 3-19.5 4.5T360-243v123h-80Zm20-282q-43-8-71.5-40.5T200-520v-240q0-50 35-85t85-35q50 0 85 35t35 85v160H280v80q0 31 5 60.5t15 57.5Zm340 2q-50 0-85-35t-35-85v-240q0-50 35-85t85-35q50 0 85 35t35 85v240q0 50-35 85t-85 35Zm-40 280v-123q-104-14-172-93t-68-184h80q0 83 58.5 141.5T640-320q83 0 141.5-58.5T840-520h80q0 105-68 184t-172 93v123h-80Zm40-360q17 0 28.5-11.5T680-520v-240q0-17-11.5-28.5T640-800q-17 0-28.5 11.5T600-760v240q0 17 11.5 28.5T640-480Zm0-160Z" />
-                    </svg>
-                  </div>
-                  <div className="flex-1">
-                    <h4 className="font-medium text-gray-900">Deep Dive conversation</h4>
-                    <p className="text-sm text-gray-600">Two hosts</p>
-                  </div>
-                </div>}
-              
-              {/* Status Display */}
-              {getStatusDisplay() && <div className="flex items-center space-x-2 mb-3 p-2 rounded-md bg-transparent">
-                  {getStatusDisplay()!.icon}
-                  <div className="flex-1">
-                    <p className="text-sm font-medium text-slate-900">{getStatusDisplay()!.text}</p>
-                    <p className="text-xs text-slate-900">{getStatusDisplay()!.description}</p>
-                  </div>
-                </div>}
-              
-              {/* Audio error div */}
-              {audioError && <div className="flex items-center space-x-2 mb-3 p-2 bg-red-50 rounded-md">
-                  <AlertCircle className="h-4 w-4 text-red-600" />
-                  <div className="flex-1">
-                    <p className="text-sm text-red-600">Audio unavailable</p>
-                  </div>
-                  <Button size="sm" variant="outline" onClick={handleAudioRetry} className="text-red-600 border-red-300 hover:bg-red-50">
-                    <RefreshCw className="h-4 w-4 mr-1" />
-                    Retry
-                  </Button>
-                </div>}
-              
-              <div className="flex space-x-2">
-                <Button size="sm" onClick={handleGenerateAudio} disabled={isGenerating || currentStatus === 'generating' || !hasProcessedSource || isAutoRefreshing} className="flex-1 text-white bg-slate-900 hover:bg-slate-800">
-                  {isGenerating || currentStatus === 'generating' ? <>
-                      <Loader2 className="h-4 w-4 mr-2 animate-spin" />
-                      Generating...
-                    </> : 'Generate'}
-                </Button>
-              </div>
-            </Card>}
-        </Card>
+  if ((isQuizCompleted || showQuizResults) && currentSession) {
+    return (
+      <div className="w-full bg-gray-50 border-l border-gray-200 flex flex-col h-full overflow-hidden">
+        <QuizResults
+          quiz={currentSession.quiz}
+          results={currentSession.results}
+          onRetry={handleQuizRetry}
+          onClose={handleQuizClose}
+        />
+      </div>
+    );
+  }
+
+  return <div className="w-full bg-gray-50 dark:bg-gray-900 border-l border-gray-200 dark:border-gray-700 flex flex-col h-full overflow-hidden">
+      <div className="p-4 border-b border-gray-200 dark:border-gray-700 flex-shrink-0">
+        <h2 className="text-lg font-medium text-foreground">Studio</h2>
+      </div>
+      
+      <ScrollArea className="flex-1">
+        <div className="p-4">
+        {/* Audio Overview */}
+        <div className="mb-6">
+          {notebookId && <PodcastView notebookId={notebookId} />}
+        </div>
 
         {/* Notes Section */}
         <div className="mb-4">
           <div className="flex items-center justify-between mb-3">
-            <h3 className="font-medium text-gray-900">Notes</h3>
+            <h3 className="font-medium text-foreground">Notes</h3>
             
           </div>
           
           <Button variant="outline" size="sm" className="w-full mb-4" onClick={handleCreateNote}>
-            <Plus className="h-4 w-4 mr-2" />
+            <i className="fi fi-rr-plus mr-2"></i>
             Add note
           </Button>
         </div>
-      </div>
 
-      {/* Saved Notes Area */}
-      <ScrollArea className="flex-1 h-full">
-        <div className="p-4">
+        {/* Quiz Section */}
+        <Collapsible open={isQuizSectionOpen} onOpenChange={setIsQuizSectionOpen}>
+          <CollapsibleTrigger className="flex items-center justify-between w-full py-2 hover:bg-gray-100 dark:hover:bg-gray-800 rounded px-2 -mx-2">
+            <div className="flex items-center gap-2">
+              <i className="fi fi-rr-brain text-green-600"></i>
+              <h3 className="font-medium text-foreground">Quiz</h3>
+            </div>
+            {isQuizSectionOpen ? (
+              <i className="fi fi-rr-angle-small-up text-gray-500"></i>
+            ) : (
+              <i className="fi fi-rr-angle-small-down text-gray-500"></i>
+            )}
+          </CollapsibleTrigger>
+          <CollapsibleContent className="pt-2">
+            {notebookId && sources && sources.length > 0 ? (
+              <QuizSelector
+                onStart={handleStartQuiz}
+                isGenerating={isGenerating}
+                error={generationError}
+                sourcesCount={sources.length}
+                availableModels={installedModels || []}
+              />
+            ) : (
+              <p className="text-xs text-gray-500 text-center py-2">
+                Add sources to generate a quiz
+              </p>
+            )}
+          </CollapsibleContent>
+        </Collapsible>
+
+        {/* Flashcards Section */}
+        <Collapsible open={isFlashcardSectionOpen} onOpenChange={setIsFlashcardSectionOpen}>
+          <CollapsibleTrigger className="flex items-center justify-between w-full py-2 hover:bg-gray-100 dark:hover:bg-gray-800 rounded px-2 -mx-2">
+            <div className="flex items-center gap-2">
+              <i className="fi fi-rr-layers text-purple-600"></i>
+              <h3 className="font-medium text-foreground">Flashcards</h3>
+            </div>
+            {isFlashcardSectionOpen ? (
+              <i className="fi fi-rr-angle-small-up text-gray-500"></i>
+            ) : (
+              <i className="fi fi-rr-angle-small-down text-gray-500"></i>
+            )}
+          </CollapsibleTrigger>
+          <CollapsibleContent>
+            {notebookId && <FlashcardDeckComponent notebookId={notebookId} />}
+          </CollapsibleContent>
+        </Collapsible>
+
+        {/* Concept Map Section */}
+        <Collapsible open={isConceptMapSectionOpen} onOpenChange={setIsConceptMapSectionOpen}>
+          <CollapsibleTrigger className="flex items-center justify-between w-full py-2 hover:bg-gray-100 dark:hover:bg-gray-800 rounded px-2 -mx-2">
+            <div className="flex items-center gap-2">
+              <i className="fi fi-rr-code-branch text-blue-600"></i>
+              <h3 className="font-medium text-foreground">Concept Map</h3>
+            </div>
+            {isConceptMapSectionOpen ? (
+              <i className="fi fi-rr-angle-small-up text-gray-500"></i>
+            ) : (
+              <i className="fi fi-rr-angle-small-down text-gray-500"></i>
+            )}
+          </CollapsibleTrigger>
+          <CollapsibleContent className="pt-2">
+            {notebookId && (
+              <div className="space-y-3">
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="w-full"
+                  onClick={handleGenerateConceptMap}
+                  disabled={isGeneratingMap || !sources || sources.length === 0}
+                >
+                  {isGeneratingMap ? (
+                    <>
+                      <i className="fi fi-rr-spinner mr-2 animate-spin"></i>
+                      {generatingProgress || 'Generating...'}
+                    </>
+                  ) : (
+                    <>
+                      <i className="fi fi-rr-code-branch mr-2"></i>
+                      Generate from sources
+                    </>
+                  )}
+                </Button>
+
+                {conceptMaps.length > 0 && (
+                  <div className="space-y-2">
+                    {conceptMaps.map((map) => (
+                      <Card key={map.id} className="p-2">
+                        <div className="flex items-center justify-between mb-2">
+                          <span className="text-sm font-medium truncate">{map.title}</span>
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            className="h-6 w-6 p-0"
+                            onClick={() => deleteMap(map.id)}
+                            disabled={isDeletingMap}
+                          >
+                            <i className="fi fi-rr-trash text-gray-500"></i>
+                          </Button>
+                        </div>
+                        <ConceptMapView conceptMap={map} />
+                      </Card>
+                    ))}
+                  </div>
+                )}
+
+                {conceptMaps.length === 0 && !isGeneratingMap && (
+                  <p className="text-xs text-gray-500 text-center py-2">
+                    Generate a concept map to visualize relationships between ideas
+                  </p>
+                )}
+              </div>
+            )}
+          </CollapsibleContent>
+        </Collapsible>
+
+        {/* Source Comparison Section */}
+        <Collapsible open={isComparisonOpen} onOpenChange={setIsComparisonOpen}>
+          <CollapsibleTrigger className="flex items-center justify-between w-full py-2 hover:bg-gray-100 dark:hover:bg-gray-800 rounded px-2 -mx-2">
+            <div className="flex items-center gap-2">
+              <i className="fi fi-rr-code-compare text-orange-600"></i>
+              <h3 className="font-medium text-foreground">Compare Sources</h3>
+            </div>
+            {isComparisonOpen ? (
+              <i className="fi fi-rr-angle-small-up text-gray-500"></i>
+            ) : (
+              <i className="fi fi-rr-angle-small-down text-gray-500"></i>
+            )}
+          </CollapsibleTrigger>
+          <CollapsibleContent className="pt-2">
+            {notebookId && sources && sources.length >= 2 ? (
+              <SourceComparisonView
+                sources={sources}
+                notebookId={notebookId}
+                onClose={() => setIsComparisonOpen(false)}
+              />
+            ) : (
+              <p className="text-xs text-gray-500 text-center py-2">
+                Add at least 2 sources to compare them
+              </p>
+            )}
+          </CollapsibleContent>
+        </Collapsible>
+
+        {/* Saved Notes Area */}
+        <div className="mt-6 border-t border-gray-200 dark:border-gray-700 pt-4">
+          <h3 className="font-medium text-foreground mb-3">Saved Notes</h3>
           {isLoading ? <div className="text-center py-8">
-              <p className="text-sm text-gray-600">Loading notes...</p>
+              <p className="text-sm text-muted-foreground">Loading notes...</p>
             </div> : notes && notes.length > 0 ? <div className="space-y-3">
-              {notes.map(note => <Card key={note.id} className="p-3 border border-gray-200 hover:bg-gray-50 cursor-pointer" onClick={() => handleEditNote(note)}>
+              {notes.map(note => <GlareCard key={note.id} className="p-3 border border-border cursor-pointer group" onClick={() => handleEditNote(note)}>
                   <div className="flex items-start justify-between">
                     <div className="flex-1 min-w-0">
                       <div className="flex items-center space-x-2 mb-1">
-                        {note.source_type === 'ai_response' ? <Bot className="h-3 w-3 text-blue-600" /> : <User className="h-3 w-3 text-gray-600" />}
-                        <span className="text-xs text-gray-500 uppercase">
+                        {note.source_type === 'ai_response' ? <i className="fi fi-rr-robot text-blue-600"></i> : <i className="fi fi-rr-user text-muted-foreground"></i>}
+                        <span className="text-xs text-muted-foreground uppercase">
                           {note.source_type === 'ai_response' ? 'AI Response' : 'Note'}
                         </span>
                       </div>
-                      <h4 className="font-medium text-gray-900 truncate">{note.title}</h4>
-                      <p className="text-sm text-gray-600 line-clamp-2 mt-1">
+                      <h4 className="font-medium text-foreground truncate">{note.title}</h4>
+                      <p className="text-sm text-muted-foreground line-clamp-2 mt-1">
                         {getPreviewText(note)}
                       </p>
-                      <p className="text-xs text-gray-500 mt-2">
+                      <p className="text-xs text-muted-foreground mt-2">
                         {new Date(note.updated_at).toLocaleDateString()}
                       </p>
                     </div>
                     {note.source_type === 'user' && <Button variant="ghost" size="sm" className="ml-2">
-                        <Edit className="h-3 w-3" />
+                        <i className="fi fi-rr-edit"></i>
                       </Button>}
                   </div>
-                </Card>)}
+                </GlareCard>)}
             </div> : <div className="text-center py-8">
-              <div className="w-16 h-16 bg-gray-200 rounded-lg mx-auto mb-4 flex items-center justify-center">
-                <span className="text-gray-400 text-2xl">📄</span>
+              <div className="w-16 h-16 bg-muted rounded-lg mx-auto mb-4 flex items-center justify-center">
+                <span className="text-muted-foreground text-2xl">📄</span>
               </div>
-              <h3 className="text-lg font-medium text-gray-900 mb-2">Saved notes will appear here</h3>
-              <p className="text-sm text-gray-600">
+              <h3 className="text-lg font-medium text-foreground mb-2">Saved notes will appear here</h3>
+              <p className="text-sm text-muted-foreground">
                 Save a chat message to create a new note, or click Add note above.
               </p>
             </div>}
+        </div>
         </div>
       </ScrollArea>
     </div>;

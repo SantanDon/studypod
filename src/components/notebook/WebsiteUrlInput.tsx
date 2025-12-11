@@ -9,7 +9,7 @@ import {
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
-import { Globe } from 'lucide-react';
+// import { Globe } from 'lucide-react'; // Removed Lucide imports
 
 interface WebsiteUrlInputProps {
   open: boolean;
@@ -42,7 +42,7 @@ const WebsiteUrlInput = ({ open, onOpenChange, onSubmit }: WebsiteUrlInputProps)
       <DialogContent className="max-w-md">
         <DialogHeader>
           <DialogTitle className="flex items-center space-x-2">
-            <Globe className="h-5 w-5 text-blue-600" />
+            <i className="fi fi-rr-globe h-5 w-5 text-blue-600"></i>
             <span>Add Website</span>
           </DialogTitle>
         </DialogHeader>

@@ -10,7 +10,7 @@ import { Button } from '@/components/ui/button';
 import { Textarea } from '@/components/ui/textarea';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
-import { Copy } from 'lucide-react';
+// import { Copy } from 'lucide-react'; // Removed Lucide imports
 
 interface PasteTextDialogProps {
   open: boolean;
@@ -54,7 +54,7 @@ const PasteTextDialog = ({ open, onOpenChange, onSubmit }: PasteTextDialogProps)
       <DialogContent className="max-w-2xl max-h-[80vh]">
         <DialogHeader>
           <DialogTitle className="flex items-center space-x-2">
-            <Copy className="h-5 w-5 text-gray-600" />
+            <i className="fi fi-rr-copy h-5 w-5 text-gray-600"></i>
             <span>Add Text Source</span>
           </DialogTitle>
         </DialogHeader>
@@ -79,7 +79,7 @@ const PasteTextDialog = ({ open, onOpenChange, onSubmit }: PasteTextDialogProps)
                 size="sm"
                 onClick={handlePasteFromClipboard}
               >
-                <Copy className="h-4 w-4 mr-2" />
+                <i className="fi fi-rr-copy h-4 w-4 mr-2"></i>
                 Paste from clipboard
               </Button>
             </div>

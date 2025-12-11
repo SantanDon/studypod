@@ -1,11 +1,12 @@
 
 import React from 'react';
 import { Button } from '@/components/ui/button';
-import { FileText } from 'lucide-react';
+// import { FileText } from 'lucide-react'; // Removed Lucide imports
 import { useNotes } from '@/hooks/useNotes';
+import { MessageSegment, Citation } from '@/types/message';
 
 interface SaveToNoteButtonProps {
-  content: string | { segments: any[]; citations: any[] };
+  content: string | { segments: MessageSegment[]; citations: Citation[] };
   notebookId?: string;
   onSaved?: () => void;
 }
@@ -41,7 +42,7 @@ const SaveToNoteButton = ({ content, notebookId, onSaved }: SaveToNoteButtonProp
       // Extract text for preview from first few segments
       extracted_text = content.segments
         .slice(0, 3)
-        .map((segment: any) => segment.text)
+        .map((segment: MessageSegment) => segment.text)
         .join(' ')
         .substring(0, 200);
     } else {
@@ -72,7 +73,7 @@ const SaveToNoteButton = ({ content, notebookId, onSaved }: SaveToNoteButtonProp
       disabled={isCreating}
       className="flex items-center space-x-1 text-gray-600 hover:text-gray-800"
     >
-      <FileText className="h-3 w-3" />
+      <i className="fi fi-rr-file h-3 w-3"></i>
       <span className="text-xs">{isCreating ? 'Saving...' : 'Save to note'}</span>
     </Button>
   );

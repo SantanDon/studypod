@@ -9,7 +9,7 @@ import {
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
-import { Youtube } from 'lucide-react';
+// import { Youtube } from 'lucide-react'; // Removed Lucide imports
 
 interface YouTubeUrlInputProps {
   open: boolean;
@@ -42,7 +42,7 @@ const YouTubeUrlInput = ({ open, onOpenChange, onSubmit }: YouTubeUrlInputProps)
       <DialogContent className="max-w-md">
         <DialogHeader>
           <DialogTitle className="flex items-center space-x-2">
-            <Youtube className="h-5 w-5 text-red-600" />
+            <i className="fi fi-rr-play-alt h-5 w-5 text-red-600"></i>
             <span>Add YouTube Video</span>
           </DialogTitle>
         </DialogHeader>

@@ -1,5 +1,4 @@
-
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect } from "react";
 import {
   Dialog,
   DialogContent,
@@ -7,21 +6,29 @@ import {
   DialogFooter,
   DialogHeader,
   DialogTitle,
-} from '@/components/ui/dialog';
-import { Button } from '@/components/ui/button';
-import { Input } from '@/components/ui/input';
-import { Label } from '@/components/ui/label';
-import { useSourceUpdate } from '@/hooks/useSourceUpdate';
+} from "@/components/ui/dialog";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { useSourceUpdate } from "@/hooks/useSourceUpdate";
+import { LocalSource } from "@/services/localStorageService";
+
+type Source = LocalSource;
 
 interface RenameSourceDialogProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
-  source: any;
+  source: Source;
   notebookId?: string;
 }
 
-const RenameSourceDialog = ({ open, onOpenChange, source, notebookId }: RenameSourceDialogProps) => {
-  const [title, setTitle] = useState('');
+const RenameSourceDialog = ({
+  open,
+  onOpenChange,
+  source,
+  notebookId,
+}: RenameSourceDialogProps) => {
+  const [title, setTitle] = useState("");
   const { updateSource, isUpdating } = useSourceUpdate();
 
   useEffect(() => {
@@ -39,12 +46,12 @@ const RenameSourceDialog = ({ open, onOpenChange, source, notebookId }: RenameSo
     });
 
     onOpenChange(false);
-    setTitle('');
+    setTitle("");
   };
 
   const handleCancel = () => {
     onOpenChange(false);
-    setTitle('');
+    setTitle("");
   };
 
   return (
@@ -71,11 +78,8 @@ const RenameSourceDialog = ({ open, onOpenChange, source, notebookId }: RenameSo
           <Button variant="outline" onClick={handleCancel}>
             Cancel
           </Button>
-          <Button 
-            onClick={handleSave}
-            disabled={!title.trim() || isUpdating}
-          >
-            {isUpdating ? 'Saving...' : 'Save'}
+          <Button onClick={handleSave} disabled={!title.trim() || isUpdating}>
+            {isUpdating ? "Saving..." : "Save"}
           </Button>
         </DialogFooter>
       </DialogContent>

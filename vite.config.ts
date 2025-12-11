@@ -1,22 +1,48 @@
-import { defineConfig } from "vite";
+﻿import { defineConfig } from "vite";
 import react from "@vitejs/plugin-react-swc";
 import path from "path";
-import { componentTagger } from "lovable-tagger";
+import { corsProxyPlugin } from "./vite-plugin-cors-proxy";
 
-// https://vitejs.dev/config/
+// https://vitejs.de
+// v/config/
 export default defineConfig(({ mode }) => ({
   server: {
-    host: "::",
+    host: "127.0.0.1",
     port: 8080,
+    strictPort: true,
+    // Cross-Origin Isolation headers for SharedArrayBuffer (required for Web Workers with ONNX)
+    // Using 'credentialless' instead of 'require-corp' to allow loading external resources (ONNX models)
+    headers: {
+      'Cross-Origin-Opener-Policy': 'same-origin',
+      'Cross-Origin-Embedder-Policy': 'credentialless',
+    },
+  },
+  preview: {
+    host: "127.0.0.1",
+    port: 4173,
+    strictPort: true,
+    headers: {
+      'Cross-Origin-Opener-Policy': 'same-origin',
+      'Cross-Origin-Embedder-Policy': 'credentialless',
+    },
   },
   plugins: [
     react(),
-    mode === 'development' &&
-    componentTagger(),
+    corsProxyPlugin(),
   ].filter(Boolean),
   resolve: {
     alias: {
       "@": path.resolve(__dirname, "./src"),
     },
   },
+    optimizeDeps: {
+    include: ['pdfjs-dist'],
+  },
+  worker: {
+    format: 'es',
+  },
+  build: {
+    sourcemap: true,
+  }
 }));
+

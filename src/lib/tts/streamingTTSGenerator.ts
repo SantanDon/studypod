@@ -1,0 +1,862 @@
+/**
+ * Streaming TTS Generator - HYBRID VERSION
+ * 
+ * Uses Web Worker with Kokoro TTS for high-quality audio (non-blocking)
+ * Falls back to Web Speech API if workers aren't supported
+ * 
+ * Priority:
+ * 1. Web Worker + Kokoro TTS (high quality, non-blocking)
+ * 2. Web Speech API (lower quality, but always works)
+ */
+
+import { PodcastScript, PodcastSegment } from '../podcastGenerator';
+import type { TTSWorkerManager } from './ttsWorker';
+
+export interface StreamingConfig {
+  host1Voice: string;
+  host2Voice: string;
+  speed: number;
+  batchSize: number;
+  yieldDuration: number;
+  useKokoro?: boolean; // Force Kokoro (via worker) if available
+  forceWebSpeech?: boolean; // Force Web Speech API
+}
+
+export interface StreamingProgress {
+  phase: 'loading' | 'generating' | 'complete' | 'error' | 'cancelled';
+  currentSegment: number;
+  totalSegments: number;
+  percentage: number;
+  message: string;
+  estimatedTimeRemaining?: number;
+  canPlay: boolean;
+  usingKokoro?: boolean;
+}
+
+export interface StreamingResult {
+  audioUrls: string[];
+  totalDuration: number;
+  segmentsReady: number;
+}
+
+type ProgressCallback = (progress: StreamingProgress) => void;
+type AudioReadyCallback = (result: StreamingResult) => void;
+
+const DEFAULT_CONFIG: StreamingConfig = {
+  host1Voice: 'am_michael',
+  host2Voice: 'af_bella',
+  speed: 1.0,
+  batchSize: 1,
+  yieldDuration: 50,
+  useKokoro: true, // Enable Kokoro TTS via Web Worker
+  forceWebSpeech: false, // Don't force Web Speech - use Kokoro if available
+};
+
+interface GeneratedAudio {
+  url: string;
+  duration: number;
+  speaker: string;
+  text: string;
+  isKokoro: boolean;
+  // Store blob too if possible, for combination
+  blob?: Blob;
+}
+
+class StreamingTTSGenerator {
+  private isGenerating = false;
+  private shouldCancel = false;
+  private generatedAudios: GeneratedAudio[] = [];
+  private currentScript: PodcastScript | null = null;
+  private workerManager: TTSWorkerManager | null = null;
+  private usingKokoro = false;
+  private currentPlaybackIndex = 0;
+  private audioElements: HTMLAudioElement[] = [];
+  private isPlaying = false; // Prevent double playback
+
+  /**
+   * Check if Kokoro via Web Worker is available
+   */
+  async isKokoroAvailable(): Promise<boolean> {
+    try {
+      // Check for Worker support
+      if (typeof Worker === 'undefined') return false;
+      
+      // Check for SharedArrayBuffer (required for ONNX threading)
+      if (typeof SharedArrayBuffer === 'undefined') {
+        console.warn('SharedArrayBuffer not available - COOP/COEP headers may be missing');
+        return false;
+      }
+      
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
+  /**
+   * Get or create the worker manager (lazy load)
+   */
+  private async getWorkerManager(): Promise<TTSWorkerManager> {
+    if (!this.workerManager) {
+      const { getTTSWorkerManager } = await import('./ttsWorker');
+      this.workerManager = getTTSWorkerManager();
+    }
+    return this.workerManager;
+  }
+
+  /**
+   * Start streaming generation
+   */
+  async startStreaming(
+    script: PodcastScript,
+    config: Partial<StreamingConfig>,
+    onProgress: ProgressCallback,
+    onAudioReady: AudioReadyCallback
+  ): Promise<void> {
+    if (this.isGenerating) {
+      console.warn('Generation already in progress');
+      return;
+    }
+
+    this.isGenerating = true;
+    this.shouldCancel = false;
+    this.generatedAudios = [];
+    this.currentScript = script;
+    this.audioElements = [];
+
+    const fullConfig = { ...DEFAULT_CONFIG, ...config };
+
+    // Determine which TTS to use
+    if (fullConfig.forceWebSpeech) {
+      console.log('Using Web Speech API (forced)');
+      this.usingKokoro = false;
+      await this.generateWithWebSpeech(script, fullConfig, onProgress, onAudioReady);
+    } else if (fullConfig.useKokoro && await this.isKokoroAvailable()) {
+      console.log('Using Kokoro TTS via Web Worker');
+      this.usingKokoro = true;
+      await this.generateWithKokoroWorker(script, fullConfig, onProgress, onAudioReady);
+    } else {
+      console.log('Falling back to Web Speech API');
+      this.usingKokoro = false;
+      await this.generateWithWebSpeech(script, fullConfig, onProgress, onAudioReady);
+    }
+  }
+
+
+  /**
+   * Generate using Kokoro TTS via Web Worker - HIGH QUALITY, NON-BLOCKING
+   */
+  private async generateWithKokoroWorker(
+    script: PodcastScript,
+    config: StreamingConfig,
+    onProgress: ProgressCallback,
+    onAudioReady: AudioReadyCallback
+  ): Promise<void> {
+    try {
+      // Get or create worker manager (lazy loaded)
+      const workerManager = await this.getWorkerManager();
+
+      onProgress({
+        phase: 'loading',
+        currentSegment: 0,
+        totalSegments: script.segments.length,
+        percentage: 5,
+        message: 'Initializing Kokoro TTS (first time may take a moment)...',
+        canPlay: false,
+        usingKokoro: true,
+      });
+
+      // Initialize worker if needed
+      if (!workerManager.isWorkerReady()) {
+        await workerManager.initialize((msg, pct) => {
+          onProgress({
+            phase: 'loading',
+            currentSegment: 0,
+            totalSegments: script.segments.length,
+            percentage: Math.min(20, 5 + pct * 0.15),
+            message: msg,
+            canPlay: false,
+            usingKokoro: true,
+          });
+        });
+      }
+
+      if (this.shouldCancel) {
+        this.cleanup('cancelled', onProgress);
+        return;
+      }
+
+      // Optimize segments
+      const optimizedSegments = this.optimizeSegments(script.segments);
+      const totalSegments = optimizedSegments.length;
+
+      onProgress({
+        phase: 'generating',
+        currentSegment: 0,
+        totalSegments,
+        percentage: 20,
+        message: `Generating ${totalSegments} audio segments...`,
+        canPlay: false,
+        usingKokoro: true,
+      });
+
+      // Generate each segment
+      const startTime = Date.now();
+      
+      for (let i = 0; i < optimizedSegments.length; i++) {
+        if (this.shouldCancel) {
+          this.cleanup('cancelled', onProgress);
+          return;
+        }
+
+        const segment = optimizedSegments[i];
+        const voice = segment.speaker === 'Alex' ? config.host1Voice : config.host2Voice;
+
+        try {
+          // Generate audio via worker (non-blocking!)
+          const result = await workerManager.synthesize(
+            segment.text,
+            voice,
+            config.speed,
+            (msg, pct) => {
+              // Per-segment progress
+              const overallPct = 20 + ((i + pct / 100) / totalSegments) * 75;
+              onProgress({
+                phase: 'generating',
+                currentSegment: i + 1,
+                totalSegments,
+                percentage: Math.round(overallPct),
+                message: `${segment.speaker}: "${segment.text.substring(0, 40)}..."`,
+                canPlay: this.generatedAudios.length > 0,
+                usingKokoro: true,
+                estimatedTimeRemaining: this.estimateRemainingTime(startTime, i, totalSegments),
+              });
+            }
+          );
+
+          // Store the generated audio
+          this.generatedAudios.push({
+            url: result.audioUrl,
+            duration: result.duration,
+            speaker: segment.speaker,
+            text: segment.text,
+            isKokoro: true,
+            blob: result.audioBlob // Store blob for combination
+          });
+
+          // Update progress
+          const percentage = Math.round(20 + ((i + 1) / totalSegments) * 75);
+          onProgress({
+            phase: 'generating',
+            currentSegment: i + 1,
+            totalSegments,
+            percentage,
+            message: `Generated ${segment.speaker}'s line (${i + 1}/${totalSegments})`,
+            canPlay: true,
+            usingKokoro: true,
+            estimatedTimeRemaining: this.estimateRemainingTime(startTime, i + 1, totalSegments),
+          });
+
+          // Notify audio ready
+          onAudioReady({
+            audioUrls: this.generatedAudios.map(a => a.url),
+            totalDuration: this.generatedAudios.reduce((sum, a) => sum + a.duration, 0),
+            segmentsReady: this.generatedAudios.length,
+          });
+
+          // Small yield not needed when using worker - keeping loop tight for background performance
+          // await new Promise(r => setTimeout(r, config.yieldDuration));
+
+        } catch (error) {
+          console.error(`Failed to generate segment ${i}:`, error);
+          // Continue with next segment on error
+        }
+      }
+
+      // Mark generation as complete BEFORE calling final callbacks
+      // This ensures isRunning() returns false when handleAudioReady checks it
+      this.isGenerating = false;
+
+      // Complete
+      onProgress({
+        phase: 'complete',
+        currentSegment: totalSegments,
+        totalSegments,
+        percentage: 100,
+        message: 'High-quality podcast ready! Click play to listen.',
+        canPlay: true,
+        usingKokoro: true,
+      });
+
+      // Final audio ready callback - this triggers the auto-save
+      onAudioReady({
+        audioUrls: this.generatedAudios.map(a => a.url),
+        totalDuration: this.generatedAudios.reduce((sum, a) => sum + a.duration, 0),
+        segmentsReady: this.generatedAudios.length,
+      });
+
+    } catch (error) {
+      console.error('Kokoro worker generation failed:', error);
+      
+      // Fall back to Web Speech
+      console.log('Falling back to Web Speech API...');
+      this.usingKokoro = false;
+      await this.generateWithWebSpeech(script, config, onProgress, onAudioReady);
+    }
+  }
+
+
+  /**
+   * Generate using Web Speech API - FALLBACK, NON-BLOCKING
+   */
+  private async generateWithWebSpeech(
+    script: PodcastScript,
+    config: StreamingConfig,
+    onProgress: ProgressCallback,
+    onAudioReady: AudioReadyCallback
+  ): Promise<void> {
+    onProgress({
+      phase: 'loading',
+      currentSegment: 0,
+      totalSegments: script.segments.length,
+      percentage: 5,
+      message: 'Preparing podcast with Web Speech...',
+      canPlay: false,
+      usingKokoro: false,
+    });
+
+    await new Promise(r => setTimeout(r, 100));
+
+    if (this.shouldCancel) {
+      this.cleanup('cancelled', onProgress);
+      return;
+    }
+
+    const optimizedSegments = this.optimizeSegments(script.segments);
+
+    onProgress({
+      phase: 'generating',
+      currentSegment: 0,
+      totalSegments: optimizedSegments.length,
+      percentage: 10,
+      message: 'Processing segments...',
+      canPlay: false,
+      usingKokoro: false,
+    });
+
+    for (let i = 0; i < optimizedSegments.length; i++) {
+      if (this.shouldCancel) {
+        this.cleanup('cancelled', onProgress);
+        return;
+      }
+
+      const segment = optimizedSegments[i];
+
+      // Create a data URL for tracking
+      const segmentData = {
+        type: 'web-speech-segment',
+        index: i,
+        speaker: segment.speaker,
+        text: segment.text,
+        voice: segment.speaker === 'Alex' ? config.host1Voice : config.host2Voice,
+        speed: config.speed,
+      };
+
+      const blob = new Blob([JSON.stringify(segmentData)], { type: 'application/json' });
+      const url = URL.createObjectURL(blob);
+
+      this.generatedAudios.push({
+        url,
+        duration: this.estimateDuration(segment.text),
+        speaker: segment.speaker,
+        text: segment.text,
+        isKokoro: false,
+        blob // Keep blob consistent structure
+      });
+
+      const percentage = Math.round(10 + ((i + 1) / optimizedSegments.length) * 85);
+      onProgress({
+        phase: 'generating',
+        currentSegment: i + 1,
+        totalSegments: optimizedSegments.length,
+        percentage,
+        message: `Prepared ${segment.speaker}'s line (${i + 1}/${optimizedSegments.length})`,
+        canPlay: true,
+        usingKokoro: false,
+      });
+
+      onAudioReady({
+        audioUrls: this.generatedAudios.map(a => a.url),
+        totalDuration: this.generatedAudios.reduce((sum, a) => sum + a.duration, 0),
+        segmentsReady: this.generatedAudios.length,
+      });
+
+      await new Promise(r => setTimeout(r, 20));
+    }
+
+    // Mark generation as complete BEFORE calling final callbacks
+    this.isGenerating = false;
+
+    onProgress({
+      phase: 'complete',
+      currentSegment: optimizedSegments.length,
+      totalSegments: optimizedSegments.length,
+      percentage: 100,
+      message: 'Podcast ready! Click play to listen.',
+      canPlay: true,
+      usingKokoro: false,
+    });
+
+    // Final audio ready callback - this triggers the auto-save
+    onAudioReady({
+      audioUrls: this.generatedAudios.map(a => a.url),
+      totalDuration: this.generatedAudios.reduce((sum, a) => sum + a.duration, 0),
+      segmentsReady: this.generatedAudios.length,
+    });
+  }
+
+  /**
+   * Cancel generation
+   */
+  cancel(): void {
+    this.shouldCancel = true;
+    
+    if (this.workerManager) {
+      this.workerManager.cancel();
+    }
+    
+    if (typeof speechSynthesis !== 'undefined') {
+      speechSynthesis.cancel();
+    }
+
+    this.stopPlayback();
+  }
+
+  isRunning(): boolean {
+    return this.isGenerating;
+  }
+
+  isUsingKokoro(): boolean {
+    return this.usingKokoro;
+  }
+
+  getGeneratedSegments(): GeneratedAudio[] {
+    return [...this.generatedAudios];
+  }
+
+  getScript(): PodcastScript | null {
+    return this.currentScript;
+  }
+
+
+  /**
+   * Ensure Web Speech voices are loaded
+   */
+  private async ensureVoicesLoaded(): Promise<SpeechSynthesisVoice[]> {
+    if (typeof speechSynthesis === 'undefined') return [];
+    
+    let voices = speechSynthesis.getVoices();
+    
+    // Voices might not be loaded yet, wait for them
+    if (voices.length === 0) {
+      await new Promise<void>((resolve) => {
+        const checkVoices = () => {
+          voices = speechSynthesis.getVoices();
+          if (voices.length > 0) {
+            resolve();
+          } else {
+            // Try again in 100ms
+            setTimeout(checkVoices, 100);
+          }
+        };
+        
+        // Also listen for voiceschanged event
+        speechSynthesis.onvoiceschanged = () => {
+          voices = speechSynthesis.getVoices();
+          if (voices.length > 0) resolve();
+        };
+        
+        checkVoices();
+        
+        // Timeout after 2 seconds
+        setTimeout(resolve, 2000);
+      });
+    }
+    
+    return voices;
+  }
+
+  /**
+   * Play a specific segment
+   */
+  playSegment(index: number, onEnd?: () => void): void {
+    const segment = this.generatedAudios[index];
+    if (!segment) return;
+
+    // Stop any existing playback first
+    this.stopPlayback();
+    
+    this.currentPlaybackIndex = index;
+    this.isPlaying = true;
+
+    if (segment.isKokoro) {
+      // Play Kokoro audio via Audio element
+      const audio = new Audio(segment.url);
+      this.audioElements.push(audio);
+      
+      audio.onended = () => {
+        const idx = this.audioElements.indexOf(audio);
+        if (idx > -1) this.audioElements.splice(idx, 1);
+        this.isPlaying = false;
+        onEnd?.();
+      };
+      
+      audio.onerror = () => {
+        console.error('Audio playback error');
+        this.isPlaying = false;
+        onEnd?.();
+      };
+      
+      audio.play().catch(err => {
+        console.error('Failed to play audio:', err);
+        this.isPlaying = false;
+        onEnd?.();
+      });
+    } else {
+      // Play via Web Speech API - use async version
+      this.playSegmentWithWebSpeech(segment, onEnd);
+    }
+  }
+
+  /**
+   * Play segment using Web Speech API with proper voice loading
+   */
+  private async playSegmentWithWebSpeech(
+    segment: GeneratedAudio, 
+    onEnd?: () => void
+  ): Promise<void> {
+    if (typeof speechSynthesis === 'undefined') {
+      this.isPlaying = false;
+      onEnd?.();
+      return;
+    }
+
+    // Cancel is already called in playSegment via stopPlayback
+
+    // Ensure voices are loaded
+    const voices = await this.ensureVoicesLoaded();
+    
+    const utterance = new SpeechSynthesisUtterance(segment.text);
+    
+    // Force English language
+    utterance.lang = 'en-US';
+    
+    // Filter to English voices only
+    const englishVoices = voices.filter(v => 
+      v.lang.startsWith('en-') || 
+      v.lang === 'en'
+    );
+    
+    if (segment.speaker === 'Alex') {
+      // Find male English voice
+      const maleVoice = englishVoices.find(v =>
+        v.name.includes('Male') ||
+        v.name.includes('David') ||
+        v.name.includes('Mark') ||
+        v.name.includes('James') ||
+        v.name.includes('Guy') ||
+        v.name.includes('Microsoft David') ||
+        v.name.includes('Google US English Male')
+      ) || englishVoices.find(v => v.lang === 'en-US') || englishVoices[0];
+      
+      if (maleVoice) utterance.voice = maleVoice;
+      utterance.pitch = 1.0;
+    } else {
+      // Find female English voice
+      const femaleVoice = englishVoices.find(v =>
+        v.name.includes('Female') ||
+        v.name.includes('Zira') ||
+        v.name.includes('Samantha') ||
+        v.name.includes('Google') ||
+        v.name.includes('Microsoft Zira') ||
+        v.name.includes('Google US English Female')
+      ) || englishVoices.find(v => v.lang === 'en-US') || englishVoices[0];
+      
+      if (femaleVoice) utterance.voice = femaleVoice;
+      utterance.pitch = 1.1;
+    }
+
+    utterance.rate = 1.0;
+    utterance.onend = () => {
+      this.isPlaying = false;
+      onEnd?.();
+    };
+    utterance.onerror = (e) => {
+      console.error('Speech synthesis error:', e);
+      this.isPlaying = false;
+      onEnd?.();
+    };
+
+    speechSynthesis.speak(utterance);
+  }
+
+  /**
+   * Play all segments sequentially
+   */
+  playAll(
+    startIndex: number = 0,
+    onSegmentChange?: (index: number) => void,
+    onComplete?: () => void
+  ): void {
+    if (startIndex >= this.generatedAudios.length) {
+      onComplete?.();
+      return;
+    }
+
+    onSegmentChange?.(startIndex);
+
+    this.playSegment(startIndex, () => {
+      setTimeout(() => {
+        this.playAll(startIndex + 1, onSegmentChange, onComplete);
+      }, 300);
+    });
+  }
+
+  /**
+   * Stop all playback
+   */
+  stopPlayback(): void {
+    this.isPlaying = false;
+    
+    // Stop Audio elements
+    for (const audio of this.audioElements) {
+      audio.pause();
+      audio.currentTime = 0;
+      audio.onended = null;
+      audio.onerror = null;
+    }
+    this.audioElements = [];
+
+    // Stop Web Speech
+    if (typeof speechSynthesis !== 'undefined') {
+      speechSynthesis.cancel();
+    }
+  }
+
+  /**
+   * Check if currently playing
+   */
+  isCurrentlyPlaying(): boolean {
+    return this.isPlaying;
+  }
+
+  /**
+   * Combine all audios into one
+   * For Kokoro: combines WAV blobs into a single WAV file
+   * For Web Speech: returns null (Web Speech audio can't be captured/combined)
+   */
+  async combineAudios(): Promise<string | null> {
+    if (this.generatedAudios.length === 0) {
+      console.warn('[StreamingTTSGenerator] No audios to combine');
+      return null;
+    }
+
+    // For Web Speech, we cannot combine the audio streams
+    // Web Speech API doesn't provide audio data - it plays directly through speakers
+    // Return null to indicate no saveable audio is available
+    if (!this.usingKokoro) {
+      console.log('[StreamingTTSGenerator] Web Speech mode - no audio blob available for saving');
+      console.log('[StreamingTTSGenerator] Web Speech plays directly through speakers and cannot be saved');
+      // Return null - the UI should handle this by showing a "play" button that uses the segment sequencer
+      return null;
+    }
+
+    try {
+      // Filter for valid blobs from Kokoro generation
+      const blobs = this.generatedAudios
+        .map(a => a.blob)
+        .filter((b): b is Blob => !!b && b.size > 0);
+
+      console.log(`[StreamingTTSGenerator] Combining ${blobs.length} audio blobs`);
+
+      if (blobs.length === 0) {
+        console.warn('[StreamingTTSGenerator] No valid blobs to combine');
+        return null;
+      }
+      
+      // For Kokoro WAV output, we need to properly combine the audio data
+      // Simple blob concatenation doesn't work for WAV files due to headers
+      // Instead, we'll use the AudioContext to decode and re-encode
+      try {
+        const audioContext = new AudioContext();
+        const audioBuffers: AudioBuffer[] = [];
+        
+        for (const blob of blobs) {
+          const arrayBuffer = await blob.arrayBuffer();
+          const audioBuffer = await audioContext.decodeAudioData(arrayBuffer);
+          audioBuffers.push(audioBuffer);
+        }
+        
+        // Calculate total length
+        const totalLength = audioBuffers.reduce((sum, buf) => sum + buf.length, 0);
+        const sampleRate = audioBuffers[0]?.sampleRate || 44100;
+        const numberOfChannels = audioBuffers[0]?.numberOfChannels || 1;
+        
+        // Create combined buffer
+        const combinedBuffer = audioContext.createBuffer(numberOfChannels, totalLength, sampleRate);
+        
+        let offset = 0;
+        for (const buffer of audioBuffers) {
+          for (let channel = 0; channel < numberOfChannels; channel++) {
+            const channelData = combinedBuffer.getChannelData(channel);
+            const sourceData = buffer.getChannelData(Math.min(channel, buffer.numberOfChannels - 1));
+            channelData.set(sourceData, offset);
+          }
+          offset += buffer.length;
+        }
+        
+        // Encode to WAV
+        const wavBlob = this.audioBufferToWav(combinedBuffer);
+        const url = URL.createObjectURL(wavBlob);
+        
+        console.log(`[StreamingTTSGenerator] Combined audio created: ${wavBlob.size} bytes`);
+        await audioContext.close();
+        
+        return url;
+      } catch (decodeError) {
+        console.warn('[StreamingTTSGenerator] AudioContext decode failed, falling back to simple concat:', decodeError);
+        // Fallback: simple blob concatenation (may not work perfectly)
+        const combinedBlob = new Blob(blobs, { type: 'audio/wav' });
+        return URL.createObjectURL(combinedBlob);
+      }
+
+    } catch (e) {
+      console.error("[StreamingTTSGenerator] Failed to combine audio", e);
+      return null;
+    }
+  }
+
+  /**
+   * Convert AudioBuffer to WAV Blob
+   */
+  private audioBufferToWav(buffer: AudioBuffer): Blob {
+    const numChannels = buffer.numberOfChannels;
+    const sampleRate = buffer.sampleRate;
+    const format = 1; // PCM
+    const bitDepth = 16;
+    
+    const bytesPerSample = bitDepth / 8;
+    const blockAlign = numChannels * bytesPerSample;
+    
+    const dataLength = buffer.length * blockAlign;
+    const bufferLength = 44 + dataLength;
+    
+    const arrayBuffer = new ArrayBuffer(bufferLength);
+    const view = new DataView(arrayBuffer);
+    
+    // WAV header
+    const writeString = (offset: number, str: string) => {
+      for (let i = 0; i < str.length; i++) {
+        view.setUint8(offset + i, str.charCodeAt(i));
+      }
+    };
+    
+    writeString(0, 'RIFF');
+    view.setUint32(4, bufferLength - 8, true);
+    writeString(8, 'WAVE');
+    writeString(12, 'fmt ');
+    view.setUint32(16, 16, true); // fmt chunk size
+    view.setUint16(20, format, true);
+    view.setUint16(22, numChannels, true);
+    view.setUint32(24, sampleRate, true);
+    view.setUint32(28, sampleRate * blockAlign, true);
+    view.setUint16(32, blockAlign, true);
+    view.setUint16(34, bitDepth, true);
+    writeString(36, 'data');
+    view.setUint32(40, dataLength, true);
+    
+    // Write audio data
+    let offset = 44;
+    for (let i = 0; i < buffer.length; i++) {
+      for (let channel = 0; channel < numChannels; channel++) {
+        const sample = Math.max(-1, Math.min(1, buffer.getChannelData(channel)[i]));
+        const intSample = sample < 0 ? sample * 0x8000 : sample * 0x7FFF;
+        view.setInt16(offset, intSample, true);
+        offset += 2;
+      }
+    }
+    
+    return new Blob([arrayBuffer], { type: 'audio/wav' });
+  }
+
+  reset(): void {
+    this.stopPlayback();
+    this.generatedAudios = [];
+    this.currentScript = null;
+    this.isGenerating = false;
+  }
+
+
+  private optimizeSegments(segments: PodcastSegment[]): PodcastSegment[] {
+    const optimized: PodcastSegment[] = [];
+    let current: PodcastSegment | null = null;
+
+    for (const seg of segments) {
+      if (!current) {
+        current = { ...seg };
+        continue;
+      }
+
+      if (current.speaker === seg.speaker && (current.text.length + seg.text.length) < 300) {
+        current.text += ' ' + seg.text;
+      } else {
+        optimized.push(current);
+        current = { ...seg };
+      }
+    }
+
+    if (current) {
+      optimized.push(current);
+    }
+
+    console.log(`Optimized ${segments.length} segments to ${optimized.length}`);
+    return optimized;
+  }
+
+  private estimateDuration(text: string): number {
+    const words = text.split(/\s+/).length;
+    return (words / 150) * 60;
+  }
+
+  private estimateRemainingTime(startTime: number, completedSegments: number, totalSegments: number): number {
+    if (completedSegments === 0) return 0;
+    
+    const elapsed = (Date.now() - startTime) / 1000;
+    const avgTimePerSegment = elapsed / completedSegments;
+    const remaining = totalSegments - completedSegments;
+    
+    return Math.round(avgTimePerSegment * remaining);
+  }
+
+  private cleanup(reason: 'cancelled' | 'error', onProgress: ProgressCallback): void {
+    this.isGenerating = false;
+    onProgress({
+      phase: reason,
+      currentSegment: 0,
+      totalSegments: 0,
+      percentage: 0,
+      message: reason === 'cancelled' ? 'Generation cancelled' : 'Generation failed',
+      canPlay: this.generatedAudios.length > 0,
+    });
+  }
+}
+
+// Singleton
+let instance: StreamingTTSGenerator | null = null;
+
+export function getStreamingTTSGenerator(): StreamingTTSGenerator {
+  if (!instance) {
+    instance = new StreamingTTSGenerator();
+  }
+  return instance;
+}
