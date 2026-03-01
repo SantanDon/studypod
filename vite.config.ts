@@ -42,7 +42,18 @@ export default defineConfig(({ mode }) => ({
     format: 'es',
   },
   build: {
-    sourcemap: true,
+    sourcemap: false,
+    rollupOptions: {
+      output: {
+        manualChunks: {
+          'vendor-react': ['react', 'react-dom', 'react-router-dom'],
+          'vendor-ui': ['@radix-ui/react-dialog', '@radix-ui/react-dropdown-menu', '@radix-ui/react-select', '@radix-ui/react-tabs', '@radix-ui/react-toast', '@radix-ui/react-tooltip'],
+          'vendor-ai': ['groq-sdk', '@xenova/transformers'],
+          'vendor-tts': ['kokoro-js'],
+          'vendor-pdf': ['pdfjs-dist', 'pdf-parse'],
+        },
+      },
+    },
   }
 }));
 

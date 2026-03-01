@@ -1,0 +1,65 @@
+{
+  "rewrites": [
+    {
+      "source": "/api/firecrawl",
+      "destination": "/api/firecrawl.js"
+    },
+    {
+      "source": "/api/proxy",
+      "destination": "/api/proxy.js"
+    },
+    {
+      "source": "/api/youtube-transcript",
+      "destination": "/api/youtube-transcript.js"
+    },
+    {
+      "source": "/api",
+      "destination": "/api/index.js"
+    },
+    {
+      "source": "/((?!api/).*)",
+      "destination": "/index.html"
+    }
+  ],
+  "headers": [
+    {
+      "source": "/(.*)",
+      "headers": [
+        {
+          "key": "Cross-Origin-Opener-Policy",
+          "value": "same-origin"
+        },
+        {
+          "key": "Cross-Origin-Embedder-Policy",
+          "value": "credentialless"
+        },
+        {
+          "key": "Cross-Origin-Resource-Policy",
+          "value": "cross-origin"
+        }
+      ]
+    }
+  ],
+  "functions": {
+    "api/firecrawl.js": {
+      "memory": 1024,
+      "maxDuration": 60
+    },
+    "api/proxy.js": {
+      "memory": 512,
+      "maxDuration": 30
+    },
+    "api/youtube-transcript.js": {
+      "memory": 1024,
+      "maxDuration": 60
+    },
+    "api/index.js": {
+      "memory": 256,
+      "maxDuration": 10
+    }
+  },
+  "buildCommand": "echo 'Static deployment - no build needed'",
+  "devCommand": "vite",
+  "installCommand": "echo 'No install needed'",
+  "framework": "vite"
+}
