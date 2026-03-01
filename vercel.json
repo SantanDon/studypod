@@ -59,7 +59,5 @@
     }
   },
   "outputDirectory": "dist",
-  "framework": "vite",
-  "installCommand": "echo 'Using pre-built dist'",
   "framework": "vite"
 }
