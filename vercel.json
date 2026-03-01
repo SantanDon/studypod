@@ -58,8 +58,8 @@
       "maxDuration": 10
     }
   },
-  "buildCommand": "npm run build",
-  "devCommand": "vite",
-  "installCommand": "npm ci --omit=dev --prefer-offline",
+  "outputDirectory": "dist",
+  "framework": "vite",
+  "installCommand": "echo 'Using pre-built dist'",
   "framework": "vite"
 }
