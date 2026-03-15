@@ -6,11 +6,63 @@ import {
   generateToken,
   generateRefreshToken,
   verifyRefreshToken,
+  authenticateToken,
 } from "../middleware/auth.js";
 
 const router = express.Router();
 
-// Sign Up
+// Agent Registration (Requires Human Authentication)
+router.post("/register", authenticateToken, async (req, res) => {
+  try {
+    const { passphrase, display_name, account_type } = req.body;
+
+    if (!passphrase || !display_name || account_type !== "agent") {
+      return res.status(400).json({ error: "Invalid agent registration payload" });
+    }
+
+    if (passphrase.length < 8) {
+      return res.status(400).json({ error: "Passphrase must be at least 8 characters" });
+    }
+
+    // Check if display name is already taken
+    const existingUser = dbHelpers.getUserByDisplayName(display_name);
+    if (existingUser) {
+      return res.status(400).json({ error: "Display name is already taken" });
+    }
+
+    const userId = uuidv4();
+    const dummyEmail = `agent_${userId}@agent.local`;
+
+    const passwordHash = await bcrypt.hash(passphrase, 10);
+    const ownerId = req.user.userId;
+
+    dbHelpers.createUser(userId, dummyEmail, passwordHash, display_name, account_type, null, ownerId);
+
+    // Create user preferences and stats
+    dbHelpers.createUserPreferences(uuidv4(), userId);
+    dbHelpers.createUserStats(uuidv4(), userId);
+
+    const accessToken = generateToken(userId, dummyEmail);
+    const refreshToken = generateRefreshToken(userId, dummyEmail);
+
+    const user = dbHelpers.getUserById(userId);
+
+    res.status(201).json({
+      message: "Agent created successfully",
+      user: {
+        id: user.id,
+        displayName: user.display_name,
+        account_type: user.account_type,
+        createdAt: user.created_at,
+      },
+      accessToken,
+      refreshToken,
+    });
+  } catch (error) {
+    console.error("Agent registration error:", error);
+    res.status(500).json({ error: "Failed to create agent" });
+  }
+});
 router.post("/signup", async (req, res) => {
   try {
     const { email, password, displayName } = req.body;
@@ -77,34 +129,55 @@ router.post("/signup", async (req, res) => {
 
 // Sign In
 router.post("/signin", async (req, res) => {
+  console.log("--> SIGNIN REQUEST RECEIVED:", req.body);
   try {
-    const { email, password } = req.body;
+    const { email, password, displayName, passphrase } = req.body;
 
-    // Validate input
-    if (!email || !password) {
-      return res.status(400).json({ error: "Email and password are required" });
+    let user;
+
+    if (email && password) {
+      console.log("--> Human auth flow...");
+      // Human auth flow
+      user = dbHelpers.getUserByEmail(email);
+      if (!user) {
+        return res.status(401).json({ error: "Invalid email or password" });
+      }
+
+      const isValidPassword = await bcrypt.compare(password, user.password_hash);
+      if (!isValidPassword) {
+        return res.status(401).json({ error: "Invalid email or password" });
+      }
+    } else if (displayName && passphrase) {
+      console.log("--> Agent auth flow... DisplayName:", displayName);
+      // Agent auth flow
+      user = dbHelpers.getUserByDisplayName(displayName);
+      console.log("--> User found:", user ? user.id : "NO");
+      if (!user) {
+        return res.status(401).json({ error: "Invalid display name or passphrase" });
+      }
+
+      console.log("--> Comparing passwords...");
+      const isValidPassword = await bcrypt.compare(passphrase, user.password_hash);
+      console.log("--> Password valid:", isValidPassword);
+      if (!isValidPassword) {
+        return res.status(401).json({ error: "Invalid display name or passphrase" });
+      }
+    } else {
+      console.log("--> Missing credentials");
+      return res.status(400).json({ error: "Missing required credentials" });
     }
 
-    // Get user by email
-    const user = dbHelpers.getUserByEmail(email);
-    if (!user) {
-      return res.status(401).json({ error: "Invalid email or password" });
-    }
-
-    // Verify password
-    const isValidPassword = await bcrypt.compare(password, user.password_hash);
-    if (!isValidPassword) {
-      return res.status(401).json({ error: "Invalid email or password" });
-    }
-
+    console.log("--> Generating tokens for", user.email);
     // Generate tokens
     const accessToken = generateToken(user.id, user.email);
     const refreshToken = generateRefreshToken(user.id, user.email);
 
+    console.log("--> Getting preferences and stats...");
     // Get user preferences and stats
     const preferences = dbHelpers.getUserPreferences(user.id);
     const stats = dbHelpers.getUserStats(user.id);
 
+    console.log("--> Sending response...");
     res.json({
       message: "Sign in successful",
       user: {

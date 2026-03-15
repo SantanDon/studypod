@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import * as fc from 'fast-check';
-import { normalizeBraces, cleanJsonResponse, parseJsonResponse } from '@/utils/jsonParser';
+import { normalizeBraces, cleanJsonResponse, parseJsonResponse } from '../src/utils/jsonParser';
 
 // Helper: Generate strings that don't contain braces (to avoid false positives in tests)
 const safeStringArb = fc.string().filter(s => !s.includes('{') && !s.includes('}'));
@@ -134,11 +134,11 @@ describe('JSON Parser - Brace Normalization', () => {
             // Parse through our robust parser
             const parsed = parseJsonResponse<typeof quizResponse>(
               doubledJson,
-              (obj): obj is typeof quizResponse => {
+              (obj: unknown): obj is typeof quizResponse => {
                 return obj !== null && 
                        typeof obj === 'object' && 
                        'questions' in obj &&
-                       Array.isArray((obj as any).questions);
+                       Array.isArray((obj as Record<string, unknown>).questions);
               }
             );
             
@@ -163,11 +163,11 @@ describe('JSON Parser - Brace Normalization', () => {
             
             const parsed = parseJsonResponse<typeof quizResponse>(
               llmOutput,
-              (obj): obj is typeof quizResponse => {
+              (obj: unknown): obj is typeof quizResponse => {
                 return obj !== null && 
                        typeof obj === 'object' && 
                        'questions' in obj &&
-                       Array.isArray((obj as any).questions);
+                       Array.isArray((obj as Record<string, unknown>).questions);
               }
             );
             
@@ -193,11 +193,11 @@ describe('JSON Parser - Brace Normalization', () => {
             
             const parsed = parseJsonResponse<typeof quizResponse>(
               llmOutput,
-              (obj): obj is typeof quizResponse => {
+              (obj: unknown): obj is typeof quizResponse => {
                 return obj !== null && 
                        typeof obj === 'object' && 
                        'questions' in obj &&
-                       Array.isArray((obj as any).questions);
+                       Array.isArray((obj as Record<string, unknown>).questions);
               }
             );
             
@@ -237,8 +237,8 @@ describe('JSON Parser - Brace Normalization', () => {
     });
 
     it('should handle null/undefined gracefully', () => {
-      expect(normalizeBraces(null as any)).toBe(null);
-      expect(normalizeBraces(undefined as any)).toBe(undefined);
+      expect(normalizeBraces(null as unknown as string)).toBe(null);
+      expect(normalizeBraces(undefined as unknown as string)).toBe(undefined);
     });
 
     it('should handle mixed single and double braces', () => {

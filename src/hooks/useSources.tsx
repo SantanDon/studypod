@@ -1,13 +1,21 @@
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { localStorageService, LocalSource } from "@/services/localStorageService";
-import { useAuth } from "@/contexts/AuthContext";
+import { useAuthState } from "@/hooks/useAuthState";
+import { useGuest } from "@/hooks/useGuest";
+import { useAuth } from "@/hooks/useAuth";
+import { ApiService } from "@/services/apiService";
 import { useNotebookGeneration } from "./useNotebookGeneration";
 import { useEffect } from "react";
 
-type Source = LocalSource;
+export interface Source extends LocalSource {
+  author_name?: string;
+}
 
 export const useSources = (notebookId?: string) => {
-  const { user } = useAuth();
+  const { user, isSignedIn: isAuthenticated } = useAuthState();
+  const { session } = useAuth();
+  const { guestId } = useGuest();
+  const effectiveUserId = user?.id || guestId;
   const queryClient = useQueryClient();
   const { generateNotebookContentAsync } = useNotebookGeneration();
 
@@ -16,12 +24,19 @@ export const useSources = (notebookId?: string) => {
     isLoading,
     error,
   } = useQuery({
-    queryKey: ["sources", notebookId],
+    queryKey: ["sources", notebookId, !!session?.access_token],
     queryFn: async () => {
       if (!notebookId) return [];
 
-      // Get sources from local storage
-      const sources = await localStorageService.getSources(notebookId);
+      let sources: Source[];
+      
+      if (session?.access_token) {
+        console.log("useSources: Fetching from cloud...");
+        sources = await ApiService.fetchSources(notebookId, session.access_token);
+      } else {
+        console.log("useSources: Fetching from local storage...");
+        sources = await localStorageService.getSources(notebookId) as Source[];
+      }
 
       // Sort by creation date (newest first)
       return sources.sort(
@@ -34,13 +49,13 @@ export const useSources = (notebookId?: string) => {
 
   // Refresh sources when notebook or user changes
   useEffect(() => {
-    if (!notebookId || !user) return;
+    if (!notebookId || !effectiveUserId) return;
 
     console.log("Refreshing sources for notebook:", notebookId);
 
     // Invalidate queries to refetch sources
     queryClient.invalidateQueries({ queryKey: ["sources", notebookId] });
-  }, [notebookId, user, queryClient]);
+  }, [notebookId, effectiveUserId, queryClient]);
 
   const addSource = useMutation({
     mutationFn: async (sourceData: {
@@ -54,7 +69,7 @@ export const useSources = (notebookId?: string) => {
       processing_status?: string;
       metadata?: unknown;
     }) => {
-      if (!user) throw new Error("User not authenticated");
+      if (!effectiveUserId) throw new Error("User not authenticated");
 
       // Create source in local storage
       const newSource = await localStorageService.createSource({
@@ -71,7 +86,7 @@ export const useSources = (notebookId?: string) => {
         file_path: sourceData.file_path,
         file_size: sourceData.file_size,
         processing_status: sourceData.processing_status,
-        metadata: sourceData.metadata || {},
+        metadata: (sourceData.metadata as Record<string, unknown>) || {},
       });
 
       return newSource;

@@ -9,6 +9,7 @@ export interface YoutubeTranscriptResult {
     duration?: number;
     author?: string;
     videoId?: string;
+    keywords?: string[];
   };
 }
 
@@ -30,79 +31,6 @@ function extractVideoId(url: string): string | null {
   return null;
 }
 
-/**
- * Decode HTML entities in transcript text
- */
-function decodeHtmlEntities(text: string): string {
-  const entities: Record<string, string> = {
-    '&#39;': "'",
-    '&quot;': '"',
-    '&amp;': '&',
-    '&lt;': '<',
-    '&gt;': '>',
-    '&nbsp;': ' ',
-    '&#x27;': "'",
-    '&#x2F;': '/',
-    '&apos;': "'",
-  };
-
-  let decoded = text;
-  for (const [entity, char] of Object.entries(entities)) {
-    decoded = decoded.replace(new RegExp(entity, 'g'), char);
-  }
-  // Handle numeric entities
-  decoded = decoded.replace(/&#(\d+);/g, (_, num) => String.fromCharCode(parseInt(num, 10)));
-  decoded = decoded.replace(/&#x([0-9a-fA-F]+);/g, (_, hex) => String.fromCharCode(parseInt(hex, 16)));
-  return decoded;
-}
-
-/**
- * Extract title from YouTube page HTML
- */
-function extractTitle(html: string, videoId: string, url: string): string {
-  // Try multiple patterns for title extraction
-  const titlePatterns = [
-    /<meta\s+name="title"\s+content="([^"]+)"/i,
-    /<meta\s+property="og:title"\s+content="([^"]+)"/i,
-    /<title>([^<]+)<\/title>/i,
-    /"title"\s*:\s*{\s*"runs"\s*:\s*\[\s*{\s*"text"\s*:\s*"([^"]+)"/,
-    /"videoDetails"[^}]*"title"\s*:\s*"([^"]+)"/,
-  ];
-
-  for (const pattern of titlePatterns) {
-    const match = html.match(pattern);
-    if (match && match[1]) {
-      const title = match[1]
-        .replace(/ - YouTube$/, '')
-        .replace(/\\u0026/g, '&')
-        .trim();
-      if (title.length > 0 && title.length < 500) {
-        return decodeHtmlEntities(title);
-      }
-    }
-  }
-
-  return `YouTube Video: ${videoId || url}`;
-}
-
-/**
- * Extract description from YouTube page HTML
- */
-function extractDescription(html: string): string {
-  const patterns = [
-    /<meta\s+name="description"\s+content="([^"]+)"/i,
-    /<meta\s+property="og:description"\s+content="([^"]+)"/i,
-    /"shortDescription"\s*:\s*"([^"]+)"/,
-  ];
-
-  for (const pattern of patterns) {
-    const match = html.match(pattern);
-    if (match && match[1]) {
-      return decodeHtmlEntities(match[1]);
-    }
-  }
-  return "";
-}
 
 export async function extractYoutubeTranscript(url: string): Promise<YoutubeTranscriptResult> {
   console.log('🎬 Starting YouTube transcript extraction for:', url);
@@ -123,32 +51,7 @@ export async function extractYoutubeTranscript(url: string): Promise<YoutubeTran
   const normalizedUrl = `https://www.youtube.com/watch?v=${videoId}`;
 
   try {
-    // 1. Fetch video page via proxy (Mainly for Title and Validation)
-    const proxyUrl = `/api/proxy?url=${encodeURIComponent(normalizedUrl)}`;
-    console.log('📡 Fetching video page via proxy for metadata...');
-
-    const response = await fetch(proxyUrl);
-    if (!response.ok) {
-      throw new Error(`Failed to fetch video page: HTTP ${response.status}`);
-    }
-
-    const html = await response.text();
-    
-    // Check if video is available
-    if (html.includes('Video unavailable') || html.includes('is not available')) {
-      throw new Error('This video is not available. It may be private, deleted, or age-restricted.');
-    }
-
-    // Extract title
-    const title = extractTitle(html, videoId, url);
-    console.log(`📝 Extracted Title: ${title}`);
-
-    // Extract description
-    const description = extractDescription(html);
-    console.log(`📝 Extracted Description: ${description.substring(0, 100)}...`);
-
-    // 2. Fetch transcript via server-side API (using youtube-transcript lib)
-    console.log('📡 Fetching transcript via server API...');
+    console.log('📡 Fetching transcript and metadata via server API...');
     const apiUrl = `/api/youtube-transcript?url=${encodeURIComponent(normalizedUrl)}`;
     const transcriptResponse = await fetch(apiUrl);
 
@@ -166,37 +69,69 @@ export async function extractYoutubeTranscript(url: string): Promise<YoutubeTran
       throw new Error(errorMessage);
     }
 
-    const transcriptData = await transcriptResponse.json();
+    const payload = await transcriptResponse.json();
     
-    if (!Array.isArray(transcriptData) || transcriptData.length === 0) {
-       throw new Error("Received empty transcript from YouTube.");
-    }
+    const transcriptData = payload.transcript || (Array.isArray(payload) ? payload : []);
+    const metadata = payload.metadata || {};
+    
+    // Extract metadata
+    const title = metadata.title || `YouTube Video: ${videoId}`;
+    const description = metadata.description || "";
+    const author = metadata.author || "Unknown Channel";
+    const keywords = metadata.keywords || [];
 
-    // 3. Process transcript
+    console.log(`📝 Extracted Title: ${title}`);
+    console.log(`📝 Extracted Description: ${description.substring(0, 100)}...`);
+    console.log(`📝 Extracted Author: ${author}`);
+    console.log(`📝 Extracted Keywords: ${keywords.length > 0 ? keywords.slice(0, 5).join(', ') + '...' : 'None'}`);
+
+    // Process transcript
     let content = "";
     let duration = 0;
 
-    // The library returns an array of objects: { text: string, duration: number, offset: number }
-    for (const item of transcriptData) {
-        content += item.text + " ";
-    }
-    
-    if (transcriptData.length > 0) {
-        const lastItem = transcriptData[transcriptData.length - 1];
-        // offset and duration are in ms
-        duration = (lastItem.offset + lastItem.duration) / 1000;
+    if (!Array.isArray(transcriptData) || transcriptData.length === 0) {
+       console.warn(`[YouTube Extractor] No transcript tracks available. Falling back to metadata only.`);
+       content = "No transcript available for this video due to region blocks or missing captions. Please rely strictly on the provided Title, Description, and Keywords metadata above to infer the content of the video.";
+    } else {
+      // The library returns an array of objects: { text: string, duration: number, offset: number }
+      for (const item of transcriptData) {
+          content += item.text + " ";
+      }
+      
+      const lastItem = transcriptData[transcriptData.length - 1];
+      // offset and duration are in ms
+      duration = (lastItem.offset + lastItem.duration) / 1000;
     }
 
     console.log(`✅ Successfully extracted transcript: ${content.length} characters, ${Math.round(duration)}s duration`);
+
+    // Prepend metadata to the final content to give the LLM structural context of the video before reading the transcript
+    const metadataHeader = `
+VIDEO METADATA
+==============
+Title: ${title}
+Channel/Author: ${author}
+Keywords/Tags: ${keywords.length > 0 ? keywords.join(', ') : 'None provided'}
+
+VIDEO DESCRIPTION
+=================
+${description || 'No description provided.'}
+
+VIDEO TRANSCRIPT
+================
+${content.trim()}
+    `.trim();
 
     return {
       url: normalizedUrl,
       title,
       description,
-      content: content.trim(),
+      content: metadataHeader,
       metadata: {
         duration: Math.round(duration),
         videoId,
+        author,
+        keywords
       },
     };
   } catch (error) {

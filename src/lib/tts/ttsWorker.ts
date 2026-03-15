@@ -260,7 +260,7 @@ class TTSWorkerManager {
     // Check directly if worker not ready
     try {
       if (typeof navigator !== 'undefined' && 'gpu' in navigator) {
-        const adapter = await (navigator as any).gpu.requestAdapter();
+        const adapter = await (navigator as unknown as { gpu: { requestAdapter: () => Promise<unknown> } }).gpu.requestAdapter();
         this.webgpuAvailable = adapter !== null;
         return this.webgpuAvailable;
       }

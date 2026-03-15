@@ -1,9 +1,6 @@
 {
   "rewrites": [
-    {
-      "source": "/api/firecrawl",
-      "destination": "/api/firecrawl.js"
-    },
+
     {
       "source": "/api/proxy",
       "destination": "/api/proxy.js"
@@ -40,24 +37,6 @@
       ]
     }
   ],
-  "functions": {
-    "api/firecrawl.js": {
-      "memory": 1024,
-      "maxDuration": 60
-    },
-    "api/proxy.js": {
-      "memory": 512,
-      "maxDuration": 30
-    },
-    "api/youtube-transcript.js": {
-      "memory": 1024,
-      "maxDuration": 60
-    },
-    "api/index.js": {
-      "memory": 256,
-      "maxDuration": 10
-    }
-  },
   "outputDirectory": "dist",
   "framework": "vite"
 }

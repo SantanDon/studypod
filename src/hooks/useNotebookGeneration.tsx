@@ -112,11 +112,13 @@ export const useNotebookGeneration = () => {
       try {
         // Use enhanced Ollama service for ultra-fast generation
         const { generateTitle, chatCompletion, checkOllamaHealth } = await import('@/lib/ai/ollamaService');
+        const { isOllamaEnabled } = await import('@/config/ollamaConfig');
 
         const isHealthy = await checkOllamaHealth();
+        const canUseAI = isHealthy || !isOllamaEnabled();
 
-        if (isHealthy && source?.content) {
-          console.log("⚡ Generating with Ollama...");
+        if (canUseAI && source?.content) {
+          console.log("⚡ Generating with AI...");
 
           // Check if the content contains extraction error messages
           const hasExtractionError = source.content.includes("extraction failed") || 

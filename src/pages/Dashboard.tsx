@@ -4,7 +4,8 @@ import NotebookGrid from "@/components/dashboard/NotebookGrid";
 import EmptyDashboard from "@/components/dashboard/EmptyDashboard";
 import MetallicText from "@/components/ui/MetallicText";
 import { useNotebooks } from "@/hooks/useNotebooks";
-import { useAuth } from "@/contexts/AuthContext";
+import { useAuth } from "@/hooks/useAuth";
+import { useGuest } from "@/hooks/useGuest";
 import { useVisualEffectsStore } from "@/stores/visualEffectsStore";
 
 const Dashboard = () => {
@@ -21,7 +22,7 @@ const Dashboard = () => {
         <main className="max-w-7xl mx-auto px-6 py-8">
           <div className="mb-8">
             <h1 className="text-4xl font-medium text-gray-900 mb-2">
-              Welcome to StudyLM
+              Welcome to StudyPodLM
             </h1>
           </div>
           <div className="text-center py-16">
@@ -41,7 +42,7 @@ const Dashboard = () => {
         <main className="max-w-7xl mx-auto px-6 py-8">
           <div className="mb-8">
             <h1 className="text-4xl font-medium text-gray-900 mb-2">
-              Welcome to StudyLM
+              Welcome to StudyPodLM
             </h1>
           </div>
           <div className="text-center py-16">
@@ -66,7 +67,7 @@ const Dashboard = () => {
         <main className="max-w-7xl mx-auto px-6 py-8">
           <div className="mb-8">
             <h1 className="text-4xl font-medium text-gray-900 mb-2">
-              Welcome to StudyLM
+              Welcome to StudyPodLM
             </h1>
           </div>
           <div className="text-center py-16">
@@ -86,7 +87,7 @@ const Dashboard = () => {
         <main className="max-w-7xl mx-auto px-6 py-8">
           <div className="mb-8">
             <h1 className="text-4xl font-medium text-gray-900 mb-2">
-              Welcome to StudyLM
+              Welcome to StudyPodLM
             </h1>
           </div>
           <div className="text-center py-16">
@@ -111,7 +112,7 @@ const Dashboard = () => {
         <div className="mb-8">
           <h1 className={`font-medium text-gray-900 mb-2 text-5xl ${useCustomFonts ? 'font-heading' : ''}`}>
             <MetallicText enabled={metallicTextEnabled} speed={metallicTextSpeed}>
-              Welcome to StudyLM
+              Welcome to StudyPodLM
             </MetallicText>
           </h1>
         </div>

@@ -24,7 +24,8 @@ interface TTSWorkerResponse {
   webgpuAvailable?: boolean;
 }
 
-let kokoroInstance: any = null;
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+let kokoroInstance: any = null; // Keeping as any for now due to complex internal type from kokoro-js
 let isInitializing = false;
 let currentRequestId: string | null = null;
 
@@ -37,7 +38,7 @@ function postResponse(response: TTSWorkerResponse) {
 async function checkWebGPU(): Promise<boolean> {
   try {
     if (typeof navigator !== 'undefined' && 'gpu' in navigator) {
-      const adapter = await (navigator as any).gpu.requestAdapter();
+      const adapter = await (navigator as unknown as { gpu: { requestAdapter: () => Promise<unknown> } }).gpu.requestAdapter();
       return adapter !== null;
     }
     return false;
@@ -70,7 +71,7 @@ async function initializeKokoro(): Promise<void> {
 
     // Use fp32 for better quality - q8 can cause gibberish output
     // Use wasm device for better compatibility
-    const options: any = {
+    const options: { dtype: 'fp32' | 'fp16' | 'q8' | 'q4' | 'q4f16'; device: 'wasm' | 'webgpu' | 'cpu' } = {
       dtype: 'fp32', // Full precision for better quality
       device: 'wasm', // WASM is more reliable than WebGPU for now
     };
@@ -184,15 +185,14 @@ self.onmessage = async (event: MessageEvent<TTSWorkerRequest>) => {
     case 'init':
       await initializeKokoro();
       break;
-
-    case 'checkWebGPU':
+    case 'checkWebGPU': {
       const available = await checkWebGPU();
       postResponse({
         type: 'webgpu-status',
         webgpuAvailable: available,
       });
       break;
-
+    }
     case 'synthesize':
       if (!id || !text || !voice) {
         postResponse({
@@ -204,11 +204,9 @@ self.onmessage = async (event: MessageEvent<TTSWorkerRequest>) => {
       }
       await synthesize(id, text, voice, speed || 1.0);
       break;
-
     case 'cancel':
       currentRequestId = null;
       break;
-
     default:
       postResponse({
         type: 'error',

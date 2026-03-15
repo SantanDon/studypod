@@ -14,16 +14,17 @@ class SpeechRecognitionPipeline {
   static task = 'automatic-speech-recognition';
   // 'Xenova/whisper-tiny' is ~40MB quantized, very fast.
   static model = 'Xenova/whisper-tiny';
-  static instance: any = null;
+  static instance: unknown = null;
 
-  static async getInstance(progress_callback?: (data: any) => void) {
+  static async getInstance(progress_callback?: (data: { status: string; progress?: number }) => void) {
     if (this.instance === null) {
       console.log(`Loading Whisper model: ${this.model}...`);
-      this.instance = await pipeline(this.task as any, this.model, { 
+      this.instance = await pipeline(this.task as "automatic-speech-recognition", this.model, { 
         progress_callback 
       });
     }
-    return this.instance;
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    return this.instance as any; // Cast back to any for legacy usage if necessary, but internal type is safe
   }
 }
 
@@ -50,7 +51,7 @@ export async function extractAudio(
     if (onStatusUpdate) onStatusUpdate("Loading Whisper model...");
     
     // 1. Get the transcriber pipeline
-    const transcriber = await SpeechRecognitionPipeline.getInstance((data: any) => {
+    const transcriber = await SpeechRecognitionPipeline.getInstance((data: { status: string; progress?: number }) => {
         if (data.status === 'progress' && onStatusUpdate) {
             // Report download progress
             const percent = data.progress ? Math.round(data.progress) : 0;

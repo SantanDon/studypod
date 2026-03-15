@@ -7,7 +7,7 @@ export interface TTSVoice {
   id: string;
   name: string;
   language: string;
-  provider: 'ultimate-tts' | 'coqui' | 'openai-tts' | 'web-speech';
+  provider: 'ultimate-tts' | 'coqui' | 'openai-tts' | 'web-speech' | 'kokoro' | 'kokoro-premium';
   gender?: 'male' | 'female' | 'neutral';
 }
 

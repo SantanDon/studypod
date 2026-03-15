@@ -51,7 +51,7 @@ const MetallicText: React.FC<MetallicTextProps> = ({
 
   return (
     <Component
-      ref={containerRef as any}
+      ref={containerRef as unknown as React.RefObject<HTMLSpanElement>}
       className={`metallic-text ${className}`}
       style={{
         background: `linear-gradient(

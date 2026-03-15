@@ -37,8 +37,17 @@ global.localStorage = localStorageMock as Storage;
 
 // Mock crypto for password hashing
 if (!global.crypto) {
-  const crypto = require('crypto');
-  global.crypto = crypto.webcrypto;
+  // Use a more modern approach for crypto if needed, but for tests this is often handled by the environment
+  // or specifically stubbed.
+  Object.defineProperty(global, 'crypto', {
+    value: {
+      webcrypto: {
+        subtle: {}, // Basic stub
+        getRandomValues: (arr: Uint8Array | Uint16Array | Uint32Array | Int8Array | Int16Array | Int32Array) => arr
+      }
+    },
+    writable: true
+  });
 }
 
 // Mock window.matchMedia
@@ -65,7 +74,7 @@ global.IntersectionObserver = class IntersectionObserver {
     return [];
   }
   unobserve() {}
-} as any;
+} as unknown as typeof IntersectionObserver;
 
 // Mock speechSynthesis for podcast tests
 global.speechSynthesis = {
@@ -84,7 +93,7 @@ global.speechSynthesis = {
   addEventListener: vi.fn(),
   removeEventListener: vi.fn(),
   dispatchEvent: vi.fn(),
-} as any;
+} as unknown as SpeechSynthesis;
 
 // Mock fetch
 global.fetch = vi.fn();

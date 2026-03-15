@@ -37,21 +37,26 @@ export const dbHelpers = {
   // User operations
   getUserByEmail(email) {
     const db = getDatabase();
-    return db.prepare('SELECT * FROM users WHERE email = ?').get(email);
+    return db.prepare('SELECT id, email, password_hash, display_name, account_type, bio, avatar_url, created_at, updated_at FROM users WHERE email = ?').get(email);
+  },
+
+  getUserByDisplayName(displayName) {
+    const db = getDatabase();
+    return db.prepare('SELECT id, email, password_hash, display_name, account_type, bio, avatar_url, created_at, updated_at FROM users WHERE display_name = ?').get(displayName);
   },
 
   getUserById(id) {
     const db = getDatabase();
-    return db.prepare('SELECT * FROM users WHERE id = ?').get(id);
+    return db.prepare('SELECT id, email, display_name, account_type, bio, avatar_url, created_at, updated_at FROM users WHERE id = ?').get(id);
   },
 
-  createUser(id, email, passwordHash, displayName = null) {
+  createUser(id, email, passwordHash, displayName = null, accountType = 'human', webhookUrl = null, ownerId = null) {
     const db = getDatabase();
     const stmt = db.prepare(`
-      INSERT INTO users (id, email, password_hash, display_name)
-      VALUES (?, ?, ?, ?)
+      INSERT INTO users (id, email, password_hash, display_name, account_type, webhook_url, owner_id)
+      VALUES (?, ?, ?, ?, ?, ?, ?)
     `);
-    return stmt.run(id, email, passwordHash, displayName);
+    return stmt.run(id, email, passwordHash, displayName, accountType, webhookUrl, ownerId);
   },
 
   updateUser(id, updates) {
@@ -123,12 +128,21 @@ export const dbHelpers = {
   // Notebooks
   getNotebooksByUserId(userId) {
     const db = getDatabase();
-    return db.prepare('SELECT * FROM notebooks WHERE user_id = ? ORDER BY updated_at DESC').all(userId);
+    return db.prepare(`
+      SELECT * FROM notebooks 
+      WHERE user_id = ? 
+      OR user_id IN (SELECT id FROM users WHERE owner_id = ?)
+      ORDER BY updated_at DESC
+    `).all(userId, userId);
   },
 
   getNotebookById(id, userId) {
     const db = getDatabase();
-    return db.prepare('SELECT * FROM notebooks WHERE id = ? AND user_id = ?').get(id, userId);
+    return db.prepare(`
+      SELECT * FROM notebooks 
+      WHERE id = ? 
+      AND (user_id = ? OR user_id IN (SELECT id FROM users WHERE owner_id = ?))
+    `).get(id, userId, userId);
   },
 
   createNotebook(id, userId, title, description = null) {
@@ -161,7 +175,14 @@ export const dbHelpers = {
   // Sources
   getSourcesByNotebookId(notebookId, userId) {
     const db = getDatabase();
-    return db.prepare('SELECT * FROM sources WHERE notebook_id = ? AND user_id = ? ORDER BY created_at DESC').all(notebookId, userId);
+    return db.prepare(`
+      SELECT s.*, u.display_name as author_name 
+      FROM sources s
+      LEFT JOIN users u ON s.user_id = u.id
+      WHERE s.notebook_id = ? 
+      AND (s.user_id = ? OR s.user_id IN (SELECT id FROM users WHERE owner_id = ?))
+      ORDER BY s.created_at DESC
+    `).all(notebookId, userId, userId);
   },
 
   createSource(id, notebookId, userId, title, type, content = null, url = null, metadata = null) {
@@ -179,19 +200,31 @@ export const dbHelpers = {
     return stmt.run(id, userId);
   },
 
+  getAgentsByOwnerId(ownerId) {
+    const db = getDatabase();
+    return db.prepare('SELECT * FROM users WHERE owner_id = ?').all(ownerId);
+  },
+
   // Notes
   getNotesByNotebookId(notebookId, userId) {
     const db = getDatabase();
-    return db.prepare('SELECT * FROM notes WHERE notebook_id = ? AND user_id = ? ORDER BY updated_at DESC').all(notebookId, userId);
+    return db.prepare(`
+      SELECT n.*, u.display_name as author_name
+      FROM notes n
+      LEFT JOIN users u ON n.author_id = u.id
+      WHERE n.notebook_id = ? 
+      AND (n.user_id = ? OR n.user_id IN (SELECT id FROM users WHERE owner_id = ?))
+      ORDER BY n.updated_at DESC
+    `).all(notebookId, userId, userId);
   },
 
-  createNote(id, notebookId, userId, content) {
+  createNote(id, notebookId, userId, content, authorId = null) {
     const db = getDatabase();
     const stmt = db.prepare(`
-      INSERT INTO notes (id, notebook_id, user_id, content)
-      VALUES (?, ?, ?, ?)
+      INSERT INTO notes (id, notebook_id, user_id, content, author_id)
+      VALUES (?, ?, ?, ?, ?)
     `);
-    return stmt.run(id, notebookId, userId, content);
+    return stmt.run(id, notebookId, userId, content, authorId || userId);
   },
 
   updateNote(id, userId, content) {

@@ -4,7 +4,7 @@
  */
 
 const DB_NAME = 'insights-lm-audio-db';
-const DB_VERSION = 1;
+const DB_VERSION = 2;
 const STORE_NAME = 'audio-blobs';
 
 class IndexedDBService {

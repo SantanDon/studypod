@@ -1,10 +1,17 @@
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { useAuth } from "@/contexts/AuthContext";
+import { useAuthState } from "@/hooks/useAuthState";
+import { useGuest } from "@/hooks/useGuest";
 import { localNotebookStore } from "@/integrations/local/localNotebookStore";
+import { useSyncTrigger } from "@/hooks/useSyncTrigger";
 
 export const useNotebooks = () => {
-  const { user, isAuthenticated, loading: authLoading } = useAuth();
+  const { user, isSignedIn: isAuthenticated } = useAuthState();
+  const { isGuest, guestId, incrementUsage } = useGuest();
   const queryClient = useQueryClient();
+  const { triggerSync } = useSyncTrigger();
+
+  // Get the effective user ID (guest or authenticated)
+  const effectiveUserId = user?.id || guestId;
 
   const {
     data: notebooks = [],
@@ -12,22 +19,22 @@ export const useNotebooks = () => {
     error,
     isError,
   } = useQuery({
-    queryKey: ["notebooks", user?.id],
+    queryKey: ["notebooks", effectiveUserId],
     queryFn: async () => {
-      if (!user) {
-        console.log("No user found, returning empty notebooks array");
+      if (!effectiveUserId) {
+        console.log("No user or guest found, returning empty notebooks array");
         return [];
       }
 
-      console.log("Fetching notebooks for user:", user.id);
+      console.log("Fetching notebooks for:", isGuest ? "guest" : "user", effectiveUserId);
 
       // Get notebooks from the local store
-      const notebooksData = await localNotebookStore.getNotebooks(user.id);
+      const notebooksData = await localNotebookStore.getNotebooks(effectiveUserId);
 
       console.log("Fetched notebooks:", notebooksData?.length || 0);
       return notebooksData || [];
     },
-    enabled: isAuthenticated && !authLoading,
+    enabled: !!effectiveUserId,
     retry: (failureCount: number, err: unknown) => {
       // Don't retry on auth errors
       const msg =
@@ -48,11 +55,11 @@ export const useNotebooks = () => {
       description?: string;
     }) => {
       console.log("Creating notebook with data:", notebookData);
-      console.log("Current user:", user?.id);
+      console.log("Current user:", effectiveUserId);
 
-      if (!user) {
-        console.error("User not authenticated");
-        throw new Error("User not authenticated");
+      if (!effectiveUserId) {
+        console.error("No user or guest ID available");
+        throw new Error("Unable to create notebook. Please refresh and try again.");
       }
 
       const data = await localNotebookStore.createNotebook(
@@ -60,15 +67,28 @@ export const useNotebooks = () => {
           title: notebookData.title,
           description: notebookData.description,
         },
-        user.id,
+        effectiveUserId,
       );
 
       console.log("Notebook created successfully:", data);
+      
+      // Track guest usage
+      if (isGuest) {
+        incrementUsage('notebooks');
+      }
+      
       return data;
     },
-    onSuccess: () => {
+    onSuccess: (data) => {
       console.log("Mutation success, invalidating queries");
-      queryClient.invalidateQueries({ queryKey: ["notebooks", user?.id] });
+      queryClient.invalidateQueries({ queryKey: ["notebooks", effectiveUserId] });
+      
+      // Trigger background sync
+      if (data) {
+        triggerSync('notebook', data.id, data, 'create').catch(err => {
+          console.error("Failed to trigger sync after creation:", err);
+        });
+      }
     },
     onError: (error) => {
       console.error("Mutation error:", error);
@@ -77,7 +97,7 @@ export const useNotebooks = () => {
 
   return {
     notebooks,
-    isLoading: authLoading || isLoading,
+    isLoading: isLoading,
     error: (error as Error)?.message || null,
     isError,
     createNotebook: createNotebook.mutate,

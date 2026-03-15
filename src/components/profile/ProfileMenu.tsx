@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 import VisualEffectsSettings from '@/components/settings/VisualEffectsSettings';
 import {
   DropdownMenu,
@@ -13,13 +14,16 @@ import {
 } from '@/components/ui/dropdown-menu';
 import { Button } from '@/components/ui/button';
 import { Avatar, AvatarFallback } from '@/components/ui/avatar';
-import { useAuth } from '@/contexts/AuthContext';
+import { useAuth } from '@/hooks/useAuth';
+import { useAuthState } from '@/hooks/useAuthState';
 import { useTheme } from '@/hooks/useTheme';
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Label } from '@/components/ui/label';
 import { Input } from '@/components/ui/input';
 import { useToast } from '@/hooks/use-toast';
 import { localStorageService } from '@/services/localStorageService';
+import { useQueryClient } from '@tanstack/react-query';
+import { useEncryptionStore } from '@/stores/encryptionStore';
 
 // Add proper accessibility descriptions for dialogs
 const DIALOG_DESCRIPTIONS = {
@@ -29,16 +33,85 @@ const DIALOG_DESCRIPTIONS = {
 };
 
 export function ProfileMenu() {
-  const { user, signOut } = useAuth();
+  const { signOut } = useAuth();
+  const { isSignedIn, isGuest, user, authMethod } = useAuthState();
   const { theme, setTheme } = useTheme();
+  const navigate = useNavigate();
   const { toast } = useToast();
+  const queryClient = useQueryClient();
+  const { clearMasterKey } = useEncryptionStore();
   const [showSettings, setShowSettings] = useState(false);
   const [showDataManagement, setShowDataManagement] = useState(false);
   const [showAbout, setShowAbout] = useState(false);
   const [showVisualEffects, setShowVisualEffects] = useState(false);
+  const [customName, setCustomName] = useState(() => localStorage.getItem('user_custom_name') || '');
 
-  const userInitials = user?.email?.substring(0, 2).toUpperCase() || 'U';
+  // User display
+  const savedCustomName = !isGuest ? localStorage.getItem('user_custom_name') : null;
+  const userInitials = isGuest ? 'G' : (savedCustomName || user?.displayName)?.substring(0, 2).toUpperCase() || 'G';
+  const displayName = isGuest ? 'Guest' : (savedCustomName || user?.displayName || 'Guest');
+  
+  // Fix: Use unified auth state to determine status
+  const displayEmail = isSignedIn 
+    ? (user?.email || `Signed in (${authMethod === 'encryption' ? 'PIN/Passphrase' : 'Email'})`)
+    : 'Not signed in';
 
+  console.log('ProfileMenu render:', { isSignedIn, user, authMethod, displayEmail });
+
+  const handleSignOut = async () => {
+    try {
+      console.log('Sign out initiated, auth method:', authMethod);
+      
+      // Step 1: Clear encryption state first (synchronous)
+      clearMasterKey();
+      console.log('Encryption state cleared');
+      
+      // Step 2: Sign out from legacy auth (async)
+      await signOut();
+      console.log('Legacy auth cleared');
+      
+      // Step 3: Clear all React Query cache (after auth cleared)
+      queryClient.clear();
+      console.log('Query cache cleared');
+      
+      console.log('Sign out completed successfully');
+      
+      toast({
+        title: 'Signed out',
+        description: 'You have been signed out successfully.',
+      });
+      
+      // Step 4: Navigate to auth page (use setTimeout to ensure state is fully cleared)
+      setTimeout(() => {
+        navigate("/auth", { replace: true });
+      }, 100);
+    } catch (error) {
+      console.error('Sign out error:', error);
+      toast({
+        title: 'Sign out failed',
+        description: 'Failed to sign out. Please try again.',
+        variant: 'destructive',
+      });
+    }
+  };
+
+  const handleSignIn = () => {
+    console.log('Sign in clicked');
+    navigate('/auth');
+  };
+
+  const handleSaveCustomName = () => {
+    if (customName.trim()) {
+      localStorage.setItem('user_custom_name', customName.trim());
+      toast({
+        title: 'Name updated',
+        description: 'Your display name has been updated successfully.',
+      });
+      setShowSettings(false);
+      // Force re-render by updating state
+      window.location.reload();
+    }
+  };
   const handleExportData = () => {
     try {
       const data = {
@@ -142,9 +215,11 @@ export function ProfileMenu() {
         <DropdownMenuContent className="w-56" align="end" forceMount>
           <DropdownMenuLabel className="font-normal">
             <div className="flex flex-col space-y-1">
-              <p className="text-sm font-medium leading-none">Account</p>
+              <p className="text-sm font-medium leading-none">
+                {displayName}
+              </p>
               <p className="text-xs leading-none text-muted-foreground">
-                {user?.email || 'Not signed in'}
+                {displayEmail}
               </p>
             </div>
           </DropdownMenuLabel>
@@ -202,11 +277,18 @@ export function ProfileMenu() {
 
           <DropdownMenuSeparator />
 
-          {/* Sign Out */}
-          <DropdownMenuItem onClick={signOut}>
-            <i className="fi fi-rr-sign-out-alt mr-2 h-4 w-4"></i>
-            <span>Sign out</span>
-          </DropdownMenuItem>
+          {/* Sign In / Sign Out */}
+          {isSignedIn ? (
+            <DropdownMenuItem onClick={handleSignOut}>
+              <i className="fi fi-rr-sign-out-alt mr-2 h-4 w-4"></i>
+              <span>Sign out</span>
+            </DropdownMenuItem>
+          ) : (
+            <DropdownMenuItem onClick={handleSignIn}>
+              <i className="fi fi-rr-sign-in-alt mr-2 h-4 w-4"></i>
+              <span>Sign in</span>
+            </DropdownMenuItem>
+          )}
         </DropdownMenuContent>
       </DropdownMenu>
 
@@ -220,13 +302,29 @@ export function ProfileMenu() {
             </DialogDescription>
           </DialogHeader>
           <div className="space-y-4 py-4">
-            <div className="space-y-2">
-              <Label htmlFor="email">Email</Label>
-              <Input id="email" value={user?.email || ''} disabled />
-            </div>
+            {!isGuest && (
+              <div className="space-y-2">
+                <Label htmlFor="custom-name">Display Name</Label>
+                <Input 
+                  id="custom-name" 
+                  value={customName} 
+                  onChange={(e) => setCustomName(e.target.value)}
+                  placeholder="Enter your name"
+                />
+                <Button onClick={handleSaveCustomName} className="w-full mt-2">
+                  Save Name
+                </Button>
+              </div>
+            )}
             <div className="space-y-2">
               <Label htmlFor="user-id">User ID</Label>
-              <Input id="user-id" value={user?.id || ''} disabled className="font-mono text-xs" />
+              <Input id="user-id" value={user?.id || 'N/A'} disabled className="font-mono text-xs" />
+            </div>
+            <div className="space-y-2">
+              <Label>Auth Method</Label>
+              <div className="text-sm text-muted-foreground">
+                {authMethod === 'legacy' ? 'Email/Password' : authMethod === 'encryption' ? 'PIN/Passphrase' : 'Guest Mode'}
+              </div>
             </div>
             <div className="space-y-2">
               <Label>Storage Used</Label>
@@ -300,7 +398,7 @@ export function ProfileMenu() {
       <Dialog open={showAbout} onOpenChange={setShowAbout}>
         <DialogContent>
           <DialogHeader>
-            <DialogTitle>About StudyLM</DialogTitle>
+            <DialogTitle>About StudyPodLM</DialogTitle>
             <DialogDescription>
               {DIALOG_DESCRIPTIONS.about}
             </DialogDescription>
@@ -313,33 +411,12 @@ export function ProfileMenu() {
             <div>
               <h4 className="font-semibold mb-2">Features</h4>
               <ul className="text-sm text-muted-foreground space-y-1">
-                <li>• Ultra-fast local AI with Ollama</li>
-                <li>• Semantic search across all content</li>
+                <li>• AI-powered study assistant</li>
+                <li>• Podcast-style audio generation</li>
                 <li>• Document processing and analysis</li>
                 <li>• Smart note-taking with AI assistance</li>
                 <li>• 100% private and local</li>
               </ul>
-            </div>
-            <div>
-              <h4 className="font-semibold mb-2">Resources</h4>
-              <div className="space-y-1 text-sm">
-                <a 
-                  href="https://github.com/yourusername/studylm" 
-                  target="_blank" 
-                  rel="noopener noreferrer"
-                  className="text-primary hover:underline block"
-                >
-                  GitHub Repository
-                </a>
-                <a 
-                  href="/docs/OLLAMA_SETUP.md" 
-                  target="_blank" 
-                  rel="noopener noreferrer"
-                  className="text-primary hover:underline block"
-                >
-                  Ollama Setup Guide
-                </a>
-              </div>
             </div>
           </div>
         </DialogContent>

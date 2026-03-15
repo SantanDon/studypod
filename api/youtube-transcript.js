@@ -1,86 +1,142 @@
-// Vercel Serverless Function for fetching YouTube transcripts
-import { YoutubeTranscript } from '@danielxceron/youtube-transcript';
+// Polyfill to parse HTML entities mapped previously in the framework
+function decodeHtmlEntities(text) {
+  if (!text) return "";
+  return text
+    .replace(/&amp;/g, '&')
+    .replace(/&lt;/g, '<')
+    .replace(/&gt;/g, '>')
+    .replace(/&#39;/g, "'")
+    .replace(/&#x27;/g, "'")
+    .replace(/&#x2F;/g, "/")
+    .replace(/&apos;/g, "'")
+    .replace(/&quot;/g, '"')
+    .replace(/\n/g, ' ')
+    .trim();
+}
 
-export default async function handler(req, res) {
-  if (req.method === 'OPTIONS') {
-    res.setHeader('Access-Control-Allow-Origin', '*');
-    res.setHeader('Access-Control-Allow-Methods', 'GET, OPTIONS');
-    return res.status(204).end();
-  }
 
-  const videoUrl = req.query.url;
 
-  if (!videoUrl) {
-    return res.status(400).json({ error: 'Missing "url" query parameter' });
-  }
-
-  console.log(`[YouTube API] Fetching transcript for: ${videoUrl}`);
-
-  const languages = ['en', 'en-US', 'en-GB', 'auto'];
-  let transcript = null;
-  let lastError = null;
-
-  for (const lang of languages) {
-    try {
-      const options = lang === 'auto' ? {} : { lang };
-      transcript = await YoutubeTranscript.fetchTranscript(videoUrl, options);
-      if (transcript && transcript.length > 0) break;
-    } catch (error) {
-      lastError = error;
+function parseXmlCaptions(xmlText) {
+  const result = [];
+  const textMatches = xmlText.match(/<text[^>]*>[\s\S]*?<\/text>/g);
+  if (textMatches && textMatches.length > 0) {
+    for (let idx = 0; idx < textMatches.length; idx++) {
+      const match = textMatches[idx];
+      const text = decodeHtmlEntities(match.replace(/<[^>]+>/g, ''));
+      const startMatch = match.match(/start="([\d.]+)"/);
+      const durMatch = match.match(/dur="([\d.]+)"/);
+      if (text.length > 0) {
+        result.push({
+          text,
+          offset: startMatch ? parseFloat(startMatch[1]) * 1000 : idx * 3000,
+          duration: durMatch ? parseFloat(durMatch[1]) * 1000 : 3000,
+        });
+      }
     }
   }
-
-  // Piped API fallback
-  if (!transcript || transcript.length === 0) {
-    try {
-      let videoId = videoUrl;
-      if (videoUrl.includes('v=')) {
-        videoId = videoUrl.split('v=')[1].split('&')[0];
-      } else if (videoUrl.includes('youtu.be/')) {
-        videoId = videoUrl.split('youtu.be/')[1].split('?')[0];
-      }
-
-      const pipedInstances = [
-        "https://pipedapi.kavin.rocks",
-        "https://api.piped.yt",
-      ];
-
-      for (const baseUrl of pipedInstances) {
-        try {
-          const controller = new AbortController();
-          const timeoutId = setTimeout(() => controller.abort(), 3000);
-          
-          const pipedResponse = await fetch(`${baseUrl}/streams/${videoId}`, { signal: controller.signal });
-          clearTimeout(timeoutId);
-          
-          if (pipedResponse.ok) {
-            const data = await pipedResponse.json();
-            if (data.subtitles && data.subtitles.length > 0) {
-              const subtitleTrack = data.subtitles.find(s => s.code === 'en') || data.subtitles[0];
-              if (subtitleTrack) {
-                const subContentResponse = await fetch(subtitleTrack.url);
-                const subText = await subContentResponse.text();
-                const jsonSub = JSON.parse(subText);
-                transcript = jsonSub.map(item => ({
-                  text: item.text || item.content,
-                  duration: item.duration,
-                  offset: item.start
-                }));
-                break;
-              }
-            }
-          }
-        } catch (e) { /* continue */ }
-      }
-    } catch (e) { /* ignore */ }
-  }
-
-  res.setHeader('Access-Control-Allow-Origin', '*');
-  
-  if (transcript && transcript.length > 0) {
-    return res.status(200).json({ transcript, segmentCount: transcript.length });
-  }
-
-  let errorMessage = lastError?.message || 'Failed to fetch transcript';
-  return res.status(500).json({ error: errorMessage });
+  return result;
 }
+
+export default async function (req, res) {
+  res.setHeader('Access-Control-Allow-Origin', '*');
+  res.setHeader('Access-Control-Allow-Methods', 'GET, OPTIONS');
+  res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
+
+  if (req.method === 'OPTIONS') return res.status(204).end();
+
+  const { url } = req.query;
+  if (!url) return res.status(400).json({ error: 'Missing url param' });
+
+  const idMatch = url.match(/(?:v=|youtu\.be\/|embed\/|shorts\/)([a-zA-Z0-9_-]{11})/);
+  if (!idMatch) return res.status(400).json({ error: 'Invalid url' });
+  const videoId = idMatch[1];
+
+  try {
+     const pageResponse = await fetch(`https://www.youtube.com/watch?v=${videoId}`, {
+       headers: {
+         'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36',
+         'Accept-Language': 'en-US,en;q=0.9',
+         'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+         'Sec-Fetch-Dest': 'document',
+       }
+     });
+     const html = await pageResponse.text();
+
+     const apiKeyMatch = html.match(/"INNERTUBE_API_KEY"\s*:\s*"([^"]+)"/);
+     const apiKey = apiKeyMatch ? apiKeyMatch[1] : 'AIzaSyA8eiZmM1FaDVjRy-df2KoPYpae5kqj3Vk';
+
+     // POST payload mimicking an Android client to bypass strict limits
+     const playerResponse = await fetch(`https://www.youtube.com/youtubei/v1/player?key=${apiKey}&prettyPrint=false`, {
+       method: 'POST',
+       headers: {
+         'Content-Type': 'application/json',
+         'X-YouTube-Client-Name': '3',
+         'X-YouTube-Client-Version': '18.11.34',
+         'Origin': 'https://www.youtube.com',
+         'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36'
+       },
+       body: JSON.stringify({
+         videoId,
+         context: {
+           client: {
+             clientName: 'ANDROID',
+             clientVersion: '20.10.38',
+             androidSdkVersion: 30,
+             userAgent: 'com.google.android.youtube/20.10.38(Linux; U; Android 11) gzip',
+             hl: 'en',
+             gl: 'US'
+           }
+         },
+         contentCheckOk: true,
+         racyCheckOk: true
+       })
+     });
+
+     const playerData = await playerResponse.json();
+     const captionTracks = playerData?.captions?.playerCaptionsTracklistRenderer?.captionTracks || [];
+
+     // Extract accurate metadata from the InnerTube JSON API response
+     let metadata = {
+        title: `YouTube Video: ${videoId}`,
+        description: "",
+        author: "Unknown Channel",
+        keywords: []
+     };
+
+     const vDetails = playerData?.videoDetails;
+     if (vDetails && vDetails.title) {
+         metadata.title = vDetails.title;
+         metadata.description = vDetails.shortDescription || "";
+         metadata.author = vDetails.author || "Unknown Channel";
+         metadata.keywords = vDetails.keywords || [];
+     } else {
+         // Fallback layer 3: oEmbed API if InnerTube returns empty due to Edge IP blocks
+         try {
+             const oembedRes = await fetch(`https://www.youtube.com/oembed?url=https://www.youtube.com/watch?v=${videoId}&format=json`);
+             if (oembedRes.ok) {
+                 const oembed = await oembedRes.json();
+                 if (oembed.title) metadata.title = oembed.title;
+                 if (oembed.author_name) metadata.author = oembed.author_name;
+             }
+         } catch (e) {
+             // Silently ignore oEmbed failures
+         }
+     }
+
+     if (captionTracks.length > 0) {
+        const track = captionTracks.find(t => t.languageCode === 'en' || t.languageCode?.startsWith('en')) || captionTracks[0];
+        const captionResult = await fetch(track.baseUrl);
+        const captionText = await captionResult.text();
+
+        const transcript = parseXmlCaptions(captionText);
+        if (transcript.length > 0) {
+            return res.status(200).json({ transcript, metadata });
+        }
+     }
+     
+     // Even if there's no transcript, return the metadata. We can't parse text, but we extracted title/desc
+     return res.status(200).json({ transcript: [], metadata, fallbackError: "No caption tracks available on Youtube" });
+  } catch (error) {
+     return res.status(500).json({ error: error.message });
+  }
+};

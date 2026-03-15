@@ -3,14 +3,22 @@ import { Button } from "@/components/ui/button";
 import { Upload, FileText, Globe, Video, Mic } from "lucide-react";
 import { useNavigate } from "react-router-dom";
 import { useNotebooks } from "@/hooks/useNotebooks";
+import { useGuest } from "@/hooks/useGuest";
 import { useToast } from "@/hooks/use-toast";
 const EmptyDashboard = () => {
   const navigate = useNavigate();
   const { createNotebook, isCreating } = useNotebooks();
+  const { canCreateNotebook, showAuthPrompt, remainingNotebooks, isGuest } = useGuest();
   const { toast } = useToast();
   const handleCreateNotebook = () => {
     console.log("Create notebook button clicked");
     console.log("isCreating:", isCreating);
+
+    // Check guest limit
+    if (isGuest && !canCreateNotebook) {
+      showAuthPrompt('create notebook');
+      return;
+    }
 
     // Generate a better default title with date
     const now = new Date();
@@ -52,7 +60,7 @@ const EmptyDashboard = () => {
           Create your first notebook
         </h2>
         <p className="text-lg text-gray-600 max-w-2xl mx-auto">
-          StudyLM is an AI-powered research and writing assistant that works
+          StudyPodLM is an AI-powered research and writing assistant that works
           best with the sources you upload
         </p>
       </div>

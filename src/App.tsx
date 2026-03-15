@@ -2,15 +2,18 @@ import { Toaster } from "@/components/ui/toaster";
 import { Toaster as Sonner } from "@/components/ui/sonner";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { BrowserRouter, Routes, Route } from "react-router-dom";
+import { BrowserRouter, Routes, Route, useNavigate } from "react-router-dom";
 import { AuthProvider } from "@/contexts/AuthContext";
-import ProtectedRoute from "@/components/auth/ProtectedRoute";
+import { GuestProvider } from "@/contexts/GuestContext";
+import { AuthPromptModal, GuestBanner } from "@/components/auth/AuthPrompt";
 import ErrorBoundary from "@/components/ErrorBoundary";
 import RibbonsCursor from "@/components/ui/RibbonsCursor";
 import { useVisualEffectsStore } from "@/stores/visualEffectsStore";
+import { ProtectedRoute } from "@/components/routing/ProtectedRoute";
+import { EncryptionFlow } from "@/components/encryption/EncryptionFlow";
 import Dashboard from "./pages/Dashboard";
 import Notebook from "./pages/Notebook";
-import Auth from "./pages/Auth";
+import Settings from "./pages/Settings";
 import NotFound from "./pages/NotFound";
 import { useEffect } from "react";
 import { useLocation } from "react-router-dom";
@@ -31,14 +34,29 @@ const PageTracker = () => {
 const queryClient = new QueryClient();
 
 const AppContent = () => {
+  const navigate = useNavigate();
+
   return (
     <>
       <PageTracker />
+      <GuestBanner />
       <Routes>
+        {/* Dedicated authentication route */}
+        <Route 
+          path="/auth" 
+          element={
+            <EncryptionFlow 
+              onUnlocked={() => navigate('/', { replace: true })} 
+              allowGuest={true}
+            />
+          } 
+        />
+        
+        {/* Protected routes - require encryption/authentication */}
         <Route 
           path="/" 
           element={
-            <ProtectedRoute fallback={<Auth />}>
+            <ProtectedRoute>
               <Dashboard />
             </ProtectedRoute>
           } 
@@ -46,7 +64,7 @@ const AppContent = () => {
         <Route 
           path="/notebook" 
           element={
-            <ProtectedRoute fallback={<Auth />}>
+            <ProtectedRoute>
               <Notebook />
             </ProtectedRoute>
           } 
@@ -54,14 +72,29 @@ const AppContent = () => {
         <Route 
           path="/notebook/:id" 
           element={
-            <ProtectedRoute fallback={<Auth />}>
+            <ProtectedRoute>
               <Notebook />
             </ProtectedRoute>
           } 
         />
-        <Route path="/auth" element={<Auth />} />
+        
+        {/* Settings route - protected */}
+        <Route 
+          path="/settings" 
+          element={
+            <ProtectedRoute>
+              <Settings />
+            </ProtectedRoute>
+          } 
+        />
+        
+        {/* Guest mode route - unprotected (if needed in future) */}
+        {/* <Route path="/guest" element={<GuestMode />} /> */}
+        
+        {/* 404 */}
         <Route path="*" element={<NotFound />} />
       </Routes>
+      <AuthPromptModal />
     </>
   );
 };
@@ -96,7 +129,9 @@ const App = () => (
   <QueryClientProvider client={queryClient}>
     <TooltipProvider>
       <AuthProvider>
-        <AppWithEffects />
+        <GuestProvider>
+          <AppWithEffects />
+        </GuestProvider>
       </AuthProvider>
     </TooltipProvider>
   </QueryClientProvider>

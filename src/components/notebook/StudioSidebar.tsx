@@ -3,24 +3,20 @@ import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
 import { ScrollArea } from '@/components/ui/scroll-area';
 // import { Plus, Edit, Bot, User, Brain, ChevronDown, ChevronUp, Layers, GitBranch, Loader2, Trash2, GitCompare } from 'lucide-react'; // Removed Lucide imports
-import { useNotes, Note } from '@/hooks/useNotes';
-import { useNotebooks } from '@/hooks/useNotebooks';
-import { useSources } from '@/hooks/useSources';
-import { useQuiz } from '@/hooks/useQuiz';
-import { useOllamaModels } from '@/hooks/useOllamaModels';
-import { useConceptMap } from '@/hooks/useConceptMap';
-import { useQueryClient } from '@tanstack/react-query';
+import { Note } from '@/hooks/useNotes';
+import { useStudioSidebar } from './hooks/useStudioSidebar';
 import NoteEditor from './NoteEditor';
 import PodcastView from './PodcastView';
 import FlashcardDeckComponent from './FlashcardDeck';
 import ConceptMapView from './ConceptMapView';
 import SourceComparisonView from './SourceComparisonView';
-import QuizSelector, { QuizConfig } from './QuizSelector';
+import QuizSelector from './QuizSelector';
 import QuizView from './QuizView';
 import QuizResults from './QuizResults';
 import { Citation } from '@/types/message';
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible';
 import { GlareCard } from '@/components/ui/glare-card';
+import { useAuthState } from '@/hooks/useAuthState';
 
 interface StudioSidebarProps {
   notebookId?: string;
@@ -33,166 +29,27 @@ const StudioSidebar = ({
   isExpanded,
   onCitationClick
 }: StudioSidebarProps) => {
-  const [editingNote, setEditingNote] = useState<Note | null>(null);
-  const [isCreatingNote, setIsCreatingNote] = useState(false);
-  const [isQuizSectionOpen, setIsQuizSectionOpen] = useState(true);
-  const [isFlashcardSectionOpen, setIsFlashcardSectionOpen] = useState(false);
-  const [isConceptMapSectionOpen, setIsConceptMapSectionOpen] = useState(false);
-  const [isComparisonOpen, setIsComparisonOpen] = useState(false);
-  const [showQuizResults, setShowQuizResults] = useState(false);
   const {
-    notes,
-    isLoading,
-    createNote,
-    updateNote,
-    deleteNote,
-    isCreating,
-    isUpdating,
-    isDeleting
-  } = useNotes(notebookId);
+    state, data, flags, misc, handlers
+  } = useStudioSidebar(notebookId);
+  const { user } = useAuthState();
+  const currentUserId = user?.id;
+
   const {
-    notebooks
-  } = useNotebooks();
+    editingNote, isQuizSectionOpen, setIsQuizSectionOpen,
+    isFlashcardSectionOpen, setIsFlashcardSectionOpen,
+    isConceptMapSectionOpen, setIsConceptMapSectionOpen,
+    isComparisonOpen, setIsComparisonOpen, showQuizResults, setShowQuizResults
+  } = state;
+
+  const { notes, sources, installedModels, conceptMaps, currentSession } = data;
+  const { isLoading, isCreating, isUpdating, isDeleting, isGenerating, isGeneratingMap, isDeletingMap, isEditingMode, isQuizActive, isQuizCompleted } = flags;
+  const { generationError, generatingProgress } = misc;
   const {
-    sources
-  } = useSources(notebookId);
-  const {
-    currentSession,
-    isGenerating,
-    generationError,
-    generateQuiz,
-    answerQuestion,
-    nextQuestion,
-    completeQuiz,
-    resetQuiz,
-    retryQuiz,
-    getCurrentQuestion,
-    getProgress,
-  } = useQuiz({ notebookId });
-  const { installedModels } = useOllamaModels();
-  const {
-    conceptMaps,
-    isLoading: isLoadingMaps,
-    generatingProgress,
-    generateMap,
-    isGenerating: isGeneratingMap,
-    deleteMap,
-    isDeleting: isDeletingMap,
-  } = useConceptMap(notebookId);
-  const queryClient = useQueryClient();
-  const notebook = notebooks?.find(n => n.id === notebookId);
-
-  const handleGenerateConceptMap = () => {
-    if (!notebookId || !sources || sources.length === 0) return;
-    
-    const combinedContent = sources
-      .map(s => `${s.title}:\n${s.content || s.summary || ''}`)
-      .join('\n\n');
-    
-    generateMap({
-      content: combinedContent,
-      title: notebook?.title || 'Concept Map',
-      notebookId,
-    });
-  };
-
-  const handleCreateNote = () => {
-    setIsCreatingNote(true);
-    setEditingNote(null);
-  };
-
-  const handleEditNote = (note: Note) => {
-    console.log('StudioSidebar: Opening note', {
-      noteId: note.id,
-      sourceType: note.source_type
-    });
-    setEditingNote(note);
-    setIsCreatingNote(false);
-  };
-
-  const handleSaveNote = (title: string, content: string) => {
-    if (editingNote) {
-      // Only allow updating user notes, not AI responses
-      if (editingNote.source_type === 'user') {
-        updateNote({
-          id: editingNote.id,
-          title,
-          content
-        });
-      }
-    } else {
-      createNote({
-        title,
-        content,
-        source_type: 'user'
-      });
-    }
-    setEditingNote(null);
-    setIsCreatingNote(false);
-  };
-
-  const handleDeleteNote = () => {
-    if (editingNote) {
-      deleteNote(editingNote.id);
-      setEditingNote(null);
-    }
-  };
-
-  const handleCancel = () => {
-    setEditingNote(null);
-    setIsCreatingNote(false);
-  };
-
-  const handleStartQuiz = (config: QuizConfig) => {
-    if (!sources || sources.length === 0) return;
-    
-    generateQuiz({
-      sources,
-      numQuestions: config.numQuestions,
-      difficulty: config.difficulty,
-      questionType: config.questionType,
-      model: config.model,
-    });
-  };
-
-  const handleQuizComplete = () => {
-    completeQuiz();
-    setShowQuizResults(true);
-  };
-
-  const handleQuizRetry = () => {
-    setShowQuizResults(false);
-    retryQuiz();
-  };
-
-  const handleQuizClose = () => {
-    setShowQuizResults(false);
-    resetQuiz();
-  };
-
-  const isEditingMode = editingNote || isCreatingNote;
-  const isQuizActive = currentSession && !currentSession.isComplete;
-  const isQuizCompleted = currentSession && currentSession.isComplete;
-  const getPreviewText = (note: Note) => {
-    if (note.source_type === 'ai_response') {
-      // Use extracted_text if available, otherwise parse the content
-      if (note.extracted_text) {
-        return note.extracted_text;
-      }
-      try {
-        const parsed = JSON.parse(note.content);
-        if (parsed.segments && parsed.segments[0]) {
-          return parsed.segments[0].text;
-        }
-      } catch (e) {
-        // If parsing fails, use content as-is
-      }
-    }
-
-    // For user notes or fallback, use the content directly
-    const contentToUse = note.content;
-    return contentToUse.length > 100 ? contentToUse.substring(0, 100) + '...' : contentToUse;
-  };
+    handleGenerateConceptMap, handleCreateNote, handleEditNote, handleSaveNote, handleDeleteNote, handleCancel,
+    handleStartQuiz, handleQuizComplete, handleQuizRetry, handleQuizClose,
+    answerQuestion, nextQuestion, getPreviewText, getCurrentQuestion, getProgress, deleteMap
+  } = handlers;
 
   if (isEditingMode) {
     return <div className="w-full bg-gray-50 border-l border-gray-200 flex flex-col h-full overflow-hidden">
@@ -414,8 +271,9 @@ const StudioSidebar = ({
                     <div className="flex-1 min-w-0">
                       <div className="flex items-center space-x-2 mb-1">
                         {note.source_type === 'ai_response' ? <i className="fi fi-rr-robot text-blue-600"></i> : <i className="fi fi-rr-user text-muted-foreground"></i>}
-                        <span className="text-xs text-muted-foreground uppercase">
-                          {note.source_type === 'ai_response' ? 'AI Response' : 'Note'}
+                        <span className="text-xs text-muted-foreground uppercase flex items-center gap-1">
+                          {note.source_type === 'ai_response' ? 'AI Response' : (note.author_name || 'Note')}
+                          {note.author_id && note.author_id !== currentUserId && <span className="text-[10px] bg-blue-100 text-blue-700 px-1 rounded">Agent</span>}
                         </span>
                       </div>
                       <h4 className="font-medium text-foreground truncate">{note.title}</h4>

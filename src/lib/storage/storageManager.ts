@@ -1,4 +1,3 @@
-console.log("DEBUG: storageManager.ts executing");
 /**
  * Storage Manager - Handles localStorage size management, compression, and cleanup
  */

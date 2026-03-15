@@ -3,6 +3,8 @@ export interface MessageSegment {
   citation_id?: number;
 }
 
+export type ChatRole = "system" | "user" | "assistant";
+
 export interface Citation {
   // citation ids can come from external systems — allow string or number
   citation_id: number | string;

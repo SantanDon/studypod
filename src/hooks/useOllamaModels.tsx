@@ -159,10 +159,15 @@ export function useOllamaModels() {
   } = useQuery({
     queryKey: ["ollama-model-details"],
     queryFn: async (): Promise<ModelInfo[]> => {
-      const response = await fetch(`${OLLAMA_BASE_URL}/api/tags`);
-      if (!response.ok) throw new Error("Failed to fetch model details");
-      const data = await response.json();
-      return data.models || [];
+      if (!isHealthy) return [];
+      try {
+        const response = await fetch(`${OLLAMA_BASE_URL}/api/tags`);
+        if (!response.ok) throw new Error("Failed to fetch model details");
+        const data = await response.json();
+        return data.models || [];
+      } catch (err) {
+        return [];
+      }
     },
     enabled: isHealthy,
     staleTime: 30000,
@@ -172,7 +177,9 @@ export function useOllamaModels() {
     try {
       const stored = localStorage.getItem(DEFAULTS_STORAGE_KEY);
       if (stored) return JSON.parse(stored);
-    } catch {}
+    } catch {
+      // Ignore errors when loading stored defaults
+    }
     return {
       chat: "llama3.2:1b",
       embedding: "nomic-embed-text",

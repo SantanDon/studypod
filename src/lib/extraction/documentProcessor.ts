@@ -4,7 +4,20 @@
  * Uses advanced chunking strategies based on document type
  */
 
-import { generateEmbeddings } from "../ai/ollamaService";
+import { generateEmbeddings as ollamaGenerateEmbeddings } from "../ai/ollamaService";
+import { isOllamaEnabled } from "@/config/ollamaConfig";
+import { generateVoyageEmbeddings } from "../ai/cloudClient";
+
+/**
+ * Route embeddings to the correct provider based on config.
+ * Uses Voyage AI when Ollama is disabled; falls back to empty [] if no key.
+ */
+async function generateEmbeddings(text: string): Promise<number[]> {
+  if (!isOllamaEnabled()) {
+    return await generateVoyageEmbeddings(text.substring(0, 1000));
+  }
+  return await ollamaGenerateEmbeddings(text);
+}
 import {
   chunkDocument,
   Chunk,
@@ -90,7 +103,6 @@ export async function processDocument(
     autoDetectType = true
   } = options;
 
-  console.log(`⚡ Processing document: ${sourceId}`);
 
   // Step 1: Chunk the document using the new chunking strategy
   const chunkingResult = chunkDocument(content, {
@@ -103,17 +115,12 @@ export async function processDocument(
   });
 
   const stats = getChunkStats(chunkingResult.chunks);
-  console.log(
-    `📦 Created ${stats.count} chunks using ${chunkingResult.method} method ` +
-    `(avg ${stats.avgLength} chars, type: ${chunkingResult.documentType})`
-  );
 
   // Step 2: Convert to DocumentChunk format with metadata
   const chunks = convertToDocumentChunks(chunkingResult.chunks, sourceId);
 
   // Step 3: Generate embeddings with optimized parallel processing (if enabled)
   if (shouldGenerateEmbeddings && chunks.length > 0) {
-    console.log(`🧠 Generating embeddings for ${chunks.length} chunks...`);
 
     try {
       // Limit chunks to process - too many chunks slow down chat
@@ -148,9 +155,6 @@ export async function processDocument(
       }
 
       const chunksWithEmbeddings = chunks.filter((c) => c.embedding).length;
-      console.log(
-        `✅ Generated ${chunksWithEmbeddings}/${chunks.length} embeddings`,
-      );
     } catch (error) {
       console.error("❌ Embedding generation failed:", error);
     }
@@ -163,7 +167,6 @@ export async function processDocument(
       // Use first 800 chars for document-level embedding
       const sampleText = content.substring(0, 800);
       documentEmbedding = await generateEmbeddings(sampleText);
-      console.log(`✅ Generated document-level embedding`);
     } catch (error) {
       console.warn("⚠️ Failed to generate document embedding");
     }
@@ -188,18 +191,12 @@ export async function processDocuments(
 ): Promise<ProcessedDocument[]> {
   const { maxParallel = 2 } = options as { maxParallel?: number } || {};
 
-  console.log(
-    `⚡ Processing ${documents.length} documents (max ${maxParallel} parallel)`,
-  );
 
   const results: ProcessedDocument[] = [];
 
   // Process sequentially for better performance with Ollama
   for (let i = 0; i < documents.length; i++) {
     const doc = documents[i];
-    console.log(
-      `📊 Processing document ${i + 1}/${documents.length}: ${doc.sourceId}`,
-    );
 
     try {
       const result = await processDocument(doc.sourceId, doc.content, {
@@ -212,7 +209,6 @@ export async function processDocuments(
     }
   }
 
-  console.log(`✅ Processed ${results.length}/${documents.length} documents`);
 
   return results;
 }
@@ -225,7 +221,6 @@ export async function searchDocumentChunks(
   chunks: DocumentChunk[],
   limit: number = 5,
 ): Promise<Array<DocumentChunk & { score: number }>> {
-  console.log(`🔍 Searching ${chunks.length} chunks for: "${query}"`);
 
   try {
     // Generate query embedding
@@ -241,12 +236,6 @@ export async function searchDocumentChunks(
       .sort((a, b) => b.score - a.score)
       .slice(0, limit);
 
-    console.log(`✅ Found ${scoredChunks.length} relevant chunks`);
-    scoredChunks.forEach((chunk, i) => {
-      console.log(
-        `  ${i + 1}. Chunk ${chunk.index}: score ${chunk.score.toFixed(3)}`,
-      );
-    });
 
     return scoredChunks;
   } catch (error) {

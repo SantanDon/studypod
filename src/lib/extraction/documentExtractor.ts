@@ -19,6 +19,8 @@ export interface ExtractionResult {
     charCount: number;
     extractionMethod: string;
     language?: string;
+    lineCount?: number;
+    paragraphCount?: number;
   };
   chunks?: string[];
 }
@@ -166,6 +168,7 @@ function processTextContent(content: string): string {
   let processed = content;
 
   // Remove control characters that are not line breaks, tabs, or other common whitespace
+  // eslint-disable-next-line no-control-regex
   processed = processed.replace(/[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]/g, '');
 
   // Normalize line endings
@@ -199,7 +202,7 @@ function processTextContent(content: string): string {
     .replace(/[–—]/g, '-');
 
   // Remove excessive punctuation or special character sequences that might indicate low-quality content
-  processed = processed.replace(/[!@#$%^&*()_+=\[\]{}|\\:";?/<>]{10,}/g, '');
+  processed = processed.replace(/[!@#$%^&*()_+=[\]{}|\\:";?/<>]{10,}/g, '');
 
   // Clean up multiple consecutive hyphens or special characters
   processed = processed.replace(/[-_]{3,}/g, '');

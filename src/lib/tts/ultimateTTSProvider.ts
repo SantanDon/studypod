@@ -53,7 +53,6 @@ export class UltimateTTSProvider implements TTSProvider {
             signal: AbortSignal.timeout(3000),
           });
           if (response.ok) {
-            console.log('✅ Ultimate TTS Studio available at:', this.endpoint);
             return true;
           }
         } catch {
@@ -61,10 +60,10 @@ export class UltimateTTSProvider implements TTSProvider {
         }
       }
       
-      console.log('❌ Ultimate TTS Studio not available at:', this.endpoint);
+
       return false;
     } catch (error) {
-      console.log('❌ Ultimate TTS Studio connection failed:', error);
+
       return false;
     }
   }

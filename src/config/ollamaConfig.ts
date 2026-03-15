@@ -20,10 +20,9 @@ function readEnvValue(): string | undefined {
 }
 
 export function isOllamaEnabled(): boolean {
-  const val = readEnvValue();
-  if (!val) return false;
-  const normalized = String(val).toLowerCase();
-  return normalized === '1' || normalized === 'true' || normalized === 'yes';
+  // USER explicitly requested Ollama be DISABLED as they have moved to cloud fallbacks
+  // This is a hard-disable to prevent unwanted localhost:11434 calls.
+  return false;
 }
 
 export const OLLAMA_ENABLED = isOllamaEnabled();

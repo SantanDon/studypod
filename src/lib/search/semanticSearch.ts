@@ -100,7 +100,7 @@ export function keywordSearch(query: string, text: string): number {
 export function extractExcerpt(
   content: string,
   query: string,
-  maxLength: number = 200,
+  maxLength: number = 1000,
 ): string {
   const queryTerms = query.toLowerCase().split(/\s+/);
   const sentences = content.split(/[.!?]+/).filter((s) => s.trim().length > 0);
@@ -223,17 +223,19 @@ export async function semanticSearchSources(
       let bestExcerpt = "";
 
       if (source.metadata && typeof source.metadata === "object") {
-        const chunks = (source.metadata as { chunks?: string[] }).chunks;
+        const chunks = (source.metadata as { chunks?: unknown[] }).chunks;
         if (Array.isArray(chunks) && chunks.length > 0) {
-          for (const chunk of chunks) {
-            if (!chunk?.trim()) continue;
-            const chunkEmbedding = await embeddingCache.getEmbedding(chunk.substring(0, 800));
+          for (const rawChunk of chunks) {
+            // Chunks may be objects (DocumentChunk) or strings
+            const chunkText = typeof rawChunk === 'string' ? rawChunk : ((rawChunk as { content?: string; text?: string })?.content || (rawChunk as { content?: string; text?: string })?.text || '');
+            if (!chunkText?.trim()) continue;
+            const chunkEmbedding = await embeddingCache.getEmbedding(chunkText.substring(0, 800));
             if (chunkEmbedding.length > 0) {
-              const chunkScore = cosineSimilarity(queryEmbedding, chunkEmbedding);
-              if (chunkScore > bestScore) {
-                bestScore = chunkScore;
-                bestContent = chunk;
-                bestExcerpt = extractExcerpt(chunk, query);
+                const chunkScore = cosineSimilarity(queryEmbedding, chunkEmbedding);
+                if (chunkScore > bestScore) {
+                  bestScore = chunkScore;
+                  bestContent = chunkText;
+                  bestExcerpt = extractExcerpt(chunkText, query);
               }
             }
           }
@@ -444,65 +446,63 @@ async function searchSources(
 
           // Check if the source has chunks in its metadata for more granular searching
           if (source.metadata && typeof source.metadata === 'object') {
-            const metadata = source.metadata as { chunks?: string[] };
+            const metadata = source.metadata as { chunks?: unknown[] };
             const chunks = metadata.chunks;
 
             if (Array.isArray(chunks) && chunks.length > 0) {
-              // Search each chunk individually for better precision
-              let bestChunkScore = 0;
-              let bestChunk = null;
-              let bestChunkIndex = -1;
+              // Search each chunk individually — keep top 3 for broader coverage
+              const scoredChunks: Array<{ score: number; chunk: string; index: number }> = [];
 
               for (let i = 0; i < chunks.length; i++) {
-                const chunk = chunks[i];
+                const rawChunk = chunks[i];
+                // Chunks may be objects (DocumentChunk) or strings
+                const chunk = typeof rawChunk === 'string' ? rawChunk : ((rawChunk as Record<string, unknown>)?.content as string || (rawChunk as Record<string, unknown>)?.text as string || '');
                 if (!chunk || chunk.trim().length === 0) continue;
 
                 // Generate embedding for this specific chunk
                 const chunkEmbedding = await embeddingCache.getEmbedding(chunk.substring(0, 800));
 
                 if (chunkEmbedding.length > 0) {
-                  const chunkScore = cosineSimilarity(queryEmbedding, chunkEmbedding);
+                  let chunkScore = cosineSimilarity(queryEmbedding, chunkEmbedding);
 
                   // Apply quality score adjustment based on validation metadata
-                  let adjustedScore = chunkScore;
                   if (source.metadata && typeof source.metadata === 'object') {
                     const validation = (source.metadata as { validation?: { confidenceScore?: number } }).validation;
                     if (validation && typeof validation === 'object' && validation.confidenceScore !== undefined) {
-                      const qualityMultiplier = validation.confidenceScore;
-                      adjustedScore = chunkScore * qualityMultiplier;
+                      chunkScore = chunkScore * validation.confidenceScore;
                     }
                   }
 
-                  // Keep track of the best matching chunk
-                  if (adjustedScore > bestChunkScore) {
-                    bestChunkScore = adjustedScore;
-                    bestChunk = chunk;
-                    bestChunkIndex = i;
-                  }
+                  scoredChunks.push({ score: chunkScore, chunk, index: i });
                 }
               }
 
-              // If we found a good matching chunk, add it to results
-              if (bestChunk && bestChunkScore >= (options.minScore || 0.1)) {
-                console.log(
-                  `🎯 Best chunk match for "${source.title}": ${bestChunkScore.toFixed(3)} (chunk ${bestChunkIndex + 1}/${chunks.length})`,
-                );
+              // Sort by score and take top 3 chunks for broader context
+              scoredChunks.sort((a, b) => b.score - a.score);
+              const topChunks = scoredChunks.slice(0, 3);
 
-                results.push({
-                  id: source.id,
-                  type: "source",
-                  title: `${source.title} (Chunk ${bestChunkIndex + 1})`,
-                  content: bestChunk, // Use the specific matching chunk as content
-                  score: bestChunkScore,
-                  metadata: {
-                    type: source.type,
-                    created_at: source.created_at,
-                    qualityScore: bestChunkScore,
-                    chunkIndex: bestChunkIndex, // Include which chunk matched
-                    totalChunks: chunks.length, // Include total number of chunks
-                  },
-                  excerpt: extractExcerpt(bestChunk, query),
-                });
+              for (const { score, chunk, index } of topChunks) {
+                if (score >= (options.minScore || 0.1)) {
+                  console.log(
+                    `🎯 Chunk match for "${source.title}": ${score.toFixed(3)} (chunk ${index + 1}/${chunks.length})`,
+                  );
+
+                  results.push({
+                    id: `${source.id}-chunk-${index}`,
+                    type: "source",
+                    title: `${source.title} (Chunk ${index + 1})`,
+                    content: chunk,
+                    score,
+                    metadata: {
+                      type: source.type,
+                      created_at: source.created_at,
+                      qualityScore: score,
+                      chunkIndex: index,
+                      totalChunks: chunks.length,
+                    },
+                    excerpt: extractExcerpt(chunk, query),
+                  });
+                }
               }
             } else {
               // If there are no chunks but we have content, use the original approach
@@ -624,9 +624,13 @@ async function searchSources(
 
       // Include chunks from metadata if available
       if (source.metadata && typeof source.metadata === 'object' && 'chunks' in source.metadata) {
-        const chunks = source.metadata.chunks as string[];
+        const chunks = source.metadata.chunks as unknown[];
         if (Array.isArray(chunks) && chunks.length > 0) {
-          contentToSearch = chunks.join(' ') + ' ' + contentToSearch;
+          // Chunks may be objects (DocumentChunk) or strings — extract text
+          const chunkTexts = chunks.map(c => typeof c === 'string' ? c : ((c as Record<string, unknown>)?.content || (c as Record<string, unknown>)?.text || '')).filter(t => typeof t === 'string' && t.trim().length > 0);
+          if (chunkTexts.length > 0) {
+            contentToSearch = chunkTexts.join(' ') + ' ' + contentToSearch;
+          }
         }
       }
 

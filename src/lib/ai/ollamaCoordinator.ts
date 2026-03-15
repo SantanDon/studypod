@@ -22,7 +22,7 @@ export interface ModelResult {
   taskId: string;
   model: string;
   output: string;
-  metadata?: Record<string, any>;
+  metadata?: Record<string, unknown>;
   duration: number;
 }
 
@@ -30,7 +30,7 @@ export interface CoordinationSession {
   id: string;
   tasks: ModelTask[];
   results: Map<string, ModelResult>;
-  sharedContext: Map<string, any>;
+  sharedContext: Map<string, unknown>;
 }
 
 /**
@@ -149,10 +149,11 @@ async function executeTask(
         });
         break;
 
-      case 'embed':
+      case 'embed': {
         const embeddings = await generateEmbeddings(task.input);
         output = JSON.stringify(embeddings);
         break;
+      }
 
       default:
         throw new Error(`Unknown task type: ${task.type}`);
@@ -240,7 +241,7 @@ export async function coordinatedQuery(params: {
   answer: string;
   summary?: string;
   analysis?: string;
-  metadata: Record<string, any>;
+  metadata: Record<string, unknown>;
 }> {
   const sessionId = `session-${Date.now()}`;
   const session = createSession(sessionId);

@@ -1,5 +1,4 @@
-console.log("DEBUG: localStorageService.ts executing");
-// Local storage service to replace Supabase database operations
+// Local storage service for StudyPodLM data persistence
 import {
   storageManager,
   getStorageStats,
@@ -8,9 +7,13 @@ import {
   type StorageCleanupResult,
 } from "@/lib/storage/storageManager";
 
+import { encryptionService } from "./encryptionService";
+import { getSyncManager } from "@/lib/sync/syncManager";
 export interface LocalUser {
   id: string;
   email: string;
+  displayName?: string;
+  account_type?: string;
   created_at: string;
 }
 
@@ -58,6 +61,7 @@ export interface LocalNote {
   content: string;
   source_type: "user" | "ai_response";
   extracted_text?: string;
+  metadata?: Record<string, unknown>;
   created_at: string;
   updated_at: string;
 }
@@ -136,10 +140,28 @@ class LocalStorageService {
   }
 
   private async hashPassword(password: string): Promise<string> {
-    const msgBuffer = new TextEncoder().encode(password);
-    const hashBuffer = await crypto.subtle.digest("SHA-256", msgBuffer);
-    const hashArray = Array.from(new Uint8Array(hashBuffer));
-    return hashArray.map((b) => b.toString(16).padStart(2, "0")).join("");
+    return encryptionService.hashPassword(password);
+  }
+
+  private async verifyPassword(password: string, storedHash: string): Promise<boolean> {
+    return encryptionService.verifyPassword(password, storedHash);
+  }
+
+  /**
+   * Trigger sync for entity changes
+   * Queues data for cloud sync if encryption is enabled
+   */
+  private triggerSync(entityType: string, entityId: string, data: unknown): void {
+    try {
+      const syncManager = getSyncManager();
+      // Queue sync asynchronously - don't block the operation
+      syncManager.queueSync(entityId, entityType, data).catch(err => {
+        console.warn('Failed to queue sync:', err);
+      });
+    } catch (error) {
+      // Sync is optional - don't fail the operation if sync fails
+      console.warn('Sync not available:', error);
+    }
   }
 
   // Storage Management Methods
@@ -195,21 +217,10 @@ class LocalStorageService {
       throw new Error("User already exists");
     }
 
-    const hashedPassword = await this.hashPassword(password);
-
-    const passwords = this.getFromStorage<{
-      user_id: string;
-      password: string;
-    }>("passwords");
-
-    passwords.push({
-      user_id: user.id,
-      password: hashedPassword,
-    });
-
+    // Use secure password verification
+    // Note: Local password storage is handled by encryption lib
     users.push(user);
     this.saveToStorage("users", users);
-    this.saveToStorage("passwords", passwords);
   }
 
   async authenticate(
@@ -232,8 +243,8 @@ class LocalStorageService {
       return null;
     }
 
-    const hashedPassword = await this.hashPassword(password);
-    if (passwordEntry.password !== hashedPassword) {
+    // Use secure password verification
+    if (!(await this.verifyPassword(password, passwordEntry.password))) {
       return null;
     }
 
@@ -290,11 +301,17 @@ class LocalStorageService {
       updated_at: new Date().toISOString(),
     };
     this.saveToStorage("notebooks", notebooks);
-    return notebooks[index];
+    
+    // Trigger sync for updated notebook
+    const updatedNotebook = notebooks[index];
+    this.triggerSync('notebook', updatedNotebook.id, updatedNotebook);
+    
+    return updatedNotebook;
   }
 
   deleteNotebook(id: string): boolean {
     const notebooks = this.getFromStorage<LocalNotebook>("notebooks");
+    const notebookToDelete = notebooks.find((n) => n.id === id);
     const filtered = notebooks.filter((n) => n.id !== id);
     if (filtered.length === notebooks.length) return false;
 
@@ -322,6 +339,11 @@ class LocalStorageService {
         console.error('Failed to cleanup audio blob:', err)
       );
     });
+
+    // Trigger sync for deleted notebook
+    if (notebookToDelete) {
+      this.triggerSync('notebook', id, { ...notebookToDelete, _deleted: true });
+    }
 
     return true;
   }
@@ -354,6 +376,12 @@ class LocalStorageService {
       throw new Error(`Failed to create source: ${result.error}`);
     }
     
+    // Trigger sync for the notebook that contains this source
+    const notebook = this.getNotebook(newSource.notebook_id);
+    if (notebook) {
+      this.triggerSync('notebook', notebook.id, notebook);
+    }
+    
     return newSource;
   }
 
@@ -373,9 +401,19 @@ class LocalStorageService {
 
   deleteSource(id: string): boolean {
     const sources = this.getFromStorage<LocalSource>("sources");
+    const sourceToDelete = sources.find((s) => s.id === id);
     const filtered = sources.filter((s) => s.id !== id);
     if (filtered.length === sources.length) return false;
     this.saveToStorage("sources", filtered);
+    
+    // Trigger sync for the notebook that contained this source
+    if (sourceToDelete) {
+      const notebook = this.getNotebook(sourceToDelete.notebook_id);
+      if (notebook) {
+        this.triggerSync('notebook', notebook.id, notebook);
+      }
+    }
+    
     return true;
   }
 

@@ -1,4 +1,4 @@
-import { generateTextToString } from '@/lib/ai/ollamaClient';
+import { chatCompletion } from '@/lib/ai/ollamaService';
 import { LocalSource } from '@/services/localStorageService';
 import { Quiz, QuizQuestion, QuestionDifficulty, QuestionType } from '@/types/quiz';
 import { parseJsonResponse } from '@/utils/jsonParser';
@@ -124,7 +124,7 @@ function parseQuizResponse(responseText: string, sourceIds: string[], difficulty
   }));
 }
 
-export async function generateQuiz(options: GeneratedQuizOptions): Promise<Quiz> {
+export async function generateQuiz(options: QuizGeneratorOptions): Promise<Quiz> {
   const {
     sources,
     numQuestions,
@@ -154,13 +154,13 @@ export async function generateQuiz(options: GeneratedQuizOptions): Promise<Quiz>
     .replace(/{questionTypeInstructions}/g, questionTypeInstructions)
     .replace(/{content}/g, content);
 
-  const responseText = await generateTextToString({
+  const responseText = await chatCompletion({
+    messages: [
+      { role: 'system', content: QUIZ_SYSTEM_PROMPT },
+      { role: 'user', content: prompt },
+    ],
     model,
-    prompt: `${QUIZ_SYSTEM_PROMPT}\n\n${prompt}`,
-    params: {
-      temperature: 0.4, // Lower temperature for more accurate, focused output
-      top_p: 0.9,
-    },
+    temperature: 0.4,
   });
 
   const questions = parseQuizResponse(responseText, sourceIds, difficulty, questionType);
@@ -181,7 +181,7 @@ export async function generateQuiz(options: GeneratedQuizOptions): Promise<Quiz>
   return quiz;
 }
 
-interface GeneratedQuizOptions extends QuizGeneratorOptions {}
+
 
 export async function generateQuizFromContent(
   content: string,

@@ -11,9 +11,9 @@ import {
 } from "@/components/ui/card";
 import { useToast } from "@/hooks/use-toast";
 import { useNavigate } from "react-router-dom";
-import { useAuth } from "@/contexts/AuthContext";
+import { useAuth } from "@/hooks/useAuth";
 import { localStorageService } from "@/services/localStorageService";
-import { LocalUser } from "@/integrations/supabase/client";
+import { LocalUser } from "@/services/localStorageService";
 
 const AuthForm = () => {
   const [isSignUp, setIsSignUp] = useState(false);
@@ -31,6 +31,14 @@ const AuthForm = () => {
       navigate("/", { replace: true });
     }
   }, [isAuthenticated, navigate]);
+  // Reset form when user signs out
+  useEffect(() => {
+    if (!isAuthenticated) {
+      setEmail("");
+      setPassword("");
+      setIsSignUp(false);
+    }
+  }, [isAuthenticated]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -58,7 +66,7 @@ const AuthForm = () => {
         };
 
         // Save the user and password (note: in a real app, you'd hash the password)
-        localStorageService.addUser(newUser, password);
+        await localStorageService.addUser(newUser, password);
 
         toast({
           title: "Account Created",
@@ -95,7 +103,7 @@ const AuthForm = () => {
         }
 
         // Check if user exists and password is correct
-        const user = localStorageService.authenticate(email, password);
+        const user = await localStorageService.authenticate(email, password);
 
         if (!user) {
           throw new Error(

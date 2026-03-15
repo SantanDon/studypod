@@ -1,33 +1,15 @@
 import React, {
-  createContext,
-  useContext,
   useEffect,
   useState,
   useCallback,
   ReactNode,
 } from "react";
-import { LocalUser, LocalSession } from "@/integrations/supabase/client";
+import { AuthContext, AuthContextType } from "./AuthContextInstance";
+import { LocalUser, LocalSession } from "@/services/localStorageService";
 import { localStorageService } from "@/services/localStorageService";
+import { useEncryptionStore } from "@/stores/encryptionStore";
+import { safeGetItem, safeParseJSON } from "@/lib/utils/contextUtils";
 
-interface AuthContextType {
-  user: LocalUser | null;
-  session: LocalSession | null;
-  loading: boolean;
-  error: string | null;
-  isAuthenticated: boolean;
-  signOut: () => Promise<void>;
-  signIn: (user: LocalUser, session: LocalSession) => void;
-}
-
-const AuthContext = createContext<AuthContextType | undefined>(undefined);
-
-export const useAuth = () => {
-  const context = useContext(AuthContext);
-  if (context === undefined) {
-    throw new Error("useAuth must be used within an AuthProvider");
-  }
-  return context;
-};
 
 interface AuthProviderProps {
   children: ReactNode;
@@ -43,13 +25,10 @@ export const AuthProvider = ({ children }: AuthProviderProps) => {
     (newUser: LocalUser | null, newSession: LocalSession | null) => {
       console.log(
         "AuthContext: Updating auth state:",
-        newUser?.email || "No user",
+        newUser?.email || newUser?.displayName || "No user",
       );
       setUser(newUser);
       setSession(newSession);
-
-      // Clear any previous errors on successful auth in a way that doesn't
-      // create a dependency on the `error` variable (so this callback stays stable).
       setError((prev) => (newUser && prev ? null : prev));
     },
     [],
@@ -66,17 +45,42 @@ export const AuthProvider = ({ children }: AuthProviderProps) => {
     console.log("AuthContext: Starting sign in process...", user.email);
 
     try {
-      // Store the session and user in localStorage
       localStorage.setItem("currentSession", JSON.stringify(session));
       localStorageService.setCurrentUser(user);
-
-      // Update internal state immediately
       updateAuthState(user, session);
-
       console.log("AuthContext: Sign in successful for", user.email);
     } catch (err) {
       console.error("AuthContext: Sign in error:", err);
       setError(err instanceof Error ? err.message : "Sign in error");
+    }
+  };
+
+  const signInWithCloud = (userData: { id: string; email?: string; displayName?: string; account_type?: string; createdAt: string }, sessionData: { accessToken: string; refreshToken: string }) => {
+    console.log("AuthContext: Cloud sign in successful", userData.displayName);
+    const { setUnlockedOnly } = useEncryptionStore.getState();
+    try {
+      const mappedUser: LocalUser = {
+        id: userData.id,
+        email: userData.email || `${userData.displayName}@agent.local`,
+        displayName: userData.displayName,
+        account_type: userData.account_type,
+        created_at: userData.createdAt
+      };
+
+      const mappedSession: LocalSession = {
+        access_token: sessionData.accessToken,
+        refresh_token: sessionData.refreshToken,
+        expires_at: Date.now() + 3600000, // 1 hour
+        user: mappedUser
+      };
+
+      localStorage.setItem("currentSession", JSON.stringify(mappedSession));
+      localStorageService.setCurrentUser(mappedUser);
+      setUnlockedOnly(userData.id);
+      updateAuthState(mappedUser, mappedSession);
+    } catch (err) {
+      console.error("AuthContext: Cloud sign in mapping error:", err);
+      setError("Cloud sign in failed");
     }
   };
 
@@ -118,11 +122,11 @@ export const AuthProvider = ({ children }: AuthProviderProps) => {
 
         // Get user from local storage
         const currentUser = localStorageService.getCurrentUser();
-        const sessionData = localStorage.getItem("currentSession");
+        const sessionData = safeGetItem("currentSession");
 
         if (currentUser && sessionData) {
           try {
-            const session = JSON.parse(sessionData);
+            const session = safeParseJSON<LocalSession>(sessionData);
             if (mounted) {
               console.log(
                 "AuthContext: Found existing session:",
@@ -171,6 +175,7 @@ export const AuthProvider = ({ children }: AuthProviderProps) => {
     isAuthenticated: !!user && !!session,
     signOut,
     signIn,
+    signInWithCloud,
   };
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;

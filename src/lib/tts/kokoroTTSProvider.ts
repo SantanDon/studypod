@@ -49,15 +49,22 @@ export const DEFAULT_HOST2_VOICE: KokoroVoiceId = 'af_bella';   // Sarah - frien
 export const HOST_VOICE_MAP: Record<string, KokoroVoiceId> = {
   'Alex': 'am_michael',
   'Sarah': 'af_bella',
-  'Host 1': 'am_michael',
   'Host 2': 'af_bella',
 };
 
-let kokoroInstance: any = null;
-let isLoading = false;
-let loadPromise: Promise<any> | null = null;
+interface KokoroTtsInstance {
+  generate(text: string, options: { voice: KokoroVoiceId; speed: number }): Promise<{
+    toBlob(): Blob; // Return Blob directly
+    duration?: number;
+  }>;
+  list_voices?(): void | unknown[];
+}
 
-async function loadKokoro(): Promise<any> {
+let kokoroInstance: KokoroTtsInstance | null = null;
+let isLoading = false;
+let loadPromise: Promise<KokoroTtsInstance> | null = null;
+
+async function loadKokoro(): Promise<KokoroTtsInstance> {
   if (kokoroInstance) return kokoroInstance;
   if (loadPromise) return loadPromise;
 

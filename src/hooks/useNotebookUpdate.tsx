@@ -1,8 +1,10 @@
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { localStorageService } from "@/services/localStorageService";
+import { useSyncTrigger } from "@/hooks/useSyncTrigger";
 
 export const useNotebookUpdate = () => {
   const queryClient = useQueryClient();
+  const { triggerSync } = useSyncTrigger();
 
   const updateNotebook = useMutation({
     mutationFn: async ({
@@ -29,6 +31,13 @@ export const useNotebookUpdate = () => {
       console.log("Mutation success, invalidating queries");
       queryClient.invalidateQueries({ queryKey: ["notebook", data.id] });
       queryClient.invalidateQueries({ queryKey: ["notebooks"] });
+      
+      // Trigger background sync
+      if (data) {
+        triggerSync('notebook', data.id, data, 'update').catch(err => {
+          console.error("Failed to trigger sync after update:", err);
+        });
+      }
     },
     onError: (error) => {
       console.error("Mutation error:", error);

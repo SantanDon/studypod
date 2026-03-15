@@ -182,7 +182,7 @@ function checkContentQuality(content: string, fileName: string): string[] {
   }
 
   // Check if content appears to be primarily non-text
-  const nonTextRegex = /[^a-zA-Z0-9\s.,;:!?'"()[\]{}\-_+=|\\\/@#$%^&*~`<>\n\r\t]/g;
+  const nonTextRegex = /[^a-zA-Z0-9\s.,;:!?'"()[\]{}\-_+=|\\/@#$%^&*~`<>\n\r\t]/g;
   const nonTextChars = content.match(nonTextRegex) || [];
   const nonTextRatio = nonTextChars.length / Math.max(1, content.length);
 
@@ -213,7 +213,8 @@ function checkContentQuality(content: string, fileName: string): string[] {
   }
 
   // Check for potential binary content by checking for null bytes or control characters
-  const binaryChars = content.match(/[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]/g) || [];
+  // eslint-disable-next-line no-control-regex
+  const binaryChars = content.match(/[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F]/g) || [];
   if (binaryChars.length > 0) {
     issues.push("Document contains binary or control characters");
   }

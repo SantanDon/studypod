@@ -7,6 +7,7 @@ import { ScrollArea } from '@/components/ui/scroll-area';
 import { Carousel, CarouselContent, CarouselItem, CarouselNext, CarouselPrevious } from '@/components/ui/carousel';
 import { useChatMessages } from '@/hooks/useChatMessages';
 import { useSources } from '@/hooks/useSources';
+import { useGuest, useNotebookLimits } from '@/hooks/useGuest';
 import MarkdownRenderer from '@/components/chat/MarkdownRenderer';
 import SaveToNoteButton from './SaveToNoteButton';
 import AddSourcesDialog from './AddSourcesDialog';
@@ -37,6 +38,9 @@ const ChatArea = ({
   const [showAiLoading, setShowAiLoading] = useState(false);
   const [clickedQuestions, setClickedQuestions] = useState<Set<string>>(new Set());
   const [showAddSourcesDialog, setShowAddSourcesDialog] = useState(false);
+  
+  const { isGuest, incrementUsage, showAuthPrompt } = useGuest();
+  const { canSendMessage, messagesRemaining } = useNotebookLimits(notebookId);
   
   const isGenerating = notebook?.generation_status === 'generating' || notebook?.generation_status === 'processing';
   
@@ -95,6 +99,12 @@ const ChatArea = ({
   const handleSendMessage = async (messageText?: string) => {
     const textToSend = messageText || message.trim();
     if (textToSend && notebookId) {
+      // Check guest message limit
+      if (isGuest && !canSendMessage) {
+        showAuthPrompt('send more messages');
+        return;
+      }
+
       console.log('📤 Sending message:', textToSend);
 
       try {
@@ -111,6 +121,11 @@ const ChatArea = ({
           role: 'user',
           content: textToSend
         });
+
+        // Track guest usage
+        if (isGuest) {
+          incrementUsage('messages', notebookId);
+        }
 
         console.log('✅ Message sent successfully');
 
@@ -174,6 +189,10 @@ const ChatArea = ({
       } else {
         return "Please wait while your sources are being processed...";
       }
+    }
+    // Show remaining messages for guests
+    if (isGuest) {
+      return `Start typing... (${messagesRemaining} messages remaining)`;
     }
     return "Start typing...";
   };
@@ -316,7 +335,7 @@ const ChatArea = ({
       
       {/* Footer */}
       <div className="p-4 border-t border-border flex-shrink-0 bg-background">
-        <p className="text-center text-sm text-muted-foreground">StudyLM can be inaccurate; please double-check its responses.</p>
+        <p className="text-center text-sm text-muted-foreground">StudyPodLM can be inaccurate; please double-check its responses.</p>
       </div>
       
       {/* Add Sources Dialog */}

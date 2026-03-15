@@ -1,45 +1,32 @@
-// Vercel Serverless Function for proxying web requests (CORS bypass)
+export default async function (req, res) {
+  res.setHeader('Access-Control-Allow-Origin', '*');
+  res.setHeader('Access-Control-Allow-Methods', 'GET, OPTIONS');
+  res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
 
-export default async function handler(req, res) {
-  // Handle CORS preflight
-  if (req.method === 'OPTIONS') {
-    res.setHeader('Access-Control-Allow-Origin', '*');
-    res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
-    res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
-    return res.status(204).end();
-  }
+  if (req.method === 'OPTIONS') return res.status(204).end();
 
-  const targetUrl = req.query.url;
-
-  if (!targetUrl) {
-    return res.status(400).json({ error: 'Missing "url" query parameter' });
-  }
-
-  console.log(`[Proxy] Fetching: ${targetUrl}`);
+  const { url } = req.query;
+  if (!url) return res.status(400).json({ error: 'Missing url param' });
 
   try {
-    const response = await fetch(targetUrl, {
-      method: 'GET',
+    const pageResponse = await fetch(url, {
       headers: {
         'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
-        'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
-      },
-      redirect: 'follow',
+        'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8'
+      }
     });
 
-    if (!response.ok) {
-      return res.status(response.status).json({ error: `HTTP ${response.status}` });
+    const htmlText = await pageResponse.text();
+
+    const contentType = pageResponse.headers.get('content-type');
+    if (contentType) {
+        res.setHeader('Content-Type', contentType);
+    } else {
+        res.setHeader('Content-Type', 'text/html');
     }
 
-    const contentType = response.headers.get('content-type') || 'text/html';
-    const body = await response.text();
-
-    res.setHeader('Access-Control-Allow-Origin', '*');
-    res.setHeader('Content-Type', contentType);
-    return res.status(200).send(body);
-
+    return res.status(pageResponse.status || 200).send(htmlText);
   } catch (error) {
-    res.setHeader('Access-Control-Allow-Origin', '*');
-    return res.status(500).json({ error: `Proxy error: ${error.message}` });
+     return res.status(500).json({ error: error.message || 'Proxy request failed' });
   }
-}
+};

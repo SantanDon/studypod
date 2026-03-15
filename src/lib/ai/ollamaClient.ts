@@ -19,6 +19,8 @@
  */
 
 
+import { TIMEOUTS } from "@/lib/constants";
+
 interface OllamaModel {
   name: string;
   [key: string]: unknown;
@@ -40,7 +42,7 @@ const FALLBACK_BASE = "http://localhost:11434";
 function getBaseUrl(): string {
   // Prefer Vite-style import.meta.env at runtime in ESM contexts (browsers/Vite dev)
   const viteEnv =
-    typeof import.meta !== "undefined" ? (import.meta as unknown as Record<string, any>).env : undefined;
+    typeof import.meta !== "undefined" ? (import.meta as unknown as Record<string, unknown>).env as Record<string, string> : undefined;
   const viteBase = viteEnv?.VITE_OLLAMA_BASE_URL || viteEnv?.VITE_OLLAMA_BASE;
   const nodeEnv =
     typeof process !== "undefined"
@@ -54,7 +56,7 @@ function getBaseUrl(): string {
  */
 function getApiKey(): Nullable<string> {
   const viteEnv =
-    typeof import.meta !== "undefined" ? (import.meta as unknown as Record<string, any>).env : undefined;
+    typeof import.meta !== "undefined" ? (import.meta as unknown as Record<string, unknown>).env as Record<string, string> : undefined;
   return (
     viteEnv?.VITE_OLLAMA_API_KEY ||
     (typeof process !== "undefined"
@@ -70,7 +72,7 @@ function getApiKey(): Nullable<string> {
 async function fetchWithTimeout(
   input: RequestInfo,
   init: RequestInit = {},
-  timeoutMs = 120000, // Increased to 2 minutes for longer generations
+  timeoutMs: number = TIMEOUTS.OLLAMA_API_DEFAULT, // Increased to 2 minutes for longer generations
 ): Promise<Response> {
   const controller =
     typeof AbortController !== "undefined" ? new AbortController() : null;
@@ -119,17 +121,17 @@ async function parseModelsResponse(res: Response): Promise<string[]> {
         typeof json === "object" && 
         json !== null && 
         'models' in json && 
-        Array.isArray((json as any).models)
+        Array.isArray((json as Record<string, unknown>).models)
       )
-        return (json as any).models.map(String);
+        return (json as Record<string, unknown[]>).models.map(String);
 
       if (
         typeof json === "object" && 
         json !== null && 
         'data' in json && 
-        Array.isArray((json as any).data)
+        Array.isArray((json as Record<string, unknown>).data)
       )
-        return (json as any).data.map(String);
+        return (json as Record<string, unknown[]>).data.map(String);
 
       // If an object map of modelName:version, pull keys or values
       if (typeof json === "object" && json !== null) {
@@ -167,7 +169,7 @@ async function parseModelsResponse(res: Response): Promise<string[]> {
  *
  * Tries multiple endpoints in order and returns the first successful model list.
  */
-export async function listModels(timeoutMs = 15000): Promise<string[]> {
+export async function listModels(timeoutMs: number = TIMEOUTS.OLLAMA_MODEL_LIST): Promise<string[]> {
   const base = getBaseUrl();
   const apiKey = getApiKey();
 
@@ -219,8 +221,7 @@ export interface GenerateOptions {
  */
 export interface GenerateResponse {
   // If the server returns a JSON object, it's assigned to `raw`.
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  raw?: any;
+  raw?: Record<string, unknown>;
   // If the server returned plain text (or the JSON contained a single response text),
   // the text ends up here for convenience.
   text?: string;
@@ -239,11 +240,11 @@ export async function generateText(
 ): Promise<GenerateResponse | Response> {
   const base = getBaseUrl();
   const apiKey = getApiKey();
-  const timeoutMs = typeof opts.timeoutMs === "number" ? opts.timeoutMs : 120000; // 2 minutes default
+  const timeoutMs = typeof opts.timeoutMs === "number" ? opts.timeoutMs : TIMEOUTS.OLLAMA_API_DEFAULT; // 2 minutes default
 
   // Try to get available models first
   try {
-    const models = await listModels(5000); // Quick check with 5s timeout
+    const models = await listModels(TIMEOUTS.OLLAMA_FAST_PING); // Quick check with 5s timeout
     if (!models.includes(opts.model)) {
       // Try to find a similar model (matching prefix before :)
       const prefix = opts.model.split(":")[0];
@@ -262,8 +263,7 @@ export async function generateText(
 
   const url = `${base.replace(/\/$/, "")}/api/generate`;
 
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const payload: any = {
+  const payload: Record<string, unknown> = {
     model: opts.model,
     prompt: opts.prompt,
     stream: !!opts.stream,
@@ -319,17 +319,14 @@ export async function generateText(
 
   if (ct.includes("application/json") || ct.includes("+json")) {
     try {
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
       out.raw = await res.json();
       // If the raw JSON contains a likely textual response, try to extract a friendly text field
       if (typeof out.raw === "object" && out.raw !== null) {
         // Common properties to look for
         const candidates = ["response", "text", "output", "result"];
         for (const c of candidates) {
-          // eslint-disable-next-line @typescript-eslint/no-explicit-any
-          if (c in out.raw && typeof (out.raw as any)[c] === "string") {
-            // eslint-disable-next-line @typescript-eslint/no-explicit-any
-            out.text = (out.raw as any)[c];
+          if (c in out.raw && typeof (out.raw as Record<string, unknown>)[c] === "string") {
+            out.text = (out.raw as Record<string, unknown>)[c] as string;
             break;
           }
         }

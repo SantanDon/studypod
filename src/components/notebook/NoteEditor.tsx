@@ -7,7 +7,6 @@ import { Note } from "@/hooks/useNotes";
 import MarkdownRenderer from "@/components/chat/MarkdownRenderer";
 import { Citation, MessageSegment } from "@/types/message";
 import { parseJsonResponse } from "@/utils/jsonParser";
-// Local implementation - no Supabase needed
 
 interface NoteEditorProps {
   note?: Note;

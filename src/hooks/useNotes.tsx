@@ -1,9 +1,9 @@
-import { useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { localStorageService, LocalNote } from "@/services/localStorageService";
-import { useAuth } from "@/contexts/AuthContext";
-
-export interface Note extends LocalNote {}
+import { localStorageService } from "@/services/localStorageService";
+import { useAuthState } from "@/hooks/useAuthState";
+import { useGuest } from "@/hooks/useGuest";
+import { useAuth } from "@/hooks/useAuth";
+import { ApiService } from "@/services/apiService";
 
 export interface Note {
   id: string;
@@ -11,22 +11,34 @@ export interface Note {
   title: string;
   content: string;
   source_type: "user" | "ai_response";
+  author_id?: string;
+  author_name?: string;
   extracted_text?: string;
   created_at: string;
   updated_at: string;
 }
 
 export const useNotes = (notebookId?: string) => {
-  const { user } = useAuth();
+  const { user } = useAuthState();
+  const { session } = useAuth();
+  const { guestId } = useGuest();
+  const effectiveUserId = user?.id || guestId;
   const queryClient = useQueryClient();
 
   const { data: notes, isLoading } = useQuery({
-    queryKey: ["notes", notebookId],
+    queryKey: ["notes", notebookId, !!session?.access_token],
     queryFn: async () => {
       if (!notebookId) return [];
 
-      // Get notes from local storage
-      const notes = await localStorageService.getNotes(notebookId);
+      let notes: Note[];
+      
+      if (session?.access_token) {
+        console.log("useNotes: Fetching from cloud...");
+        notes = await ApiService.fetchNotes(notebookId, session.access_token);
+      } else {
+        console.log("useNotes: Fetching from local storage...");
+        notes = await localStorageService.getNotes(notebookId) as Note[];
+      }
 
       // Sort by updated date (newest first)
       return notes.sort(
@@ -34,7 +46,7 @@ export const useNotes = (notebookId?: string) => {
           new Date(b.updated_at).getTime() - new Date(a.updated_at).getTime(),
       );
     },
-    enabled: !!notebookId && !!user,
+    enabled: !!notebookId && !!effectiveUserId,
   });
 
   const createNoteMutation = useMutation({
@@ -102,8 +114,34 @@ export const useNotes = (notebookId?: string) => {
       if (!deleteSuccess) {
         throw new Error("Note not found");
       }
+      
+      return { id, notebookId };
     },
-    onSuccess: () => {
+    onMutate: async (noteId) => {
+      // Cancel any outgoing refetches
+      await queryClient.cancelQueries({ queryKey: ["notes", notebookId] });
+
+      // Snapshot the previous value
+      const previousNotes = queryClient.getQueryData<Note[]>(["notes", notebookId]);
+
+      // Optimistically update to remove the note
+      if (previousNotes) {
+        queryClient.setQueryData<Note[]>(
+          ["notes", notebookId],
+          previousNotes.filter((note) => note.id !== noteId)
+        );
+      }
+
+      return { previousNotes };
+    },
+    onError: (err, noteId, context) => {
+      // Rollback on error
+      if (context?.previousNotes) {
+        queryClient.setQueryData(["notes", notebookId], context.previousNotes);
+      }
+    },
+    onSettled: () => {
+      // Always refetch after error or success
       queryClient.invalidateQueries({ queryKey: ["notes", notebookId] });
     },
   });

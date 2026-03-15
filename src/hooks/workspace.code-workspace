@@ -1,7 +1,0 @@
-{
-	"folders": [],
-	"settings": {
-		"CodeGPT.apiKey": "Ollama",
-		"codium.codeCompletion.enable": true
-	}
-}

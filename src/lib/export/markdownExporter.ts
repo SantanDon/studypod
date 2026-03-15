@@ -230,7 +230,7 @@ export function exportToMarkdown(data: ExportData, options: ExportOptions): stri
     sections.push(generateChatSection(data.chatHistory));
   }
 
-  sections.push('---\n*Exported from StudyLM*');
+  sections.push('---\n*Exported from StudyPodLM*');
 
   return sections.filter(Boolean).join('\n');
 }

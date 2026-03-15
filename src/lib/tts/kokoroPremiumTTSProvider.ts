@@ -35,6 +35,7 @@ export const KOKORO_PREMIUM_VOICES: PremiumVoiceInfo[] = [
 
 export class KokoroPremiumTTSProvider implements TTSProvider {
   public name = 'kokoro-premium';
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   private kokoroInstance: any = null;
   private isInitialized = false;
 

@@ -1,12 +1,17 @@
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { localStorageService } from "@/services/localStorageService";
-import { useAuth } from "@/contexts/AuthContext";
+import { useAuthState } from "@/hooks/useAuthState";
+import { useGuest } from "@/hooks/useGuest";
 import { useToast } from "@/hooks/use-toast";
+import { useSyncTrigger } from "@/hooks/useSyncTrigger";
 
 export const useNotebookDelete = () => {
   const queryClient = useQueryClient();
-  const { user } = useAuth();
+  const { user } = useAuthState();
+  const { guestId } = useGuest();
   const { toast } = useToast();
+  const effectiveUserId = user?.id || guestId;
+  const { triggerSync } = useSyncTrigger();
 
   const deleteNotebook = useMutation({
     mutationFn: async (notebookId: string) => {
@@ -75,13 +80,18 @@ export const useNotebookDelete = () => {
       console.log("Delete mutation success, invalidating queries");
 
       // Invalidate all related queries
-      queryClient.invalidateQueries({ queryKey: ["notebooks", user?.id] });
+      queryClient.invalidateQueries({ queryKey: ["notebooks", effectiveUserId] });
       queryClient.invalidateQueries({ queryKey: ["sources", notebookId] });
       queryClient.invalidateQueries({ queryKey: ["notebook", notebookId] });
 
       toast({
         title: "Notebook deleted",
         description: `"${deletedNotebook?.title || "Notebook"}" and all its sources have been successfully deleted.`,
+      });
+      
+      // Trigger background sync
+      triggerSync('notebook', notebookId, { deleted: true }, 'delete').catch(err => {
+        console.error("Failed to trigger sync after deletion:", err);
       });
     },
     onError: (error: unknown) => {

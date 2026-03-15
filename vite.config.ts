@@ -4,6 +4,7 @@ import path from "path";
 import { corsProxyPlugin } from "./vite-plugin-cors-proxy";
 
 // https://vitejs.de
+// Trigger Vite restart for @mozilla/readability 2
 // v/config/
 export default defineConfig(({ mode }) => ({
   server: {
@@ -36,7 +37,7 @@ export default defineConfig(({ mode }) => ({
     },
   },
     optimizeDeps: {
-    include: ['pdfjs-dist'],
+    include: ['pdfjs-dist', '@mozilla/readability'],
   },
   worker: {
     format: 'es',

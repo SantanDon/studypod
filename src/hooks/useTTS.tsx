@@ -95,6 +95,7 @@ export function useTTS() {
     if (speechSynthesis.onvoiceschanged !== undefined) {
       speechSynthesis.onvoiceschanged = loadVoices;
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const updateSettings = useCallback((newSettings: Partial<TTSSettings>) => {

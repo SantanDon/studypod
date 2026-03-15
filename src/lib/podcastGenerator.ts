@@ -60,7 +60,7 @@ function extractKeyTopics(content: string): string[] {
   const topics: string[] = [];
   
   // Extract headings (lines that look like titles)
-  const headingMatches = content.match(/^#+\s*(.+)$/gm) || [];
+  const headingMatches = (content.match(/^#+\s*(.+)$/gm) || []) as string[];
   headingMatches.forEach(h => {
     const cleaned = h.replace(/^#+\s*/, '').trim();
     if (cleaned.length > 3 && cleaned.length < 100) {
@@ -69,18 +69,18 @@ function extractKeyTopics(content: string): string[] {
   });
   
   // Extract numbered items
-  const numberedMatches = content.match(/^\d+[\.\)]\s*(.+)$/gm) || [];
+  const numberedMatches = (content.match(/^\d+[.)]\s*(.+)$/gm) || []) as string[];
   numberedMatches.forEach(n => {
-    const cleaned = n.replace(/^\d+[\.\)]\s*/, '').trim();
+    const cleaned = n.replace(/^\d+[.)]\s*/, '').trim();
     if (cleaned.length > 10 && cleaned.length < 150) {
       topics.push(cleaned);
     }
   });
   
   // Extract bullet points
-  const bulletMatches = content.match(/^[-*•]\s*(.+)$/gm) || [];
+  const bulletMatches = (content.match(/^[-*•]\s*(.+)$/gm) || []) as string[];
   bulletMatches.forEach(b => {
-    const cleaned = b.replace(/^[-*•]\s*/, '').trim();
+    const cleaned = (b as string).replace(/^[-*•]\s*/, '').trim();
     if (cleaned.length > 10 && cleaned.length < 150) {
       topics.push(cleaned);
     }
@@ -236,6 +236,7 @@ function tryParseJSON(text: string): PodcastScript | null {
     cleaned = cleaned
       .replace(/,\s*}/g, "}")
       .replace(/,\s*]/g, "]")
+      // eslint-disable-next-line no-control-regex
       .replace(/[\x00-\x1F\x7F]/g, " ") // Remove control characters
       .replace(/\n/g, " ")
       .replace(/\r/g, " ")
@@ -279,6 +280,7 @@ function tryParseJSON(text: string): PodcastScript | null {
       fixed = fixed
         .replace(/,\s*}/g, "}")
         .replace(/,\s*]/g, "]")
+        // eslint-disable-next-line no-control-regex
         .replace(/[\x00-\x1F\x7F]/g, " ");
       
       const parsed = JSON.parse(fixed);
@@ -347,7 +349,7 @@ function parseAsConversation(text: string): PodcastScript {
     if (!trimmed || trimmed.length < 10) continue;
     
     // Skip JSON artifacts
-    if (/^[\{\}\[\]":]/.test(trimmed)) continue;
+    if (/^[{}[\]":]/.test(trimmed)) continue;
     if (trimmed.includes('"speaker"') || trimmed.includes('"text"')) continue;
 
     const alexMatch = trimmed.match(/^(?:Alex|Host\s*1)[:\s]+(.+)/i);
@@ -609,7 +611,7 @@ function splitIntoChunks(content: string, maxChunkSize: number): string[] {
  */
 function summarizeContent(content: string, maxLength: number): string {
   // Clean the content
-  let cleaned = content
+  const cleaned = content
     .replace(/\s+/g, " ")
     .replace(/[#*_`]/g, "")
     .trim();

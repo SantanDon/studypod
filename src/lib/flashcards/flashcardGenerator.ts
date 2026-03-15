@@ -77,7 +77,7 @@ function parseFlashcardResponse(response: string): GeneratedCard[] {
  * Removes metadata, headers, and structural elements that shouldn't become flashcards
  */
 function preprocessContent(content: string): string {
-  let cleaned = content
+  const cleaned = content
     // Remove markdown headers but keep the text
     .replace(/^#{1,6}\s+/gm, '')
     // Remove bullet points and numbering

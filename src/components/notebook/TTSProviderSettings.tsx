@@ -66,30 +66,34 @@ const TTSProviderSettings: React.FC<TTSProviderSettingsProps> = ({
       setAudioConfig(getPodcastAudioConfig());
       // Only check connection if provider is ultimate-tts
       if (config.provider === 'ultimate-tts') {
-        checkConnection();
+        checkConnection(config.provider, config.endpoint);
       } else {
         setConnectionStatus('unknown');
       }
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isOpen]);
 
-  const checkConnection = async () => {
+  const checkConnection = async (provider?: string, endpoint?: string): Promise<boolean> => {
     // Only check if provider is ultimate-tts
-    if (ttsConfig.provider !== 'ultimate-tts') {
+    if ((provider || ttsConfig.provider) !== 'ultimate-tts') {
       setConnectionStatus('unknown');
-      return;
+      return false;
     }
     
     setIsChecking(true);
     try {
-      const isAvailable = await PodcastAudioGenerator.checkEndpoint(ttsConfig.endpoint);
+      const checkEndpoint = endpoint || ttsConfig.endpoint;
+      const isAvailable = await PodcastAudioGenerator.checkEndpoint(checkEndpoint);
       setConnectionStatus(isAvailable ? 'connected' : 'disconnected');
       
       if (isAvailable) {
         loadVoices();
       }
+      return isAvailable;
     } catch {
       setConnectionStatus('disconnected');
+      return false;
     } finally {
       setIsChecking(false);
     }
@@ -115,33 +119,18 @@ const TTSProviderSettings: React.FC<TTSProviderSettingsProps> = ({
   };
 
   const handleTestConnection = async () => {
-    setIsChecking(true);
-    try {
-      const isAvailable = await PodcastAudioGenerator.checkEndpoint(ttsConfig.endpoint);
-      setConnectionStatus(isAvailable ? 'connected' : 'disconnected');
-      
-      if (isAvailable) {
-        toast({
-          title: '✅ Connected!',
-          description: 'Ultimate TTS Studio is available.',
-        });
-        loadVoices();
-      } else {
-        toast({
-          title: '❌ Connection Failed',
-          description: 'Could not connect to Ultimate TTS Studio. Make sure it\'s running.',
-          variant: 'destructive',
-        });
-      }
-    } catch {
-      setConnectionStatus('disconnected');
+    const isAvailable = await checkConnection();
+    if (isAvailable) {
       toast({
-        title: '❌ Connection Error',
-        description: 'Failed to connect. Check the endpoint URL.',
+        title: '✅ Connected!',
+        description: 'Ultimate TTS Studio is available.',
+      });
+    } else {
+      toast({
+        title: '❌ Connection Failed',
+        description: 'Could not connect to Ultimate TTS Studio. Make sure it\'s running.',
         variant: 'destructive',
       });
-    } finally {
-      setIsChecking(false);
     }
   };
 

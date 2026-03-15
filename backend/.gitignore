@@ -9,8 +9,12 @@
 
 # Local database
 /data/
-/data/*.db
-/data/*.db-journal
+*.db
+*.db-shm
+*.db-wal
+*.db-journal
+*.sqlite
+/src/db/*.sqlite
 
 # Logs
 logs

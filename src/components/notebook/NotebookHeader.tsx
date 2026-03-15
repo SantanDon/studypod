@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useMemo, useState } from 'react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { useNavigate } from 'react-router-dom';
@@ -9,6 +9,9 @@ import { useNotes } from '@/hooks/useNotes';
 import Logo from '@/components/ui/Logo';
 import { ProfileMenu } from '@/components/profile/ProfileMenu';
 import ExportDialog from './ExportDialog';
+import { useChatMessages } from '@/hooks/useChatMessages';
+import { LocalNotebook } from '@/services/localStorageService';
+import { ChatMessage } from '@/lib/export/markdownExporter';
 // import { Download } from 'lucide-react'; // Removed Lucide imports
 
 interface NotebookHeaderProps {
@@ -25,8 +28,31 @@ const NotebookHeader = ({ title, notebookId }: NotebookHeaderProps) => {
   const { notebooks } = useNotebooks();
   const { sources } = useSources(notebookId);
   const { notes } = useNotes(notebookId);
-  
+  const { messages: rawMessages } = useChatMessages(notebookId);
+
   const notebook = notebooks?.find(n => n.id === notebookId);
+
+  // Map EnhancedChatMessage[] → ChatMessage[] for the markdown exporter.
+  // Each stored record has { message: { type: "human"|"ai", content: string | { segments, citations } } }
+  const chatHistory = useMemo<ChatMessage[]>(() => {
+    if (!rawMessages) return [];
+    return rawMessages.map((msg) => {
+      const role = msg.message.type === 'human' ? 'user' : 'assistant';
+      const raw = msg.message.content;
+      let content: string;
+      if (typeof raw === 'string') {
+        content = raw;
+      } else if (raw && typeof raw === 'object' && 'segments' in raw) {
+        // Segment-based content: join text segments
+        content = (raw.segments as Array<{ text?: string }>)
+          .map((seg) => seg.text ?? '')
+          .join('');
+      } else {
+        content = JSON.stringify(raw);
+      }
+      return { role, content };
+    });
+  }, [rawMessages]);
 
   const handleTitleClick = () => {
     if (notebookId) {
@@ -114,6 +140,7 @@ const NotebookHeader = ({ title, notebookId }: NotebookHeaderProps) => {
           notebook={notebook as LocalNotebook}
           sources={sources || []}
           notes={notes || []}
+          chatHistory={chatHistory}
           isOpen={isExportOpen}
           onClose={() => setIsExportOpen(false)}
         />

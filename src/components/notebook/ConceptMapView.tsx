@@ -1,4 +1,4 @@
-import React, { useState, useMemo, useCallback, useRef, useEffect } from 'react';
+import React, { useMemo, useRef, useEffect, useState, useCallback } from 'react';
 import { Card } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -18,8 +18,9 @@ import {
   DropdownMenuCheckboxItem,
 } from '@/components/ui/dropdown-menu';
 
-import { ConceptMap, ConceptNode, ConceptEdge, NodeType } from '@/types/conceptMap';
+import { ConceptMap, ConceptNode, NodeType } from '@/types/conceptMap';
 import { cn } from '@/lib/utils';
+import { useConceptMapInteraction } from '@/hooks/useConceptMapInteraction';
 
 interface ConceptMapViewProps {
   conceptMap: ConceptMap | null;
@@ -27,240 +28,20 @@ interface ConceptMapViewProps {
   onNodeClick?: (node: ConceptNode) => void;
 }
 
-interface NodePosition {
-  x: number;
-  y: number;
-}
-
-// Enhanced color scheme with dark mode support
-const NODE_COLORS: Record<NodeType, { 
-  bg: string; 
-  bgDark: string;
-  border: string; 
-  borderDark: string;
-  text: string;
-  textDark: string;
-  glow: string;
-}> = {
-  main: { 
-    bg: '#3b82f6', 
-    bgDark: '#2563eb',
-    border: '#1d4ed8', 
-    borderDark: '#3b82f6',
-    text: '#ffffff',
-    textDark: '#ffffff',
-    glow: 'rgba(59, 130, 246, 0.5)'
-  },
-  subtopic: { 
-    bg: '#10b981', 
-    bgDark: '#059669',
-    border: '#047857', 
-    borderDark: '#10b981',
-    text: '#ffffff',
-    textDark: '#ffffff',
-    glow: 'rgba(16, 185, 129, 0.5)'
-  },
-  detail: { 
-    bg: '#f59e0b', 
-    bgDark: '#d97706',
-    border: '#b45309', 
-    borderDark: '#f59e0b',
-    text: '#1f2937',
-    textDark: '#ffffff',
-    glow: 'rgba(245, 158, 11, 0.5)'
-  },
-  term: { 
-    bg: '#8b5cf6', 
-    bgDark: '#7c3aed',
-    border: '#6d28d9', 
-    borderDark: '#8b5cf6',
-    text: '#ffffff',
-    textDark: '#ffffff',
-    glow: 'rgba(139, 92, 246, 0.5)'
-  },
-};
-
-// Edge colors by relationship type
-const EDGE_COLORS: Record<string, { stroke: string; strokeDark: string }> = {
-  related: { stroke: '#94a3b8', strokeDark: '#64748b' },
-  explains: { stroke: '#3b82f6', strokeDark: '#60a5fa' },
-  example: { stroke: '#10b981', strokeDark: '#34d399' },
-  part_of: { stroke: '#f59e0b', strokeDark: '#fbbf24' },
-};
-
-const NODE_WIDTH = 150;
-const NODE_HEIGHT = 55;
-const CANVAS_WIDTH = 1000;
-const CANVAS_HEIGHT = 600;
-const PADDING = 80;
-
-// Improved radial/hierarchical layout algorithm
-function calculateNodePositions(
-  nodes: ConceptNode[],
-  edges: ConceptEdge[]
-): Map<string, NodePosition> {
-  const positions = new Map<string, NodePosition>();
-  if (nodes.length === 0) return positions;
-
-  // Build adjacency map
-  const adjacency = new Map<string, Set<string>>();
-  const parentMap = new Map<string, string>();
-  
-  nodes.forEach((node) => adjacency.set(node.id, new Set()));
-  edges.forEach(({ source, target }) => {
-    adjacency.get(source)?.add(target);
-    adjacency.get(target)?.add(source);
-    if (!parentMap.has(target)) {
-      parentMap.set(target, source);
-    }
-  });
-
-  // Categorize nodes
-  const mainNodes = nodes.filter((n) => n.type === 'main');
-  const subtopicNodes = nodes.filter((n) => n.type === 'subtopic');
-  const detailNodes = nodes.filter((n) => n.type === 'detail');
-  const termNodes = nodes.filter((n) => n.type === 'term');
-
-  const centerX = CANVAS_WIDTH / 2;
-  const centerY = CANVAS_HEIGHT / 2;
-
-  // Position main nodes at center
-  if (mainNodes.length === 1) {
-    positions.set(mainNodes[0].id, { x: centerX, y: centerY - 50 });
-  } else {
-    mainNodes.forEach((node, i) => {
-      const angle = (2 * Math.PI * i) / mainNodes.length - Math.PI / 2;
-      const radius = 80;
-      positions.set(node.id, {
-        x: centerX + Math.cos(angle) * radius,
-        y: centerY - 50 + Math.sin(angle) * radius,
-      });
-    });
-  }
-
-  // Position subtopics in a ring around main nodes
-  const subtopicRadius = 180;
-  subtopicNodes.forEach((node, i) => {
-    const angle = (2 * Math.PI * i) / subtopicNodes.length - Math.PI / 2;
-    positions.set(node.id, {
-      x: centerX + Math.cos(angle) * subtopicRadius,
-      y: centerY + Math.sin(angle) * subtopicRadius,
-    });
-  });
-
-  // Position details in outer ring
-  const detailRadius = 280;
-  detailNodes.forEach((node, i) => {
-    const angle = (2 * Math.PI * i) / detailNodes.length - Math.PI / 2;
-    const jitter = (Math.random() - 0.5) * 30;
-    positions.set(node.id, {
-      x: centerX + Math.cos(angle) * (detailRadius + jitter),
-      y: centerY + Math.sin(angle) * (detailRadius + jitter),
-    });
-  });
-
-  // Position terms in outermost ring
-  const termRadius = 350;
-  termNodes.forEach((node, i) => {
-    const angle = (2 * Math.PI * i) / termNodes.length - Math.PI / 2;
-    const jitter = (Math.random() - 0.5) * 40;
-    positions.set(node.id, {
-      x: centerX + Math.cos(angle) * (termRadius + jitter),
-      y: centerY + Math.sin(angle) * (termRadius + jitter),
-    });
-  });
-
-  // Force-directed refinement for better spacing
-  for (let iteration = 0; iteration < 100; iteration++) {
-    const forces = new Map<string, { fx: number; fy: number }>();
-    nodes.forEach((node) => forces.set(node.id, { fx: 0, fy: 0 }));
-
-    // Repulsion between all nodes
-    nodes.forEach((node) => {
-      const pos = positions.get(node.id);
-      if (!pos) return;
-
-      nodes.forEach((other) => {
-        if (other.id === node.id) return;
-        const otherPos = positions.get(other.id);
-        if (!otherPos) return;
-
-        const dx = pos.x - otherPos.x;
-        const dy = pos.y - otherPos.y;
-        const dist = Math.sqrt(dx * dx + dy * dy) || 1;
-        const minDist = 160;
-
-        if (dist < minDist) {
-          const force = ((minDist - dist) / dist) * 0.3;
-          const f = forces.get(node.id)!;
-          f.fx += dx * force;
-          f.fy += dy * force;
-        }
-      });
-    });
-
-    // Attraction along edges
-    edges.forEach(({ source, target }) => {
-      const sourcePos = positions.get(source);
-      const targetPos = positions.get(target);
-      if (!sourcePos || !targetPos) return;
-
-      const dx = targetPos.x - sourcePos.x;
-      const dy = targetPos.y - sourcePos.y;
-      const dist = Math.sqrt(dx * dx + dy * dy) || 1;
-      const idealDist = 180;
-
-      if (dist > idealDist) {
-        const force = ((dist - idealDist) / dist) * 0.05;
-        const sf = forces.get(source)!;
-        const tf = forces.get(target)!;
-        sf.fx += dx * force;
-        sf.fy += dy * force;
-        tf.fx -= dx * force;
-        tf.fy -= dy * force;
-      }
-    });
-
-    // Apply forces with damping
-    const damping = 1 - iteration / 100;
-    nodes.forEach((node) => {
-      const pos = positions.get(node.id)!;
-      const f = forces.get(node.id)!;
-      positions.set(node.id, {
-        x: Math.max(NODE_WIDTH, Math.min(CANVAS_WIDTH - NODE_WIDTH, pos.x + f.fx * damping)),
-        y: Math.max(NODE_HEIGHT, Math.min(CANVAS_HEIGHT - NODE_HEIGHT, pos.y + f.fy * damping)),
-      });
-    });
-  }
-
-  return positions;
-}
-
-// Generate curved path for edges
-function generateCurvedPath(
-  x1: number, y1: number, 
-  x2: number, y2: number
-): string {
-  const midX = (x1 + x2) / 2;
-  const midY = (y1 + y2) / 2;
-  
-  // Calculate perpendicular offset for curve
-  const dx = x2 - x1;
-  const dy = y2 - y1;
-  const dist = Math.sqrt(dx * dx + dy * dy);
-  
-  // Curve amount proportional to distance
-  const curveAmount = Math.min(dist * 0.15, 40);
-  
-  // Perpendicular direction
-  const px = -dy / dist;
-  const py = dx / dist;
-  
-  const ctrlX = midX + px * curveAmount;
-  const ctrlY = midY + py * curveAmount;
-  
-  return `M ${x1} ${y1} Q ${ctrlX} ${ctrlY} ${x2} ${y2}`;
-}
+import { 
+  NODE_COLORS, 
+  EDGE_COLORS, 
+  NODE_WIDTH, 
+  NODE_HEIGHT, 
+  CANVAS_WIDTH, 
+  CANVAS_HEIGHT, 
+  PADDING 
+} from '@/lib/conceptMap/constants';
+import { 
+  NodePosition, 
+  calculateNodePositions, 
+  generateCurvedPath 
+} from '@/lib/conceptMap/layoutUtils';
 
 const ConceptMapView: React.FC<ConceptMapViewProps> = ({
   conceptMap,
@@ -269,18 +50,35 @@ const ConceptMapView: React.FC<ConceptMapViewProps> = ({
 }) => {
   const svgRef = useRef<SVGSVGElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
-  const [scale, setScale] = useState(0.9);
-  const [pan, setPan] = useState({ x: 0, y: 0 });
-  const [isPanning, setIsPanning] = useState(false);
-  const [panStart, setPanStart] = useState({ x: 0, y: 0 });
-  const [selectedNode, setSelectedNode] = useState<ConceptNode | null>(null);
-  const [searchQuery, setSearchQuery] = useState('');
-  const [isFullscreen, setIsFullscreen] = useState(false);
-  const [showMinimap, setShowMinimap] = useState(true);
-  const [visibleTypes, setVisibleTypes] = useState<Set<NodeType>>(
-    new Set(['main', 'subtopic', 'detail', 'term'])
-  );
-  const [hoveredNode, setHoveredNode] = useState<string | null>(null);
+  const {
+    scale,
+    pan,
+    isPanning,
+    selectedNode,
+    setSelectedNode,
+    searchQuery,
+    setSearchQuery,
+    isFullscreen,
+    showMinimap,
+    setShowMinimap,
+    visibleTypes,
+    hoveredNode,
+    setHoveredNode,
+    filteredNodes,
+    filteredEdges,
+    connectedNodes,
+    handleZoomIn,
+    handleZoomOut,
+    handleReset,
+    handleWheel,
+    handleMouseDown,
+    handleMouseMove,
+    handleMouseUp,
+    handleNodeClick,
+    toggleNodeType,
+    toggleFullscreen
+  } = useConceptMapInteraction(conceptMap, onNodeClick);
+
   const [isDarkMode, setIsDarkMode] = useState(false);
 
   // Detect dark mode
@@ -298,114 +96,6 @@ const ConceptMapView: React.FC<ConceptMapViewProps> = ({
     if (!conceptMap) return new Map<string, NodePosition>();
     return calculateNodePositions(conceptMap.nodes, conceptMap.edges);
   }, [conceptMap]);
-
-  // Filter nodes based on search and visibility
-  const filteredNodes = useMemo(() => {
-    if (!conceptMap) return [];
-    return conceptMap.nodes.filter((node) => {
-      if (!visibleTypes.has(node.type)) return false;
-      if (searchQuery && !node.label.toLowerCase().includes(searchQuery.toLowerCase())) {
-        return false;
-      }
-      return true;
-    });
-  }, [conceptMap, searchQuery, visibleTypes]);
-
-  const filteredNodeIds = useMemo(() => new Set(filteredNodes.map(n => n.id)), [filteredNodes]);
-
-  const filteredEdges = useMemo(() => {
-    if (!conceptMap) return [];
-    return conceptMap.edges.filter(
-      (edge) => filteredNodeIds.has(edge.source) && filteredNodeIds.has(edge.target)
-    );
-  }, [conceptMap, filteredNodeIds]);
-
-  // Highlight connected nodes on hover
-  const connectedNodes = useMemo(() => {
-    if (!hoveredNode || !conceptMap) return new Set<string>();
-    const connected = new Set<string>([hoveredNode]);
-    conceptMap.edges.forEach((edge) => {
-      if (edge.source === hoveredNode) connected.add(edge.target);
-      if (edge.target === hoveredNode) connected.add(edge.source);
-    });
-    return connected;
-  }, [hoveredNode, conceptMap]);
-
-  const handleZoomIn = useCallback(() => {
-    setScale((s) => Math.min(s + 0.15, 3));
-  }, []);
-
-  const handleZoomOut = useCallback(() => {
-    setScale((s) => Math.max(s - 0.15, 0.3));
-  }, []);
-
-  const handleReset = useCallback(() => {
-    setScale(0.9);
-    setPan({ x: 0, y: 0 });
-    setSearchQuery('');
-    setSelectedNode(null);
-  }, []);
-
-  const handleWheel = useCallback((e: React.WheelEvent) => {
-    e.preventDefault();
-    const delta = e.deltaY > 0 ? -0.1 : 0.1;
-    setScale((s) => Math.max(0.3, Math.min(3, s + delta)));
-  }, []);
-
-  const handleMouseDown = useCallback((e: React.MouseEvent) => {
-    if (e.button === 0 && !e.defaultPrevented) {
-      setIsPanning(true);
-      setPanStart({ x: e.clientX - pan.x, y: e.clientY - pan.y });
-    }
-  }, [pan]);
-
-  const handleMouseMove = useCallback(
-    (e: React.MouseEvent) => {
-      if (isPanning) {
-        setPan({
-          x: e.clientX - panStart.x,
-          y: e.clientY - panStart.y,
-        });
-      }
-    },
-    [isPanning, panStart]
-  );
-
-  const handleMouseUp = useCallback(() => {
-    setIsPanning(false);
-  }, []);
-
-  const handleNodeClick = useCallback(
-    (node: ConceptNode, e: React.MouseEvent) => {
-      e.stopPropagation();
-      e.preventDefault();
-      setSelectedNode(node);
-      onNodeClick?.(node);
-    },
-    [onNodeClick]
-  );
-
-  const toggleNodeType = useCallback((type: NodeType) => {
-    setVisibleTypes((prev) => {
-      const next = new Set(prev);
-      if (next.has(type)) {
-        next.delete(type);
-      } else {
-        next.add(type);
-      }
-      return next;
-    });
-  }, []);
-
-  const toggleFullscreen = useCallback(() => {
-    if (!containerRef.current) return;
-    if (!isFullscreen) {
-      containerRef.current.requestFullscreen?.();
-    } else {
-      document.exitFullscreen?.();
-    }
-    setIsFullscreen(!isFullscreen);
-  }, [isFullscreen]);
 
   const exportAsSVG = useCallback(() => {
     if (!svgRef.current) return;
@@ -569,7 +259,7 @@ const ConceptMapView: React.FC<ConceptMapViewProps> = ({
             <i className="fi fi-rr-rotate-left h-4 w-4"></i>
           </Button>
 
-          <Button variant="outline" size="icon" onClick={toggleFullscreen} className="h-8 w-8 bg-background/80 backdrop-blur-sm">
+          <Button variant="outline" size="icon" onClick={() => toggleFullscreen(containerRef)} className="h-8 w-8 bg-background/80 backdrop-blur-sm">
             {isFullscreen ? <i className="fi fi-rr-compress h-4 w-4"></i> : <i className="fi fi-rr-expand h-4 w-4"></i>}
           </Button>
         </div>

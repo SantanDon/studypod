@@ -6,7 +6,7 @@
  */
 
 import { validateDocumentContent } from "./contentValidator";
-import * as cheerio from 'cheerio';
+import { Readability } from '@mozilla/readability';
 
 export interface WebContentResult {
   url: string;
@@ -56,31 +56,42 @@ export async function extractWebContent(
     }
 
     const html = await response.text();
-    const $ = cheerio.load(html);
-
-    // Remove unwanted elements
-    $("script, style, noscript, nav, footer").remove();
+    
+    // Parse HTML string into DOM Document
+    const parser = new DOMParser();
+    const doc = parser.parseFromString(html, "text/html");
 
     // Extract title
-    const title =
-      $("title").text() || $("h1").first().text() || parsedUrl.hostname;
+    const title = doc.title || doc.querySelector("h1")?.textContent || parsedUrl.hostname;
 
     // Extract description
     const description = 
-      $('meta[name="description"]').attr('content') || 
-      $('meta[property="og:description"]').attr('content') || 
+      doc.querySelector('meta[name="description"]')?.getAttribute('content') || 
+      doc.querySelector('meta[property="og:description"]')?.getAttribute('content') || 
       "";
+      
+    // Count links and images using the original document BEFORE Readability modifies it
+    const links = doc.querySelectorAll("a").length;
+    const images = doc.querySelectorAll("img").length;
 
-    // Extract main content
-    const content = $("body")
-      .text()
-      .replace(/\s+/g, " ")
-      .trim()
-      .substring(0, 50000);
+    // Use Readability to extract the core article content intelligently
+    const reader = new Readability(doc);
+    const article = reader.parse();
 
-    // Count links and images
-    const links = $("a").length;
-    const images = $("img").length;
+    let content = "";
+    if (article && article.textContent && article.textContent.trim().length > 100) {
+      content = article.textContent
+        .replace(/\s+/g, " ")
+        .trim()
+        .substring(0, 50000);
+    } else {
+      // Fallback if Readability yields nothing or very little text
+      const contentElement = doc.querySelector("article, main, [role='main'], #mw-content-text, .mw-parser-output, #content, .post-content, .entry-content") || doc.body;
+      content = (contentElement?.textContent || "")
+        .replace(/\s+/g, " ")
+        .trim()
+        .substring(0, 50000);
+    }
 
     const validation = await validateDocumentContent(content, title);
 

@@ -5,6 +5,7 @@ import NotebookCard from './NotebookCard';
 // import { Check, Grid3X3, List, ChevronDown } from 'lucide-react'; // Removed Lucide imports
 import { useNotebooks } from '@/hooks/useNotebooks';
 import { useNavigate } from 'react-router-dom';
+import { useGuest } from '@/hooks/useGuest';
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -23,6 +24,7 @@ const NotebookGrid = () => {
     isCreating
   } = useNotebooks();
   const navigate = useNavigate();
+  const { canCreateNotebook, showAuthPrompt, isGuest } = useGuest();
 
   const sortedNotebooks = useMemo(() => {
     if (!notebooks) return [];
@@ -40,6 +42,12 @@ const NotebookGrid = () => {
 
   const { toast } = useToast();
   const handleCreateNotebook = () => {
+    // Check guest limit
+    if (isGuest && !canCreateNotebook) {
+      showAuthPrompt('create notebook');
+      return;
+    }
+
     createNotebook({
       title: 'Untitled notebook',
       description: ''

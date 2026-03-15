@@ -63,60 +63,45 @@ export const useDocumentProcessing = () => {
         }
 
         // Use optimized document processor with parallel chunking and embeddings
-        const { checkOllamaHealth } = await import("@/lib/ai/ollamaService");
-        const isHealthy = await checkOllamaHealth();
+        // Cloud routing (Voyage AI) is handled by documentProcessor automatically
+        console.log("⚡ Processing with optimized document processor...");
 
-        if (isHealthy) {
-          console.log("⚡ Processing with optimized document processor...");
+        // Process document with parallel chunking and embedding generation
+        const result = await processDocumentWithEmbeddings(
+          sourceId,
+          source.content,
+          {
+            generateEmbeddings: true,
+            chunkSize: 1000,
+            generateSummary: false, // Keep it fast
+          },
+        );
 
-          // Process document with parallel chunking and embedding generation
-          const result = await processDocumentWithEmbeddings(
-            sourceId,
-            source.content,
-            {
-              generateEmbeddings: true,
-              chunkSize: 1000,
-              generateSummary: false, // Keep it fast
-            },
-          );
+        console.log("✅ Document processed:", {
+          chunks: result.chunks.length,
+          embeddings: result.chunks.filter((c) => c.embedding).length,
+        });
 
-          console.log("✅ Document processed:", {
-            chunks: result.chunks.length,
-            embeddings: result.chunks.filter((c) => c.embedding).length,
-          });
+        // Update source with processed data including chunks
+        localStorageService.updateSource(sourceId, {
+          processing_status: "completed",
+          content: source.content,
+          metadata: {
+            ...(source.metadata || {}),
+            chunks: result.chunks,
+            documentEmbedding: result.embeddings,
+            processedAt: new Date().toISOString(),
+          },
+        });
 
-          // Update source with processed data including chunks
-          localStorageService.updateSource(sourceId, {
-            processing_status: "completed",
-            content: source.content,
-            metadata: {
-              ...(source.metadata || {}),
-              chunks: result.chunks,
-              documentEmbedding: result.embeddings,
-              processedAt: new Date().toISOString(),
-            },
-          });
-
-          return {
-            success: true,
-            sourceId,
-            filePath,
-            sourceType,
-            chunks: result.chunks.length,
-            embeddings: result.chunks.filter((c) => c.embedding).length,
-          };
-        } else {
-          console.log(
-            "⚠️ Ollama not available, marking as completed without embeddings",
-          );
-
-          // Fallback: just mark as completed
-          localStorageService.updateSource(sourceId, {
-            processing_status: "completed",
-          });
-
-          return { success: true, sourceId, filePath, sourceType };
-        }
+        return {
+          success: true,
+          sourceId,
+          filePath,
+          sourceType,
+          chunks: result.chunks.length,
+          embeddings: result.chunks.filter((c) => c.embedding).length,
+        };
       } catch (error) {
         console.error("Document processing error:", error);
 
