@@ -575,7 +575,7 @@
 
 /* Dark mode adjustments (already dark, but ensure consistency) */
 .dark .podcast-card {
-  background: linear-gradient(145deg, #1a1a2e 0%, #16213e 50%, #0f0f23 100%);
+  background: #000000;
 }
 
 /* ============================================

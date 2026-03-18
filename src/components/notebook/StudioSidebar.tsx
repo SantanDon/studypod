@@ -52,7 +52,7 @@ const StudioSidebar = ({
   } = handlers;
 
   if (isEditingMode) {
-    return <div className="w-full bg-gray-50 border-l border-gray-200 flex flex-col h-full overflow-hidden">
+    return <div className="w-full bg-gray-50 dark:bg-background border-l border-gray-200 dark:border-border flex flex-col h-full overflow-hidden">
         <NoteEditor note={editingNote || undefined} onSave={handleSaveNote} onDelete={editingNote ? handleDeleteNote : undefined} onCancel={handleCancel} isLoading={isCreating || isUpdating || isDeleting} onCitationClick={onCitationClick} />
       </div>;
   }
@@ -63,7 +63,7 @@ const StudioSidebar = ({
     
     if (currentQuestion) {
       return (
-        <div className="w-full bg-gray-50 border-l border-gray-200 flex flex-col h-full overflow-hidden">
+        <div className="w-full bg-gray-50 dark:bg-background border-l border-gray-200 dark:border-border flex flex-col h-full overflow-hidden">
           <QuizView
             question={currentQuestion}
             questionNumber={progress.current}
@@ -80,7 +80,7 @@ const StudioSidebar = ({
 
   if ((isQuizCompleted || showQuizResults) && currentSession) {
     return (
-      <div className="w-full bg-gray-50 border-l border-gray-200 flex flex-col h-full overflow-hidden">
+      <div className="w-full bg-gray-50 dark:bg-background border-l border-gray-200 dark:border-border flex flex-col h-full overflow-hidden">
         <QuizResults
           quiz={currentSession.quiz}
           results={currentSession.results}
@@ -91,8 +91,8 @@ const StudioSidebar = ({
     );
   }
 
-  return <div className="w-full bg-gray-50 dark:bg-gray-900 border-l border-gray-200 dark:border-gray-700 flex flex-col h-full overflow-hidden">
-      <div className="p-4 border-b border-gray-200 dark:border-gray-700 flex-shrink-0">
+  return <div className="w-full bg-gray-50 dark:bg-background border-l border-gray-200 dark:border-border flex flex-col h-full overflow-hidden">
+      <div className="p-4 border-b border-gray-200 dark:border-border flex-shrink-0">
         <h2 className="text-lg font-medium text-foreground">Studio</h2>
       </div>
       
@@ -118,7 +118,7 @@ const StudioSidebar = ({
 
         {/* Quiz Section */}
         <Collapsible open={isQuizSectionOpen} onOpenChange={setIsQuizSectionOpen}>
-          <CollapsibleTrigger className="flex items-center justify-between w-full py-2 hover:bg-gray-100 dark:hover:bg-gray-800 rounded px-2 -mx-2">
+          <CollapsibleTrigger className="flex items-center justify-between w-full py-2 hover:bg-gray-100 dark:hover:bg-accent rounded px-2 -mx-2">
             <div className="flex items-center gap-2">
               <i className="fi fi-rr-brain text-green-600"></i>
               <h3 className="font-medium text-foreground">Quiz</h3>
@@ -148,7 +148,7 @@ const StudioSidebar = ({
 
         {/* Flashcards Section */}
         <Collapsible open={isFlashcardSectionOpen} onOpenChange={setIsFlashcardSectionOpen}>
-          <CollapsibleTrigger className="flex items-center justify-between w-full py-2 hover:bg-gray-100 dark:hover:bg-gray-800 rounded px-2 -mx-2">
+          <CollapsibleTrigger className="flex items-center justify-between w-full py-2 hover:bg-gray-100 dark:hover:bg-accent rounded px-2 -mx-2">
             <div className="flex items-center gap-2">
               <i className="fi fi-rr-layers text-purple-600"></i>
               <h3 className="font-medium text-foreground">Flashcards</h3>
@@ -166,7 +166,7 @@ const StudioSidebar = ({
 
         {/* Concept Map Section */}
         <Collapsible open={isConceptMapSectionOpen} onOpenChange={setIsConceptMapSectionOpen}>
-          <CollapsibleTrigger className="flex items-center justify-between w-full py-2 hover:bg-gray-100 dark:hover:bg-gray-800 rounded px-2 -mx-2">
+          <CollapsibleTrigger className="flex items-center justify-between w-full py-2 hover:bg-gray-100 dark:hover:bg-accent rounded px-2 -mx-2">
             <div className="flex items-center gap-2">
               <i className="fi fi-rr-code-branch text-blue-600"></i>
               <h3 className="font-medium text-foreground">Concept Map</h3>
@@ -234,7 +234,7 @@ const StudioSidebar = ({
 
         {/* Source Comparison Section */}
         <Collapsible open={isComparisonOpen} onOpenChange={setIsComparisonOpen}>
-          <CollapsibleTrigger className="flex items-center justify-between w-full py-2 hover:bg-gray-100 dark:hover:bg-gray-800 rounded px-2 -mx-2">
+          <CollapsibleTrigger className="flex items-center justify-between w-full py-2 hover:bg-gray-100 dark:hover:bg-accent rounded px-2 -mx-2">
             <div className="flex items-center gap-2">
               <i className="fi fi-rr-code-compare text-orange-600"></i>
               <h3 className="font-medium text-foreground">Compare Sources</h3>
@@ -261,7 +261,7 @@ const StudioSidebar = ({
         </Collapsible>
 
         {/* Saved Notes Area */}
-        <div className="mt-6 border-t border-gray-200 dark:border-gray-700 pt-4">
+        <div className="mt-6 border-t border-gray-200 dark:border-border pt-4">
           <h3 className="font-medium text-foreground mb-3">Saved Notes</h3>
           {isLoading ? <div className="text-center py-8">
               <p className="text-sm text-muted-foreground">Loading notes...</p>

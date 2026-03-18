@@ -35,24 +35,24 @@ const MobileNotebookTabs = ({
 }: MobileNotebookTabsProps) => {
   return (
     <Tabs defaultValue="chat" className="flex-1 flex flex-col overflow-hidden">
-      <TabsList className="grid w-full grid-cols-3 bg-gray-100 p-1 h-12 rounded-none border-b border-gray-200">
+      <TabsList className="grid w-full grid-cols-3 bg-gray-100 dark:bg-muted p-1 h-12 rounded-none border-b border-gray-200 dark:border-border">
         <TabsTrigger 
           value="sources" 
-          className="flex items-center space-x-2 text-sm data-[state=active]:bg-white data-[state=active]:shadow-sm"
+          className="flex items-center space-x-2 text-sm data-[state=active]:bg-white dark:data-[state=active]:bg-background data-[state=active]:shadow-sm"
         >
           <i className="fi fi-rr-file h-4 w-4"></i>
           <span className="hidden sm:inline">Sources</span>
         </TabsTrigger>
         <TabsTrigger 
           value="chat" 
-          className="flex items-center space-x-2 text-sm data-[state=active]:bg-white data-[state=active]:shadow-sm"
+          className="flex items-center space-x-2 text-sm data-[state=active]:bg-white dark:data-[state=active]:bg-background data-[state=active]:shadow-sm"
         >
           <i className="fi fi-rr-comment h-4 w-4"></i>
           <span className="hidden sm:inline">Chat</span>
         </TabsTrigger>
         <TabsTrigger 
           value="studio" 
-          className="flex items-center space-x-2 text-sm data-[state=active]:bg-white data-[state=active]:shadow-sm"
+          className="flex items-center space-x-2 text-sm data-[state=active]:bg-white dark:data-[state=active]:bg-background data-[state=active]:shadow-sm"
         >
           <i className="fi fi-rr-notebook h-4 w-4"></i>
           <span className="hidden sm:inline">Notes</span>

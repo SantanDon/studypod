@@ -64,18 +64,18 @@ const QuizSelector: React.FC<QuizSelectorProps> = ({
       </div>
 
       {sourcesCount === 0 && (
-        <div className="mb-4 p-3 bg-amber-50 border border-amber-200 rounded-lg flex items-start space-x-2">
-          <i className="fi fi-rr-exclamation h-4 w-4 text-amber-600 mt-0.5 flex-shrink-0"></i>
-          <p className="text-sm text-amber-700">
+        <div className="mb-4 p-3 bg-amber-50 dark:bg-amber-950/30 border border-amber-200 dark:border-amber-900 rounded-lg flex items-start space-x-2">
+          <i className="fi fi-rr-exclamation h-4 w-4 text-amber-600 dark:text-amber-500 mt-0.5 flex-shrink-0"></i>
+          <p className="text-sm text-amber-700 dark:text-amber-400">
             Add some sources to your notebook before generating a quiz.
           </p>
         </div>
       )}
 
       {error && (
-        <div className="mb-4 p-3 bg-red-50 border border-red-200 rounded-lg flex items-start space-x-2">
-          <i className="fi fi-rr-exclamation h-4 w-4 text-red-600 mt-0.5 flex-shrink-0"></i>
-          <p className="text-sm text-red-700">{error}</p>
+        <div className="mb-4 p-3 bg-red-50 dark:bg-red-950/30 border border-red-200 dark:border-red-900 rounded-lg flex items-start space-x-2">
+          <i className="fi fi-rr-exclamation h-4 w-4 text-red-600 dark:text-red-500 mt-0.5 flex-shrink-0"></i>
+          <p className="text-sm text-red-700 dark:text-red-400">{error}</p>
         </div>
       )}
 
@@ -116,8 +116,8 @@ const QuizSelector: React.FC<QuizSelectorProps> = ({
                 className={cn(
                   'flex flex-col items-center justify-center rounded-lg border-2 p-3 cursor-pointer transition-all',
                   difficulty === level
-                    ? 'border-blue-500 bg-blue-50'
-                    : 'border-gray-200 hover:border-gray-300',
+                    ? 'border-blue-500 bg-blue-50 dark:bg-blue-900/30 dark:border-blue-400'
+                    : 'border-gray-200 hover:border-gray-300 dark:border-gray-700 dark:hover:border-gray-600',
                   isGenerating && 'opacity-50 cursor-not-allowed'
                 )}
               >
@@ -160,8 +160,8 @@ const QuizSelector: React.FC<QuizSelectorProps> = ({
               className={cn(
                 'flex items-center justify-center rounded-lg border-2 p-3 cursor-pointer transition-all',
                 questionType === 'multiple_choice'
-                  ? 'border-blue-500 bg-blue-50'
-                  : 'border-gray-200 hover:border-gray-300',
+                  ? 'border-blue-500 bg-blue-50 dark:bg-blue-900/30 dark:border-blue-400'
+                  : 'border-gray-200 hover:border-gray-300 dark:border-gray-700 dark:hover:border-gray-600',
                 isGenerating && 'opacity-50 cursor-not-allowed'
               )}
             >
@@ -173,8 +173,8 @@ const QuizSelector: React.FC<QuizSelectorProps> = ({
               className={cn(
                 'flex items-center justify-center rounded-lg border-2 p-3 cursor-pointer transition-all',
                 questionType === 'true_false'
-                  ? 'border-blue-500 bg-blue-50'
-                  : 'border-gray-200 hover:border-gray-300',
+                  ? 'border-blue-500 bg-blue-50 dark:bg-blue-900/30 dark:border-blue-400'
+                  : 'border-gray-200 hover:border-gray-300 dark:border-gray-700 dark:hover:border-gray-600',
                 isGenerating && 'opacity-50 cursor-not-allowed'
               )}
             >

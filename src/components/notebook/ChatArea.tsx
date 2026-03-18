@@ -199,9 +199,9 @@ const ChatArea = ({
   return <div className="flex-1 flex flex-col h-full overflow-hidden">
       {hasSource ? <div className="flex-1 flex flex-col h-full overflow-hidden">
           {/* Chat Header */}
-          <div className="p-4 border-b border-gray-200 flex-shrink-0">
+          <div className="p-4 border-b border-gray-200 dark:border-border flex-shrink-0 bg-white dark:bg-background">
             <div className="max-w-4xl mx-auto flex items-center justify-between">
-              <h2 className="text-lg font-medium text-gray-900">Chat</h2>
+              <h2 className="text-lg font-medium text-gray-900 dark:text-foreground">Chat</h2>
               {shouldShowRefreshButton && <Button variant="ghost" size="sm" onClick={handleRefreshChat} disabled={isDeletingChatHistory || isChatDisabled} className="flex items-center space-x-2">
                   <i className={`fi fi-rr-refresh h-4 w-4 ${isDeletingChatHistory ? 'animate-spin' : ''}`}></i>
                   <span>{isDeletingChatHistory ? 'Clearing...' : 'Clear Chat'}</span>
@@ -209,24 +209,24 @@ const ChatArea = ({
             </div>
           </div>
 
-          <ScrollArea className="flex-1 h-full" ref={scrollAreaRef}>
+          <ScrollArea className="flex-1 h-full bg-white dark:bg-background" ref={scrollAreaRef}>
             {/* Document Summary */}
-            <div className="p-8 border-b border-gray-200">
+            <div className="p-8 border-b border-gray-200 dark:border-border">
               <div className="max-w-4xl mx-auto">
                 <div className="flex items-center space-x-4 mb-6">
                   <div className="w-10 h-10 flex items-center justify-center bg-transparent">
                     {isGenerating ? <i className="fi fi-rr-spinner text-black font-normal w-10 h-10 animate-spin"></i> : <span className="text-[40px] leading-none">{notebook?.icon || '☕'}</span>}
                   </div>
                   <div>
-                    <h1 className="text-2xl font-medium text-gray-900">
+                    <h1 className="text-2xl font-medium text-gray-900 dark:text-foreground">
                       {isGenerating ? 'Generating content...' : notebook?.title || 'Untitled Notebook'}
                     </h1>
                     <p className="text-sm text-gray-600">{sourceCount} source{sourceCount !== 1 ? 's' : ''}</p>
                   </div>
                 </div>
                 
-                <div className="bg-gray-50 rounded-lg p-6 mb-6">
-                  {isGenerating ? <div className="flex items-center space-x-2 text-gray-600">
+                <div className="bg-gray-50 dark:bg-muted/30 rounded-lg p-6 mb-6">
+                  {isGenerating ? <div className="flex items-center space-x-2 text-gray-600 dark:text-muted-foreground">
                       
                       <p>AI is analyzing your source and generating a title and description...</p>
                     </div> : <MarkdownRenderer content={notebook?.description || 'No description available for this notebook.'} className="prose prose-gray max-w-none text-gray-700 leading-relaxed" />}
@@ -236,7 +236,7 @@ const ChatArea = ({
                 {(messages.length > 0 || pendingUserMessage || showAiLoading) && <div className="mb-6 space-y-4">
                     {messages.map((msg, index) => <div key={msg.id} className={`flex ${isUserMessage(msg) ? 'justify-end' : 'justify-start'}`}>
                         <div className={`${isUserMessage(msg) ? 'max-w-xs lg:max-w-md px-4 py-2 bg-blue-500 text-white rounded-lg' : 'w-full'}`}>
-                          <div className={isUserMessage(msg) ? '' : 'prose prose-gray max-w-none text-gray-800'}>
+                          <div className={isUserMessage(msg) ? '' : 'prose prose-gray dark:prose-invert max-w-none text-gray-800 dark:text-gray-200'}>
                             <MarkdownRenderer content={msg.message.content} className={isUserMessage(msg) ? '' : ''} onCitationClick={handleCitationClick} isUserMessage={isUserMessage(msg)} />
                           </div>
                           {isAiMessage(msg) && <div className="mt-2 flex justify-start">
@@ -307,12 +307,12 @@ const ChatArea = ({
           </div>
         </div> :
     // Empty State
-    <div className="flex-1 flex flex-col items-center justify-center p-8 overflow-hidden">
+    <div className="flex-1 flex flex-col items-center justify-center p-8 overflow-hidden bg-white dark:bg-background">
           <div className="text-center mb-8">
-            <div className="w-16 h-16 rounded-full mx-auto mb-4 flex items-center justify-center bg-gray-100">
-              <i className="fi fi-rr-upload h-8 w-8 text-slate-600"></i>
+            <div className="w-16 h-16 rounded-full mx-auto mb-4 flex items-center justify-center bg-gray-100 dark:bg-muted">
+              <i className="fi fi-rr-upload h-8 w-8 text-slate-600 dark:text-slate-400"></i>
             </div>
-            <h2 className="text-xl font-medium text-gray-900 mb-4">Add a source to get started</h2>
+            <h2 className="text-xl font-medium text-gray-900 dark:text-foreground mb-4">Add a source to get started</h2>
             <Button onClick={() => setShowAddSourcesDialog(true)}>
               <i className="fi fi-rr-upload h-4 w-4 mr-2"></i>
               Upload a source
