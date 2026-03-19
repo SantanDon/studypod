@@ -14,6 +14,7 @@ import { useNavigate } from "react-router-dom";
 import { useAuth } from "@/hooks/useAuth";
 import { localStorageService } from "@/services/localStorageService";
 import { LocalUser } from "@/services/localStorageService";
+import { ApiService } from "@/services/apiService";
 
 const AuthForm = () => {
   const [isSignUp, setIsSignUp] = useState(false);
@@ -102,27 +103,43 @@ const AuthForm = () => {
           throw new Error("Email and password are required");
         }
 
-        // Check if user exists and password is correct
-        const user = await localStorageService.authenticate(email, password);
+        let user, session;
 
-        if (!user) {
-          throw new Error(
-            "Invalid email or password. Please check your credentials and try again.",
-          );
+        try {
+          // Try backend API first (auth supports displayName/passphrase)
+          const res = await ApiService.signin({ displayName: email, passphrase: password });
+          user = res.user;
+          session = {
+            access_token: res.accessToken,
+            refresh_token: res.refreshToken, // might be undefined depending on backend
+            expires_at: Date.now() + 60 * 60 * 1000, // 1 hour
+            user: user,
+          };
+          console.log("Backend sign in successful:", user.displayName);
+        } catch (apiError) {
+          console.log("Backend auth failed, falling back to local storage...", apiError);
+          // Check if user exists in local storage as a fallback
+          user = await localStorageService.authenticate(email, password);
+
+          if (!user) {
+            throw new Error(
+              "Invalid credentials. Please check your username/email and password and try again.",
+            );
+          }
+
+          // Create a local session
+          session = {
+            access_token: window.crypto.randomUUID(),
+            refresh_token: window.crypto.randomUUID(),
+            expires_at: Date.now() + 60 * 60 * 1000, // 1 hour
+            user: user,
+          };
         }
-
-        // Create a session (in a real app, this would be more secure)
-        const session = {
-          access_token: window.crypto.randomUUID(),
-          refresh_token: window.crypto.randomUUID(),
-          expires_at: Date.now() + 60 * 60 * 1000, // 1 hour
-          user: user,
-        };
 
         // Use the context's signIn function to properly update state
         signIn(user, session);
 
-        console.log("Sign in successful:", user.email);
+        console.log("Sign in successful:", user.email || user.displayName);
 
         toast({
           title: "Welcome back!",
