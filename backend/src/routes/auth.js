@@ -236,4 +236,61 @@ router.post("/signout", (req, res) => {
   res.json({ message: "Signed out successfully" });
 });
 
+// ─── Agent API Key Management ─────────────────────────────────
+import { randomBytes } from 'crypto';
+import { hashApiKey } from '../middleware/auth.js';
+
+/**
+ * POST /api/auth/agent-key
+ * Generate a new API key. Requires a valid JWT (log in once in browser, copy token).
+ * After generating a key, you never need to use JWT again.
+ */
+router.post("/agent-key", authenticateToken, async (req, res) => {
+  try {
+    const { label = 'My Agent Key' } = req.body;
+    const rawKey = 'spm_' + randomBytes(32).toString('hex');
+    const keyHash = hashApiKey(rawKey);
+    const prefix = rawKey.slice(0, 12) + '...';
+    const id = uuidv4();
+    dbHelpers.createApiKey(id, req.user.userId, keyHash, prefix, label);
+    res.status(201).json({
+      message: 'API key created — save this now, it will not be shown again.',
+      key: rawKey,
+      label,
+      prefix,
+      id,
+    });
+  } catch (error) {
+    console.error('Create API key error:', error);
+    res.status(500).json({ error: 'Failed to create API key' });
+  }
+});
+
+/**
+ * GET /api/auth/agent-key
+ * List all your API keys (hashes never returned).
+ */
+router.get("/agent-key", authenticateToken, (req, res) => {
+  try {
+    res.json(dbHelpers.listApiKeys(req.user.userId));
+  } catch (error) {
+    res.status(500).json({ error: 'Failed to list API keys' });
+  }
+});
+
+/**
+ * DELETE /api/auth/agent-key/:id
+ * Revoke an API key.
+ */
+router.delete("/agent-key/:id", authenticateToken, (req, res) => {
+  try {
+    const result = dbHelpers.deleteApiKey(req.params.id, req.user.userId);
+    if (result.changes === 0) return res.status(404).json({ error: 'Key not found' });
+    res.json({ message: 'API key revoked' });
+  } catch (error) {
+    res.status(500).json({ error: 'Failed to revoke API key' });
+  }
+});
+
 export default router;
+

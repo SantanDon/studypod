@@ -205,6 +205,20 @@ db.exec(`
   );
 `);
 
+// Create agent_api_keys table
+db.exec(`
+  CREATE TABLE IF NOT EXISTS agent_api_keys (
+    id TEXT PRIMARY KEY,
+    user_id TEXT NOT NULL,
+    key_hash TEXT NOT NULL UNIQUE,
+    label TEXT NOT NULL DEFAULT 'My Agent Key',
+    prefix TEXT NOT NULL,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    last_used_at DATETIME,
+    FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+  );
+`);
+
 // Create indexes for better performance
 db.exec(`
   CREATE INDEX IF NOT EXISTS idx_notebooks_user_id ON notebooks(user_id);
@@ -217,7 +231,10 @@ db.exec(`
   CREATE INDEX IF NOT EXISTS idx_sync_data_user_id ON sync_data(user_id);
   CREATE INDEX IF NOT EXISTS idx_sync_data_type ON sync_data(type);
   CREATE INDEX IF NOT EXISTS idx_sync_data_updated_at ON sync_data(updated_at);
+  CREATE INDEX IF NOT EXISTS idx_api_keys_user_id ON agent_api_keys(user_id);
+  CREATE INDEX IF NOT EXISTS idx_api_keys_key_hash ON agent_api_keys(key_hash);
 `);
+
 
 console.log('✅ Database initialized successfully at:', DB_PATH);
 console.log('📊 Tables created:');

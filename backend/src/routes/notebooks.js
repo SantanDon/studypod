@@ -155,6 +155,51 @@ router.post("/:id/notes", async (req, res) => {
 });
 
 /**
+ * GET /api/notebooks/:id/notes/:noteId
+ * Get a single note
+ */
+router.get("/:id/notes/:noteId", (req, res) => {
+  try {
+    const note = dbHelpers.getNoteById(req.params.noteId, req.user.userId);
+    if (!note) return res.status(404).json({ error: "Note not found" });
+    res.json(note);
+  } catch (error) {
+    res.status(500).json({ error: "Failed to get note" });
+  }
+});
+
+/**
+ * PUT /api/notebooks/:id/notes/:noteId
+ * Update note content
+ */
+router.put("/:id/notes/:noteId", (req, res) => {
+  try {
+    const { content } = req.body;
+    if (!content) return res.status(400).json({ error: "content is required" });
+    const result = dbHelpers.updateNote(req.params.noteId, req.user.userId, content);
+    if (result.changes === 0) return res.status(404).json({ error: "Note not found" });
+    res.json(dbHelpers.getNoteById(req.params.noteId, req.user.userId));
+  } catch (error) {
+    res.status(500).json({ error: "Failed to update note" });
+  }
+});
+
+/**
+ * DELETE /api/notebooks/:id/notes/:noteId
+ * Delete a note
+ */
+router.delete("/:id/notes/:noteId", (req, res) => {
+  try {
+    const result = dbHelpers.deleteNote(req.params.noteId, req.user.userId);
+    if (result.changes === 0) return res.status(404).json({ error: "Note not found" });
+    res.json({ message: "Note deleted" });
+  } catch (error) {
+    res.status(500).json({ error: "Failed to delete note" });
+  }
+});
+
+
+/**
  * POST /api/notebooks/:id/memory/search
  * Semantic search in EverMemOS for this notebook's context
  */
