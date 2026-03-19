@@ -1,0 +1,17 @@
+{
+  "name": "studypodlm-mcp-server",
+  "version": "1.0.0",
+  "description": "MCP server for StudyPodLM - lets CLI agents access notebooks via natural language",
+  "type": "module",
+  "main": "index.js",
+  "bin": {
+    "studypodlm-mcp": "./index.js"
+  },
+  "scripts": {
+    "start": "node index.js"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.0.0",
+    "dotenv": "^16.0.0"
+  }
+}
