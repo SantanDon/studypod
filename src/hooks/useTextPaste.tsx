@@ -127,7 +127,7 @@ export const useTextPaste = () => {
       
       toast({
         title: "Text Added Successfully",
-        description: `Added "${title}" to your notebook with ${sourceData.metadata.wordCount} words.`,
+        description: `Added "${title}" to your notebook with ${sourcePayload.metadata.wordCount} words.`,
       });
 
       return true;
