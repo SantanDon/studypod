@@ -2,13 +2,8 @@
  * AI Chat Service — StudyPodLM
  *
  * Powers the /chat endpoint. Consumes all notebook sources and notes,
- * builds a rich context prompt, and returns a grounded AI answer via Gemini.
- *
- * This is the engine that makes StudyPodLM useful to AI agents:
- * instead of the human re-explaining source material, the agent reads it directly.
+ * builds a rich context prompt, and returns a grounded AI answer via Groq.
  */
-
-import { GoogleGenAI } from '@google/genai';
 
 /**
  * Build a structured context block from all notebook sources and notes.
@@ -59,7 +54,6 @@ function buildNotebookContext(notebook, sources, notes) {
 
 /**
  * Build the system prompt that shapes how the AI behaves in StudyPodLM.
- * This is what gives the AI its character as a collaborative partner.
  */
 function buildSystemPrompt(callerType = 'unknown') {
   return `You are StudyPod AI, a premium collaborative research partner. 
@@ -95,101 +89,59 @@ IMPORTANT: Emulate the professional, structured quality of NotebookLM. Be a stra
  * @returns {{ answer: string, groundedSources: string[], tokensUsed: number }}
  */
 export async function chatWithNotebook({ notebook, sources, notes, message, history = [], callerType = 'human' }) {
-  if (!process.env.GEMINI_API_KEY) {
-    throw new Error('GEMINI_API_KEY not configured. Set it in backend/.env to enable AI chat.');
+  if (!process.env.VITE_GROQ_API_KEY) {
+    throw new Error('VITE_GROQ_API_KEY not configured in backend/.env to enable AI chat.');
   }
 
   const notebookContext = buildNotebookContext(notebook, sources, notes);
   const systemPrompt = buildSystemPrompt(callerType);
 
-  // Build conversation history for multi-turn context
-  const contents = [];
+  const groqMessages = [
+    { role: 'system', content: systemPrompt }
+  ];
 
-  // Add conversation history (limit to last 10 turns to control token usage)
+  // Add conversation history
   const recentHistory = history.slice(-10);
   for (const turn of recentHistory) {
-    const role = (turn.role === 'agent' || turn.role === 'assistant') ? 'model' : 'user';
-    const text = turn.content || '';
-    
-    // Gemini explicitly requires strictly alternating roles (user, model, user, model).
-    // If a previous request failed, the history will have consecutive 'user' roles, breaking the API.
-    // To protect against this, collapse consecutive messages of the same role.
-    if (contents.length > 0 && contents[contents.length - 1].role === role) {
-      contents[contents.length - 1].parts[0].text += `\n\n[Previous message]: ${text}`;
-    } else {
-      contents.push({ role, parts: [{ text }] });
-    }
+    groqMessages.push({
+      role: (turn.role === 'agent' || turn.role === 'assistant') ? 'assistant' : 'user',
+      content: turn.content || ''
+    });
   }
 
   // Current message includes full notebook context
   const fullMessage = `${notebookContext}\n\n=== USER QUESTION ===\n${message}`;
-
-  // Ensure current message also alternates correctly
-  if (contents.length > 0 && contents[contents.length - 1].role === 'user') {
-    contents[contents.length - 1].parts[0].text += `\n\n${fullMessage}`;
-  } else {
-    contents.push({ role: 'user', parts: [{ text: fullMessage }] });
-  }
+  groqMessages.push({ role: 'user', content: fullMessage });
 
   let answer = '';
   let tokensUsed = 0;
 
   try {
-    if (!process.env.GEMINI_API_KEY) throw new Error("No Gemini key");
-    // 1. Primary: Use Gemini via @google/genai
-    const gemini = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
-    const response = await gemini.models.generateContent({
-      model: 'gemini-2.0-flash',
-      contents,
-      config: {
-        systemInstruction: systemPrompt,
-        temperature: 0.4,
-        maxOutputTokens: 2048,
-      }
-    });
-    answer = response.text;
-    tokensUsed = response.usageMetadata?.totalTokenCount || 0;
-  } catch (primaryError) {
-    if (!process.env.VITE_GROQ_API_KEY) {
-      throw new Error(`AI processing failed: ${primaryError.message}. No Groq fallback key available.`);
-    }
-    // 2. Fallback: Use Groq via raw fetch
-    console.log(`☁️ Gemini failed (${primaryError.message}), falling back to Groq API...`);
-    
-    // Map Gemini contents format back to OpenAI format for Groq
-    const groqMessages = [
-      { role: 'system', content: systemPrompt }
-    ];
-    
-    for (const msg of contents) {
-       groqMessages.push({
-         role: msg.role === 'model' ? 'assistant' : 'user',
-         content: msg.parts[0].text
-       });
-    }
-
     const groqResponse = await fetch('https://api.groq.com/openai/v1/chat/completions', {
-       method: 'POST',
-       headers: {
-         'Authorization': `Bearer ${process.env.VITE_GROQ_API_KEY}`,
-         'Content-Type': 'application/json'
-       },
-       body: JSON.stringify({
-         model: 'llama-3.3-70b-versatile',
-         messages: groqMessages,
-         temperature: 0.4,
-         max_tokens: 2048
-       })
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${process.env.VITE_GROQ_API_KEY}`,
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify({
+        model: 'llama-3.3-70b-versatile',
+        messages: groqMessages,
+        temperature: 0.4,
+        max_tokens: 2048
+      })
     });
     
     if (!groqResponse.ok) {
-       const err = await groqResponse.json().catch(()=>({}));
-       throw new Error(err.error?.message || `Groq API request failed with status ${groqResponse.status}`);
+      const err = await groqResponse.json().catch(()=>({}));
+      throw new Error(err.error?.message || `Groq API request failed with status ${groqResponse.status}`);
     }
     
     const data = await groqResponse.json();
     answer = data.choices?.[0]?.message?.content || "No response generated.";
     tokensUsed = data.usage?.total_tokens || 0;
+  } catch (error) {
+    console.error('Groq AI processing failed:', error);
+    throw new Error(`AI processing failed: ${error.message}`);
   }
 
   // Identify which sources the answer likely draws from (simple keyword matching)
