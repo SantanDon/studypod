@@ -39,6 +39,24 @@ export async function authenticateToken(req, res, next) {
   // JWT path
   try {
     const user = jwt.verify(token, JWT_SECRET);
+    
+    // VERCEL WORKAROUND: If user exists in JWT but not in DB (DB reset)
+    // We auto-provision a shell record so Foreign Keys don't break
+    const userId = user.userId || user.id;
+    if (userId) {
+      const existing = dbHelpers.getUserById(userId);
+      if (!existing && user.email) {
+        console.log(`🛠️ Auto-provisioning user ${userId} after DB reset...`);
+        try {
+          // Password hash is irrelevant here as they are already authed via JWT
+          // We use a dummy hash as it's a required field in the schema
+          dbHelpers.createUser(userId, user.email, 'AUTOPROVISIONED_SESSION_RECOVERY');
+        } catch (provisionError) {
+          console.error('Failed to auto-provision user:', provisionError);
+        }
+      }
+    }
+
     req.user = user;
     next();
   } catch (error) {
