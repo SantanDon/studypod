@@ -10,7 +10,7 @@ import { useAuth } from '@/hooks/useAuth';
 import { ApiService } from '@/services/apiService';
 
 export function DeveloperSettings() {
-  const { session } = useAuth();
+  const { session, loading } = useAuth();
   const { toast } = useToast();
   const [copied, setCopied] = useState(false);
   
@@ -50,9 +50,11 @@ export function DeveloperSettings() {
       if (data.code) {
         setPairingCode(data.code);
         setPairingExpires(data.expiresAt);
+        // Auto-copy the code for maximum convenience
+        navigator.clipboard.writeText(data.code);
         toast({
           title: "Pairing Active",
-          description: "Invitation code generated successfully.",
+          description: "Access code generated and copied to clipboard.",
         });
       }
     } catch (error) {
@@ -79,7 +81,12 @@ export function DeveloperSettings() {
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-4">
-          {!currentToken ? (
+          {loading ? (
+            <div className="flex flex-col items-center justify-center p-8 space-y-4 border-2 border-dashed rounded-xl bg-muted/30">
+              <RefreshCw className="w-8 h-8 text-muted-foreground animate-spin opacity-50" />
+              <p className="text-sm font-medium text-muted-foreground">Verifying secure connection...</p>
+            </div>
+          ) : !currentToken ? (
             <div className="flex flex-col items-center justify-center p-8 space-y-4 border-2 border-dashed rounded-xl bg-muted/30">
               <ShieldCheck className="w-10 h-10 text-muted-foreground opacity-30" />
               <div className="text-center max-w-[280px]">
@@ -106,16 +113,24 @@ export function DeveloperSettings() {
               </div>
               <Button onClick={initiatePairing} disabled={isInitializing}>
                 {isInitializing ? <RefreshCw className="w-4 h-4 mr-2 animate-spin" /> : <ShieldCheck className="w-4 h-4 mr-2" />}
-                Generate Pairing Code
+                Generate Access Code
               </Button>
             </div>
           ) : (
             <div className="flex flex-col items-center justify-center p-6 space-y-4 border-2 border-blue-500/30 rounded-xl bg-blue-500/5">
-              <div className="text-4xl font-black tracking-[0.5em] text-blue-600 dark:text-blue-400 font-mono">
+              <div className="text-4xl font-black tracking-[0.5em] text-blue-600 dark:text-blue-400 font-mono flex items-center gap-3">
                 {pairingCode}
+                <Button 
+                  variant="ghost" 
+                  size="icon" 
+                  className="h-8 w-8 rounded-full hover:bg-blue-100 dark:hover:bg-blue-900/50"
+                  onClick={() => copyToClipboard(pairingCode, 'Access Code')}
+                >
+                  <Copy className="h-4 w-4 text-blue-600 dark:text-blue-400" />
+                </Button>
               </div>
               <div className="text-center">
-                <p className="text-sm font-semibold">Enter this code in your agent</p>
+                <p className="text-sm font-semibold">Paste this PIN into your AI Agent</p>
                 <p className="text-[10px] text-muted-foreground mt-1">
                   Expires at {new Date(pairingExpires!).toLocaleTimeString()}
                 </p>
@@ -126,9 +141,6 @@ export function DeveloperSettings() {
             </div>
           )}
         </CardContent>
-        <CardFooter className="text-[10px] text-muted-foreground border-t bg-muted/20 py-2 rounded-b-lg">
-          Connect via CLI: <code className="ml-1 bg-background px-1 rounded text-[9px]">node backend/scripts/kilo_pair.js {pairingCode || '######'}</code>
-        </CardFooter>
       </Card>
 
       <Card>
