@@ -59,7 +59,14 @@ router.post("/", (req, res, next) => {
  */
 router.get("/:id", (req, res) => {
   try {
-    const notebook = dbHelpers.getNotebookById(req.params.id, req.user.userId);
+    let notebook = dbHelpers.getNotebookById(req.params.id, req.user.userId);
+    if (!notebook) {
+      // JIT recovery for Vercel cold-start DB wipes
+      try {
+        dbHelpers.createNotebook(req.params.id, req.user.userId, "Recovered Notebook", "Auto-provisioned");
+        notebook = dbHelpers.getNotebookById(req.params.id, req.user.userId);
+      } catch(e) {}
+    }
     if (!notebook) {
       return res.status(404).json({ error: "Notebook not found" });
     }
@@ -97,9 +104,24 @@ router.put("/:id", (req, res) => {
       return res.status(400).json({ error: "No updates provided" });
     }
 
+    // VERCEL WORKAROUND: Auto-provision notebook if it was wiped before updating
+    let notebook = dbHelpers.getNotebookById(req.params.id, req.user.userId);
+    if (!notebook) {
+      console.log(`🛠️ PUT /:id: Auto-provisioning missing notebook ${req.params.id}...`);
+      try {
+        dbHelpers.createNotebook(req.params.id, req.user.userId, title || "Recovered Notebook", description || "Automatically provisioned");
+      } catch (e) {
+        console.error('Auto-provision failed:', e);
+      }
+    }
+
     dbHelpers.updateNotebook(req.params.id, req.user.userId, updates);
-    const notebook = dbHelpers.getNotebookById(req.params.id, req.user.userId);
+    notebook = dbHelpers.getNotebookById(req.params.id, req.user.userId);
     
+    if (!notebook) {
+      return res.status(404).json({ error: "Notebook not found" });
+    }
+
     // Parse it back for the response
     if (notebook.example_questions && typeof notebook.example_questions === 'string') {
       try { notebook.example_questions = JSON.parse(notebook.example_questions); } catch (e) {}
@@ -108,7 +130,7 @@ router.put("/:id", (req, res) => {
     res.json(notebook);
   } catch (error) {
     console.error("Update notebook error:", error);
-    res.status(500).json({ error: "Failed to update notebook" });
+    res.status(500).json({ error: "Failed to update notebook", detail: error.message, stack: error.stack });
   }
 });
 
@@ -135,7 +157,10 @@ router.delete("/:id", (req, res) => {
  */
 router.get("/:id/notes", (req, res) => {
   try {
-    const notebook = dbHelpers.getNotebookById(req.params.id, req.user.userId);
+    let notebook = dbHelpers.getNotebookById(req.params.id, req.user.userId);
+    if (!notebook) {
+      try { dbHelpers.createNotebook(req.params.id, req.user.userId, "Recovered Notebook", "Auto-provisioned"); notebook = dbHelpers.getNotebookById(req.params.id, req.user.userId); } catch(e) {}
+    }
     if (!notebook) return res.status(404).json({ error: { code: "NOTEBOOK_NOT_FOUND", message: "Notebook not found" } });
     const notes = dbHelpers.getNotesByNotebookId(req.params.id, req.user.userId);
     res.json(notes);
@@ -322,8 +347,32 @@ router.put("/:id/sources/:sourceId", (req, res) => {
     const updates = req.body;
     const result = dbHelpers.updateSource(req.params.sourceId, req.user.userId, updates);
     
+    // VERCEL WORKAROUND: If changes is 0, the source was wiped by Vercel serverless. We MUST auto-provision it.
     if (result.changes === 0) {
-      return res.status(404).json({ error: "Source not found or no changes made" });
+      console.log(`🛠️ PUT /sources/:sourceId: Source missing, auto-provisioning...`);
+      try {
+        let notebook = dbHelpers.getNotebookById(req.params.id, req.user.userId);
+        if (!notebook) {
+           dbHelpers.createNotebook(req.params.id, req.user.userId, "Recovered Notebook", "Auto-provisioned");
+        }
+        
+        dbHelpers.createSource(
+            req.params.sourceId, req.params.id, req.user.userId, 
+            updates.title || "Recovered Source", 
+            updates.type || "unknown", 
+            updates.content || "", 
+            updates.url || "", 
+            updates.metadata ? (typeof updates.metadata === 'string' ? updates.metadata : JSON.stringify(updates.metadata)) : null,
+            updates.file_path || "",
+            updates.file_size || 0
+        );
+        if (updates.processing_status) {
+           dbHelpers.updateSource(req.params.sourceId, req.user.userId, { processing_status: updates.processing_status });
+        }
+      } catch (e) {
+          console.error("Failed to auto-provision source:", e);
+          return res.status(404).json({ error: "Source not found and could not be recovered" });
+      }
     }
     
     res.json({ success: true, message: "Source updated" });
@@ -339,7 +388,10 @@ router.put("/:id/sources/:sourceId", (req, res) => {
  */
 router.get("/:id/sources", (req, res) => {
   try {
-    const notebook = dbHelpers.getNotebookById(req.params.id, req.user.userId);
+    let notebook = dbHelpers.getNotebookById(req.params.id, req.user.userId);
+    if (!notebook) {
+      try { dbHelpers.createNotebook(req.params.id, req.user.userId, "Recovered Notebook", "Auto-provisioned"); notebook = dbHelpers.getNotebookById(req.params.id, req.user.userId); } catch(e) {}
+    }
     if (!notebook) return res.status(404).json({ error: { code: "NOTEBOOK_NOT_FOUND", message: "Notebook not found" } });
     const sources = dbHelpers.getSourcesByNotebookId(req.params.id, req.user.userId);
     res.json(sources);
@@ -355,7 +407,10 @@ router.get("/:id/sources", (req, res) => {
  */
 router.get("/:id/messages", (req, res) => {
   try {
-    const notebook = dbHelpers.getNotebookById(req.params.id, req.user.userId);
+    let notebook = dbHelpers.getNotebookById(req.params.id, req.user.userId);
+    if (!notebook) {
+      try { dbHelpers.createNotebook(req.params.id, req.user.userId, "Recovered Notebook", "Auto-provisioned"); notebook = dbHelpers.getNotebookById(req.params.id, req.user.userId); } catch(e) {}
+    }
     if (!notebook) return res.status(404).json({ error: { code: "NOTEBOOK_NOT_FOUND", message: "Notebook not found" } });
     const messages = dbHelpers.getChatMessagesByNotebookId(req.params.id, req.user.userId);
     res.json(messages);
@@ -419,8 +474,20 @@ router.post("/:id/chat", async (req, res) => {
     const notebookId = req.params.id;
     const userId = req.user.userId;
 
-    const notebook = dbHelpers.getNotebookById(notebookId, userId);
-    if (!notebook) return res.status(404).json({ error: "Notebook not found" });
+    // JIT recovery: the chat endpoint often hits a blank Vercel DB after a serverless cold-start
+    let notebook = dbHelpers.getNotebookById(notebookId, userId);
+    let jitError = null;
+    if (!notebook) {
+      console.log(`🛠️ Chat: Auto-provisioning notebook ${notebookId}...`);
+      try {
+        dbHelpers.createNotebook(notebookId, userId, "Recovered Notebook", "Auto-provisioned");
+        notebook = dbHelpers.getNotebookById(notebookId, userId);
+      } catch(e) { 
+        console.error('Chat JIT provision failed:', e);
+        jitError = e.message;
+      }
+    }
+    if (!notebook) return res.status(404).json({ error: "Notebook not found", detail: jitError });
 
     const sources = dbHelpers.getSourcesByNotebookId(notebookId, userId);
     const notes = dbHelpers.getNotesByNotebookId(notebookId, userId);
