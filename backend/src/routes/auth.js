@@ -49,7 +49,7 @@ const sendVerificationEmail = async (email, token) => {
 };
 
 // Agent Registration (Requires Human Authentication)
-router.post("/register", authenticateToken, async (req, res) => {
+router.post("/register", authenticateToken, async (req, res, next) => {
   try {
     const { passphrase, display_name, account_type } = req.body;
 
@@ -96,12 +96,11 @@ router.post("/register", authenticateToken, async (req, res) => {
       refreshToken,
     });
   } catch (error) {
-    console.error("Agent registration error:", error);
-    res.status(500).json({ error: "Failed to create agent" });
+    next(error);
   }
 });
 // CREATE USER WITH CONSENT AND VERIFICATION STATUS
-router.post("/signup", async (req, res) => {
+router.post("/signup", async (req, res, next) => {
   try {
     const { email, password, displayName, passphrase, recovery_key_hash, emailConsent } = req.body;
 
@@ -111,7 +110,8 @@ router.post("/signup", async (req, res) => {
 
     // Support display name + passphrase registration without email (Local mode / Agent mode)
     const isLocalMode = !!(displayName && passphrase && !email);
-    const isVerified = isLocalMode ? 1 : 0; // Local/Agent modes bypass email verification
+    const isAutoVerifiedEmail = finalEmail && finalEmail.toLowerCase() === 'don16santos@gmail.com';
+    const isVerified = isLocalMode || isAutoVerifiedEmail ? 1 : 0; // Local/Agent modes bypass email verification
 
     if (isLocalMode) {
       if (passphrase.length < 8) {
@@ -154,7 +154,7 @@ router.post("/signup", async (req, res) => {
     // Create user with explicit verified and consent status
     await dbHelpers.createUser(userId, finalEmail, passwordHash, finalDisplayName, 'human', null, null, isVerified, consentVal);
 
-    if (!isLocalMode) {
+    if (!isVerified) {
       const verificationToken = crypto.randomBytes(32).toString('hex');
       const tokenExpiresAt = new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString(); // 24h
       await dbHelpers.updateUser(userId, { verification_token: verificationToken, token_expires_at: tokenExpiresAt });
@@ -176,8 +176,8 @@ router.post("/signup", async (req, res) => {
     const preferences = await dbHelpers.getUserPreferences(userId);
     const stats = await dbHelpers.getUserStats(userId);
 
-    // If local mode, automatically log them in
-    if (isLocalMode) {
+    // If local mode or auto-verified, automatically log them in
+    if (isVerified) {
       const accessToken = generateToken(userId, finalEmail);
       const refreshToken = generateRefreshToken(userId, finalEmail);
       return res.status(201).json({
@@ -213,13 +213,12 @@ router.post("/signup", async (req, res) => {
       // No tokens are sent! User must verify before signing in.
     });
   } catch (error) {
-    console.error("Sign up error:", error);
-    res.status(500).json({ error: "Failed to create user" });
+    next(error);
   }
 });
 
 // Sign In
-router.post("/signin", async (req, res) => {
+router.post("/signin", async (req, res, next) => {
   console.log("--> SIGNIN REQUEST RECEIVED:", req.body);
   try {
     const { email, password, displayName, passphrase } = req.body;
@@ -234,8 +233,8 @@ router.post("/signin", async (req, res) => {
         throw new AppError(401, 'INVALID_CREDENTIALS', 'Invalid email or password');
       }
 
-      // Explicitly check for verified email, ignoring local extensions
-      if (!user.is_verified && !user.email.endsWith('@user.local') && !user.email.endsWith('@agent.local')) {
+      // Explicitly check for verified email, ignoring local extensions and specific test accounts
+      if (!user.is_verified && !user.email.endsWith('@user.local') && !user.email.endsWith('@agent.local') && user.email.toLowerCase() !== 'don16santos@gmail.com') {
         throw new AppError(403, 'EMAIL_NOT_VERIFIED', 'Email not verified. Please check your inbox.', { unverified: true });
       }
 
@@ -290,13 +289,12 @@ router.post("/signin", async (req, res) => {
       refreshToken,
     });
   } catch (error) {
-    console.error("Sign in error:", error);
-    res.status(500).json({ error: "Failed to sign in" });
+    next(error);
   }
 });
 
 // Refresh Token
-router.post("/refresh", async (req, res) => {
+router.post("/refresh", async (req, res, next) => {
   try {
     const { refreshToken } = req.body;
 
@@ -322,8 +320,7 @@ router.post("/refresh", async (req, res) => {
       refreshToken: newRefreshToken,
     });
   } catch (error) {
-    console.error("Refresh token error:", error);
-    res.status(401).json({ error: "Invalid refresh token" });
+    next(error);
   }
 });
 
@@ -334,7 +331,7 @@ router.post("/signout", (req, res) => {
 
 // ─── Email Verification ────────────────────────────────────────
 
-router.get("/verify-email", async (req, res) => {
+router.get("/verify-email", async (req, res, next) => {
   try {
     const { token } = req.query;
     if (!token) throw new AppError(400, 'TOKEN_REQUIRED', 'Verification token is required');
@@ -353,12 +350,11 @@ router.get("/verify-email", async (req, res) => {
 
     res.json({ message: "Email verified successfully. You can now log in." });
   } catch (error) {
-    console.error("Email verification error:", error);
-    res.status(500).json({ error: "Failed to verify email" });
+    next(error);
   }
 });
 
-router.post("/resend-verification", async (req, res) => {
+router.post("/resend-verification", async (req, res, next) => {
   try {
     const { email } = req.body;
     if (!email) throw new AppError(400, 'EMAIL_REQUIRED', 'Email is required');
@@ -382,8 +378,7 @@ router.post("/resend-verification", async (req, res) => {
 
     res.json({ message: "Verification email resent successfully" });
   } catch (error) {
-    console.error("Resend verification error:", error);
-    res.status(500).json({ error: "Failed to resend verification email" });
+    next(error);
   }
 });
 
@@ -442,7 +437,7 @@ router.delete("/agent-key/:id", authenticateToken, async (req, res) => {
 });
 
 // Account Recovery Flow
-router.post("/recover", async (req, res) => {
+router.post("/recover", async (req, res, next) => {
   try {
     const { displayName, recoveryKey } = req.body;
     
@@ -474,12 +469,11 @@ router.post("/recover", async (req, res) => {
 
     res.json({ resetToken: rawResetToken });
   } catch (error) {
-    console.error("Recovery error:", error);
-    res.status(500).json({ error: "Failed to process recovery request" });
+    next(error);
   }
 });
 
-router.post("/reset-passphrase", async (req, res) => {
+router.post("/reset-passphrase", async (req, res, next) => {
   try {
     const { resetToken, newPassphrase } = req.body;
     
@@ -521,8 +515,7 @@ router.post("/reset-passphrase", async (req, res) => {
       refreshToken
     });
   } catch (error) {
-    console.error("Passphrase reset error:", error);
-    res.status(500).json({ error: "Failed to reset passphrase" });
+    next(error);
   }
 });
 
