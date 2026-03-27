@@ -12,8 +12,17 @@ const __dirname = path.dirname(__filename);
 
 // Load environment variables
 dotenv.config();
-// Also load frontend .env.local so we can access VITE_GROQ_API_KEY for the AI fallback
-dotenv.config({ path: path.join(__dirname, '../../.env.local') });
+
+// Consolidated environment validation
+const REQUIRED_ENVS = ['TURSO_DATABASE_URL', 'TURSO_AUTH_TOKEN', 'VITE_GROQ_API_KEY', 'JWT_SECRET'];
+const missingEnvs = REQUIRED_ENVS.filter(env => !process.env[env]);
+
+if (missingEnvs.length > 0 && process.env.NODE_ENV === 'production') {
+  console.error(`❌ CRITICAL: Missing required environment variables: ${missingEnvs.join(', ')}`);
+  process.exit(1);
+} else if (missingEnvs.length > 0) {
+  console.warn(`⚠️ Warning: Missing environment variables: ${missingEnvs.join(', ')}. Some features may be disabled.`);
+}
 
 const app = express();
 const PORT = process.env.PORT || 3001;

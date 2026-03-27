@@ -61,7 +61,7 @@ export async function extractYoutubeTranscript(url: string): Promise<YoutubeTran
       try {
         const errorJson = JSON.parse(errorText);
         if (errorJson.error) {
-          errorMessage = errorJson.error;
+          errorMessage = typeof errorJson.error === 'object' ? errorJson.error.message : errorJson.error;
         }
       } catch (e) {
         // ignore json parse error

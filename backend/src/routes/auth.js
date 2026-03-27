@@ -11,6 +11,7 @@ import {
 } from "../middleware/auth.js";
 import crypto, { randomBytes } from "crypto";
 import { Resend } from "resend";
+import { AppError } from "../middleware/errorHandler.js";
 
 const router = express.Router();
 const resend = new Resend(process.env.RESEND_API_KEY || "re_dummy");
@@ -53,17 +54,17 @@ router.post("/register", authenticateToken, async (req, res) => {
     const { passphrase, display_name, account_type } = req.body;
 
     if (!passphrase || !display_name || account_type !== "agent") {
-      return res.status(400).json({ error: "Invalid agent registration payload" });
+      throw new AppError(400, 'INVALID_PAYLOAD', 'Invalid agent registration payload');
     }
 
     if (passphrase.length < 8) {
-      return res.status(400).json({ error: "Passphrase must be at least 8 characters" });
+      throw new AppError(400, 'WEAK_PASSPHRASE', 'Passphrase must be at least 8 characters');
     }
 
     // Check if display name is already taken
     const existingUser = await dbHelpers.getUserByDisplayName(display_name);
     if (existingUser) {
-      return res.status(400).json({ error: "Display name is already taken" });
+      throw new AppError(400, 'DISPLAY_NAME_TAKEN', 'Display name is already taken');
     }
 
     const userId = uuidv4();
@@ -114,31 +115,31 @@ router.post("/signup", async (req, res) => {
 
     if (isLocalMode) {
       if (passphrase.length < 8) {
-        return res.status(400).json({ error: "Passphrase must be at least 8 characters" });
+        throw new AppError(400, 'WEAK_PASSPHRASE', 'Passphrase must be at least 8 characters');
       }
       finalEmail = `${displayName.toLowerCase().replace(/[^a-z0-9]/g, '')}@user.local`;
       finalPassword = passphrase;
     } else {
       // Validate traditional input
       if (!email || !password) {
-        return res.status(400).json({ error: "Email and password (or displayName and passphrase) are required" });
+        throw new AppError(400, 'MISSING_CREDENTIALS', 'Email and password (or displayName and passphrase) are required');
       }
       if (password.length < 6) {
-        return res.status(400).json({ error: "Password must be at least 6 characters" });
+        throw new AppError(400, 'WEAK_PASSWORD', 'Password must be at least 6 characters');
       }
     }
 
     if (finalDisplayName) {
       const existingName = await dbHelpers.getUserByDisplayName(finalDisplayName);
       if (existingName) {
-        return res.status(400).json({ error: "Display name is already taken" });
+        throw new AppError(400, 'DISPLAY_NAME_TAKEN', 'Display name is already taken');
       }
     }
 
     // Check if user already exists
     const existingUser = await dbHelpers.getUserByEmail(finalEmail);
     if (existingUser) {
-      return res.status(400).json({ error: "User already exists" });
+      throw new AppError(400, 'USER_EXISTS', 'User already exists');
     }
 
     // Hash password
@@ -230,17 +231,17 @@ router.post("/signin", async (req, res) => {
       // Human auth flow
       user = await dbHelpers.getUserByEmail(email);
       if (!user) {
-        return res.status(401).json({ error: "Invalid email or password" });
+        throw new AppError(401, 'INVALID_CREDENTIALS', 'Invalid email or password');
       }
 
       // Explicitly check for verified email, ignoring local extensions
       if (!user.is_verified && !user.email.endsWith('@user.local') && !user.email.endsWith('@agent.local')) {
-        return res.status(403).json({ error: "Email not verified. Please check your inbox.", unverified: true });
+        throw new AppError(403, 'EMAIL_NOT_VERIFIED', 'Email not verified. Please check your inbox.', { unverified: true });
       }
 
       const isValidPassword = await bcrypt.compare(password, user.password_hash);
       if (!isValidPassword) {
-        return res.status(401).json({ error: "Invalid email or password" });
+        throw new AppError(401, 'INVALID_CREDENTIALS', 'Invalid email or password');
       }
     } else if (displayName && passphrase) {
       console.log("--> Agent auth flow... DisplayName:", displayName);
@@ -248,18 +249,18 @@ router.post("/signin", async (req, res) => {
       user = await dbHelpers.getUserByDisplayName(displayName);
       console.log("--> User found:", user ? user.id : "NO");
       if (!user) {
-        return res.status(401).json({ error: "Invalid display name or passphrase" });
+        throw new AppError(401, 'INVALID_CREDENTIALS', 'Invalid display name or passphrase');
       }
 
       console.log("--> Comparing passwords...");
       const isValidPassword = await bcrypt.compare(passphrase, user.password_hash);
       console.log("--> Password valid:", isValidPassword);
       if (!isValidPassword) {
-        return res.status(401).json({ error: "Invalid display name or passphrase" });
+        throw new AppError(401, 'INVALID_CREDENTIALS', 'Invalid display name or passphrase');
       }
     } else {
       console.log("--> Missing credentials");
-      return res.status(400).json({ error: "Missing required credentials" });
+      throw new AppError(400, 'MISSING_CREDENTIALS', 'Missing required credentials');
     }
 
     console.log("--> Generating tokens for", user.email);
@@ -336,15 +337,15 @@ router.post("/signout", (req, res) => {
 router.get("/verify-email", async (req, res) => {
   try {
     const { token } = req.query;
-    if (!token) return res.status(400).json({ error: "Verification token is required" });
+    if (!token) throw new AppError(400, 'TOKEN_REQUIRED', 'Verification token is required');
 
     const user = await dbHelpers.getUserByVerificationToken(token);
     if (!user) {
-      return res.status(400).json({ error: "Invalid or already used verification token" });
+      throw new AppError(400, 'INVALID_TOKEN', 'Invalid or already used verification token');
     }
 
     if (new Date(user.token_expires_at) < new Date()) {
-      return res.status(400).json({ error: "Verification token has expired" });
+      throw new AppError(400, 'TOKEN_EXPIRED', 'Verification token has expired');
     }
 
     // Mark user as verified, clear the token and expiration
@@ -360,13 +361,13 @@ router.get("/verify-email", async (req, res) => {
 router.post("/resend-verification", async (req, res) => {
   try {
     const { email } = req.body;
-    if (!email) return res.status(400).json({ error: "Email is required" });
+    if (!email) throw new AppError(400, 'EMAIL_REQUIRED', 'Email is required');
 
     const user = await dbHelpers.getUserByEmail(email);
-    if (!user) return res.status(404).json({ error: "User not found" });
+    if (!user) throw new AppError(404, 'USER_NOT_FOUND', 'User not found');
 
     if (user.is_verified) {
-      return res.status(400).json({ error: "Email is already verified" });
+      throw new AppError(400, 'ALREADY_VERIFIED', 'Email is already verified');
     }
 
     const verificationToken = crypto.randomBytes(32).toString('hex');
@@ -457,12 +458,11 @@ router.post("/recover", async (req, res) => {
     // Verify recovery key matches stored hash
     const providedHash = crypto.createHash("sha256").update(recoveryKey).digest("hex");
     
-    // We need to fetch the user's recovery_key_hash from the DB directly since getUserByDisplayName might not select it
-    const db = dbHelpers.getUserByDisplayName(displayName); // wait, we need a custom query if it's not in the default select
+    // Fix: Select user and verify recovery hash in one path
     const userRow = await dbHelpers.getUserByRecoveryKeyHash(providedHash);
     
     if (!userRow || userRow.id !== user.id) {
-      return res.status(401).json({ error: "Invalid recovery key" });
+      throw new AppError(401, 'INVALID_RECOVERY_KEY', 'Invalid recovery key');
     }
 
     // Generate 15-minute reset token

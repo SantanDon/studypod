@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { useToast } from "@/hooks/use-toast";
-import { localStorageService } from "@/services/localStorageService";
+import { localStorageService, LocalSource } from "@/services/localStorageService";
 import { validateDocumentContent } from "@/lib/extraction/contentValidator";
 import { useNotebookGeneration } from "@/hooks/useNotebookGeneration";
 import { useQueryClient } from "@tanstack/react-query";
@@ -51,11 +51,11 @@ export const useTextPaste = () => {
       }
 
       // Check if this is the first source in the notebook BEFORE adding
-      let existingSources: any[] = [];
+      let existingSources: LocalSource[] = [];
       if (session?.access_token) {
         existingSources = await ApiService.fetchSources(notebookId, session.access_token);
       } else {
-        existingSources = (await localStorageService.getSources(notebookId)) as any[];
+        existingSources = (await localStorageService.getSources(notebookId)) as LocalSource[];
       }
       const isFirstSource = existingSources.length === 0;
 
@@ -77,7 +77,7 @@ export const useTextPaste = () => {
       };
 
       // Save the source via API or local storage
-      let savedSource: any;
+      let savedSource: LocalSource;
       if (session?.access_token) {
         savedSource = await ApiService.createSource(notebookId, sourcePayload, session.access_token);
       } else {

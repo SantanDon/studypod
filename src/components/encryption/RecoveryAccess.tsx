@@ -59,8 +59,8 @@ export function RecoveryAccess({ onSuccess, onCancel }: RecoveryAccessProps) {
         setSuccess('Passphrase reset successfully! Logging you in...');
         setTimeout(() => onSuccess?.(), 1500);
       }
-    } catch (err: any) {
-      setError(err.message || 'Recovery failed');
+    } catch (err: unknown) {
+      setError(err instanceof Error ? err.message : 'Recovery failed');
     } finally {
       setIsRecovering(false);
     }

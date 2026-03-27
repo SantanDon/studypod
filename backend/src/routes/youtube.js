@@ -1,5 +1,6 @@
 import express from 'express';
 import { YoutubeTranscript } from 'youtube-transcript';
+import { AppError } from '../middleware/errorHandler.js';
 
 const router = express.Router();
 
@@ -167,10 +168,10 @@ function buildStructuredContent({ transcript, metadata, chapters }) {
 router.get('/youtube-transcript', async (req, res) => {
   try {
     const { url } = req.query;
-    if (!url) return res.status(400).json({ error: 'Missing url param' });
+    if (!url) throw new AppError(400, 'MISSING_URL', 'Missing url parameter');
 
     const idMatch = url.match(/(?:v=|youtu\.be\/|embed\/|shorts\/)([a-zA-Z0-9_-]{11})/);
-    if (!idMatch) return res.status(400).json({ error: 'Invalid YouTube URL' });
+    if (!idMatch) throw new AppError(400, 'INVALID_URL', 'Invalid YouTube URL');
     const videoId = idMatch[1];
 
     console.log(`[YouTube] Extracting: ${videoId}`);
@@ -281,8 +282,9 @@ router.get('/youtube-transcript', async (req, res) => {
     return res.status(200).json({ transcript, metadata, structuredContent });
 
   } catch (error) {
+    if (error instanceof AppError) throw error;
     console.error('[YouTube] Error:', error);
-    res.status(500).json({ error: error.message });
+    throw new AppError(500, 'YOUTUBE_EXTRACTION_FAILED', error.message);
   }
 });
 

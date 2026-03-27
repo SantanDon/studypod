@@ -31,7 +31,7 @@ export default function AccountCreation() {
   const [recoveryKey, setRecoveryKey] = useState('');
   const [recoveryConfirmed, setRecoveryConfirmed] = useState(false);
   const [loading, setLoading] = useState(false);
-  const [authData, setAuthData] = useState<{ user: any; accessToken: string; refreshToken: string; userId: string; key: CryptoKey; salt: ArrayBuffer } | null>(null);
+  const [authData, setAuthData] = useState<{ user: Record<string, unknown>; accessToken: string; refreshToken: string; userId: string; key: CryptoKey; salt: ArrayBuffer } | null>(null);
   
   const { toast } = useToast();
   const navigate = useNavigate();
@@ -77,7 +77,7 @@ export default function AccountCreation() {
       });
       
       const { user, accessToken, refreshToken } = apiResponse;
-      const userId = user.id;
+      const userId = user.id as string;
 
       // Generate local encryption key
       const { key, salt } = await generateKeyFromPassphrase(passphrase);

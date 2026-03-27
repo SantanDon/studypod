@@ -3,6 +3,7 @@ import multer from 'multer';
 import path from 'path';
 import { promises as fs } from 'fs';
 import pdfParse from 'pdf-parse';
+import { AppError } from '../middleware/errorHandler.js';
 
 const router = express.Router();
 
@@ -46,9 +47,9 @@ ensureUploadsDir();
 
 // PDF processing endpoint
 router.post('/process-pdf', upload.single('file'), async (req, res) => {
-  if (!req.file) {
-    return res.status(400).json({ error: 'No file uploaded' });
-  }
+    if (!req.file) {
+      throw new AppError(400, 'NO_FILE_UPLOADED', 'No file uploaded');
+    }
 
   try {
     // Read the uploaded PDF file
@@ -76,6 +77,7 @@ router.post('/process-pdf', upload.single('file'), async (req, res) => {
     });
 
   } catch (error) {
+    if (error instanceof AppError) throw error;
     console.error('PDF processing error:', error);
 
     // Clean up uploaded file if it exists
@@ -87,10 +89,7 @@ router.post('/process-pdf', upload.single('file'), async (req, res) => {
       console.error('Error cleaning up file:', cleanupError);
     }
 
-    res.status(500).json({
-      success: false,
-      error: error.message
-    });
+    throw new AppError(500, 'PDF_PROCESSING_FAILED', error.message);
   }
 });
 

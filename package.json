@@ -11,7 +11,6 @@
         "build:dev": "vite build --mode development",
         "lint": "eslint .",
         "preview": "vite preview",
-        "test:edge-functions": "node test-edge-functions.js",
         "setup:ollama": "node scripts/setup-ollama.js",
         "check:ollama": "node -e \"fetch('http://localhost:11434/api/tags').then(r=>r.ok?console.log('✅ Ollama is running'):console.log('❌ Ollama not running')).catch(()=>console.log('❌ Ollama not running'))\"",
         "test": "vitest",

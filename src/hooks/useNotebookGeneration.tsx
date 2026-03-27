@@ -1,5 +1,5 @@
 import { useMutation, useQueryClient } from "@tanstack/react-query";
-import { localStorageService } from "@/services/localStorageService";
+import { localStorageService, LocalSource } from "@/services/localStorageService";
 import { useToast } from "@/hooks/use-toast";
 import { useAuth } from "@/hooks/useAuth";
 import { ApiService } from "@/services/apiService";
@@ -119,14 +119,14 @@ export const useNotebookGeneration = () => {
       }
 
       // 2. Try to match by file_path OR url from the cloud sources
-      let sources: any[] = [];
+      let sources: LocalSource[] = [];
       try {
         if (session?.access_token) {
           const res = await ApiService.fetchSources(notebookId, session.access_token);
           sources = Array.isArray(res) ? res : [];
         } else {
           const res = await localStorageService.getSources(notebookId);
-          sources = Array.isArray(res) ? res : [];
+          sources = Array.isArray(res) ? (res as LocalSource[]) : [];
         }
       } catch (err) {
         console.warn("Failed to fetch sources for generation:", err);
@@ -281,7 +281,7 @@ FORMAT: Just the questions, nothing else.`,
       }
 
       // Update the notebook with title/description
-      let updatedNotebook: any;
+      let updatedNotebook: unknown;
       if (session?.access_token) {
         updatedNotebook = await ApiService.updateNotebook(
           notebookId, 

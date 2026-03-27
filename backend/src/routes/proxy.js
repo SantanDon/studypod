@@ -1,6 +1,6 @@
 import express from 'express';
-
 import { URL } from 'url';
+import { AppError } from '../middleware/errorHandler.js';
 
 const router = express.Router();
 
@@ -13,7 +13,7 @@ router.get('/proxy', async (req, res) => {
     const { url } = req.query;
 
     if (!url) {
-      return res.status(400).json({ error: 'URL parameter is required' });
+      throw new AppError(400, 'MISSING_URL', 'URL parameter is required');
     }
 
     const decodedUrl = decodeURIComponent(url);
@@ -23,7 +23,7 @@ router.get('/proxy', async (req, res) => {
     try {
       new URL(decodedUrl);
     } catch (e) {
-      return res.status(400).json({ error: 'Invalid URL provided' });
+      throw new AppError(400, 'INVALID_URL', 'Invalid URL provided');
     }
 
     const response = await fetch(decodedUrl, {
@@ -50,10 +50,9 @@ router.get('/proxy', async (req, res) => {
     response.body.pipe(res);
 
   } catch (error) {
+    if (error instanceof AppError) throw error;
     console.error('[Proxy] Error:', error);
-    res.status(500).json({ 
-      error: error.message || 'Failed to proxy request' 
-    });
+    throw new AppError(500, 'PROXY_FAILED', error.message || 'Failed to proxy request');
   }
 });
 

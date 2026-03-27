@@ -24,9 +24,9 @@ export default function VerifyEmail() {
       try {
         await ApiService.verifyEmail(token);
         setStatus('success');
-      } catch (err: any) {
+      } catch (err: unknown) {
         setStatus('error');
-        setErrorMessage(err.message || 'Verification failed. The link may be expired.');
+        setErrorMessage(err instanceof Error ? err.message || 'Verification failed. The link may be expired.' : 'Verification failed. The link may be expired.');
       }
     };
 

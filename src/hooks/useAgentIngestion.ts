@@ -71,7 +71,7 @@ export const useAgentIngestion = (notebookId: string | undefined) => {
     const interval = setInterval(checkAndProcessPendingUploads, 30000);
 
     return () => clearInterval(interval);
-  }, [notebookId, session, handleFileUpload]);
+  }, [notebookId, session, handleFileUpload, queryClient]);
 
   return { isIngesting, ingestionStatus };
 };

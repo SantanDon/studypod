@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { useToast } from "@/hooks/use-toast";
-import { localStorageService } from "@/services/localStorageService";
+import { localStorageService, LocalSource } from "@/services/localStorageService";
 import { extractMultipleWebContents, validateWebContent, sanitizeWebContent } from "@/lib/extraction/webExtractor";
 import { useDocumentProcessing } from "@/hooks/useDocumentProcessing";
 import { useNotebookGeneration } from "@/hooks/useNotebookGeneration";
@@ -64,11 +64,11 @@ export const useWebsiteProcessing = () => {
       }
 
       // Check if this is the first source in the notebook BEFORE adding
-      let existingSources: any[] = [];
+      let existingSources: LocalSource[] = [];
       if (session?.access_token) {
         existingSources = await ApiService.fetchSources(notebookId, session.access_token);
       } else {
-        existingSources = (await localStorageService.getSources(notebookId)) as any[];
+        existingSources = (await localStorageService.getSources(notebookId)) as LocalSource[];
       }
       const isFirstSource = existingSources.length === 0;
 
@@ -137,7 +137,7 @@ export const useWebsiteProcessing = () => {
         };
 
         // Save the source to API or local storage
-        let savedSource: any;
+        let savedSource: LocalSource;
         if (session?.access_token) {
           savedSource = await ApiService.createSource(notebookId, sourcePayload, session.access_token);
         } else {
