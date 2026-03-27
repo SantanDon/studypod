@@ -1,4 +1,5 @@
 import express from 'express';
+import { YoutubeTranscript } from 'youtube-transcript';
 
 const router = express.Router();
 
@@ -242,11 +243,32 @@ router.get('/youtube-transcript', async (req, res) => {
     // ── Step 4: Fetch transcript ──────────────────────────────────────────────
     let transcript = [];
     if (captionTracks.length > 0) {
-      const track = captionTracks.find(t => t.languageCode === 'en' || t.languageCode?.startsWith('en')) || captionTracks[0];
-      const captionResult = await fetch(track.baseUrl);
-      const captionText = await captionResult.text();
-      transcript = parseXmlCaptions(captionText);
-      console.log(`[YouTube] Transcript items: ${transcript.length}`);
+      try {
+        const track = captionTracks.find(t => t.languageCode === 'en' || t.languageCode?.startsWith('en')) || captionTracks[0];
+        console.log(`[YouTube] Fetching captions from: ${track.baseUrl}`);
+        const captionResult = await fetch(track.baseUrl);
+        const captionText = await captionResult.text();
+        transcript = parseXmlCaptions(captionText);
+        console.log(`[YouTube] Transcript items (Manual): ${transcript.length}`);
+      } catch (innerError) {
+        console.warn('[YouTube] Manual caption fetch failed, trying library fallback...', innerError.message);
+      }
+    }
+
+    // Fallback if manual method yielded nothing
+    if (transcript.length === 0) {
+      try {
+        console.log(`[YouTube] Attempting library fallback for video: ${videoId}`);
+        const libTranscript = await YoutubeTranscript.fetchTranscript(videoId);
+        transcript = libTranscript.map(item => ({
+          text: item.text,
+          offset: item.offset,
+          duration: item.duration
+        }));
+        console.log(`[YouTube] Transcript items (Library): ${transcript.length}`);
+      } catch (libError) {
+        console.warn(`[YouTube] Library fallback also failed: ${libError.message}`);
+      }
     }
 
     // ── Step 5: Parse chapters from description ───────────────────────────────
