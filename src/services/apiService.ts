@@ -6,7 +6,7 @@
  * Handles identity authentication and cloud content management.
  */
 
-export const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:3001/api';
+export const API_BASE_URL = import.meta.env.VITE_API_URL || '/api';
 
 /**
  * Handle HTTP response globally for Auth events.
