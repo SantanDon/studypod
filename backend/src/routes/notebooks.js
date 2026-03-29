@@ -5,6 +5,7 @@ import { dbHelpers } from "../db/database.js";
 import { authenticateToken } from "../middleware/auth.js";
 import { MemoryService } from "../services/memoryService.js";
 import { chatWithNotebook } from "../services/aiChatService.js";
+import { AppError } from '../middleware/errorHandler.js';
 
 const router = express.Router();
 
@@ -17,18 +18,13 @@ router.use(authenticateToken);
  * GET /api/notebooks
  * List all notebooks for the authenticated user
  */
-router.get("/", async (req, res) => {
+router.get("/", async (req, res, next) => {
   try {
     const notebooks = await dbHelpers.getNotebooksByUserId(req.user.userId);
     notebooks.forEach(notebook => {
       if (notebook.example_questions && typeof notebook.example_questions === 'string') {
-        try { notebook.example_questions = JSON.parse(notebook.example_questions); } catch (e) {}
-      }
-    });
-    res.json(notebooks);
-  } catch (error) {
-    console.error("List notebooks error:", error);
-    res.status(500).json({ error: "Failed to list notebooks" });
+        try { notebook.example_questions = JSON.parse(notebook.example_questions); } catch (e) {
+    next(e);
   }
 });
 
@@ -40,7 +36,7 @@ router.post("/", async (req, res, next) => {
   try {
     const { title, description, id: providedId } = req.body;
     if (!title) {
-      return res.status(400).json({ error: "Notebook title is required" });
+      return next(new AppError(400, 'BAD_REQUEST', 'Notebook title is required'));
     }
 
     const id = providedId || uuidv4();
@@ -51,33 +47,10 @@ router.post("/", async (req, res, next) => {
   } catch (error) {
     next(error);
   }
-});
-
-/**
- * GET /api/notebooks/:id
- * Get details for a specific notebook
- */
-router.get("/:id", async (req, res) => {
-  try {
-    let notebook = await dbHelpers.getNotebookById(req.params.id, req.user.userId);
-    if (!notebook) {
-      // JIT recovery for Vercel cold-start DB wipes
-      try {
-        await dbHelpers.createNotebook(req.params.id, req.user.userId, "Recovered Notebook", "Auto-provisioned");
-        notebook = await dbHelpers.getNotebookById(req.params.id, req.user.userId);
-      } catch(e) {}
-    }
-    if (!notebook) {
-      return res.status(404).json({ error: "Notebook not found" });
-    }
     // Parse example_questions if it exists and is a string
     if (notebook.example_questions && typeof notebook.example_questions === 'string') {
-      try { notebook.example_questions = JSON.parse(notebook.example_questions); } catch (e) {}
-    }
-    res.json(notebook);
-  } catch (error) {
-    console.error("Get notebook error:", error);
-    res.status(500).json({ error: "Failed to get notebook" });
+      try { notebook.example_questions = JSON.parse(notebook.example_questions); } catch (e) {
+    next(e);
   }
 });
 
@@ -85,7 +58,7 @@ router.get("/:id", async (req, res) => {
  * PUT /api/notebooks/:id
  * Update notebook metadata
  */
-router.put("/:id", async (req, res) => {
+router.put("/:id", async (req, res, next) => {
   try {
     const { title, description, example_questions, generation_status, icon } = req.body;
     const updates = {};
@@ -101,7 +74,7 @@ router.put("/:id", async (req, res) => {
     }
 
     if (Object.keys(updates).length === 0) {
-      return res.status(400).json({ error: "No updates provided" });
+      return next(new AppError(400, 'BAD_REQUEST', 'No updates provided'));
     }
 
     // VERCEL WORKAROUND: Auto-provision notebook if it was wiped before updating
@@ -111,26 +84,13 @@ router.put("/:id", async (req, res) => {
       try {
         await dbHelpers.createNotebook(req.params.id, req.user.userId, title || "Recovered Notebook", description || "Automatically provisioned");
       } catch (e) {
-        console.error('Auto-provision failed:', e);
-      }
-    }
-
-    await dbHelpers.updateNotebook(req.params.id, req.user.userId, updates);
-    notebook = await dbHelpers.getNotebookById(req.params.id, req.user.userId);
-    
-    if (!notebook) {
-      return res.status(404).json({ error: "Notebook not found" });
-    }
+    next(e);
+  }
 
     // Parse it back for the response
     if (notebook.example_questions && typeof notebook.example_questions === 'string') {
-      try { notebook.example_questions = JSON.parse(notebook.example_questions); } catch (e) {}
-    }
-    
-    res.json(notebook);
-  } catch (error) {
-    console.error("Update notebook error:", error);
-    res.status(500).json({ error: "Failed to update notebook", detail: error.message, stack: error.stack });
+      try { notebook.example_questions = JSON.parse(notebook.example_questions); } catch (e) {
+    next(e);
   }
 });
 
@@ -138,16 +98,15 @@ router.put("/:id", async (req, res) => {
  * DELETE /api/notebooks/:id
  * Delete a notebook
  */
-router.delete("/:id", async (req, res) => {
+router.delete("/:id", async (req, res, next) => {
   try {
     const result = await dbHelpers.deleteNotebook(req.params.id, req.user.userId);
     if (result.changes === 0) {
-      return res.status(404).json({ error: "Notebook not found" });
+      return next(new AppError(404, 'NOT_FOUND', 'Notebook not found'));
     }
     res.json({ message: "Notebook deleted successfully" });
   } catch (error) {
-    console.error("Delete notebook error:", error);
-    res.status(500).json({ error: "Failed to delete notebook" });
+    next(error);
   }
 });
 
@@ -155,18 +114,14 @@ router.delete("/:id", async (req, res) => {
  * GET /api/notebooks/:id/notes
  * List all notes in a notebook
  */
-router.get("/:id/notes", async (req, res) => {
+router.get("/:id/notes", async (req, res, next) => {
   try {
     let notebook = await dbHelpers.getNotebookById(req.params.id, req.user.userId);
     if (!notebook) {
-      try { await dbHelpers.createNotebook(req.params.id, req.user.userId, "Recovered Notebook", "Auto-provisioned"); notebook = await dbHelpers.getNotebookById(req.params.id, req.user.userId); } catch(e) {}
-    }
-    if (!notebook) return res.status(404).json({ error: { code: "NOTEBOOK_NOT_FOUND", message: "Notebook not found" } });
-    const notes = await dbHelpers.getNotesByNotebookId(req.params.id, req.user.userId);
-    res.json(notes);
+      try { await dbHelpers.createNotebook(req.params.id, req.user.userId, "Recovered Notebook", "Auto-provisioned"); notebook = await dbHelpers.getNotebookById(req.params.id, req.user.userId); } catch (e) {
+    next(e);
   } catch (error) {
-    console.error("List notes error:", error);
-    res.status(500).json({ error: "Failed to list notes" });
+    next(error);
   }
 });
 
@@ -174,7 +129,7 @@ router.get("/:id/notes", async (req, res) => {
  * POST /api/notebooks/:id/notes
  * Create a new note in a notebook
  */
-router.post("/:id/notes", async (req, res) => {
+router.post("/:id/notes", async (req, res, next) => {
   try {
     let notebook = await dbHelpers.getNotebookById(req.params.id, req.user.userId);
     
@@ -185,15 +140,10 @@ router.post("/:id/notes", async (req, res) => {
         await dbHelpers.createNotebook(req.params.id, req.user.userId, "Recovered Notebook", "Automatically provisioned after system reset");
         notebook = await dbHelpers.getNotebookById(req.params.id, req.user.userId);
       } catch (provisionError) {
-        console.error('Failed to auto-provision notebook:', provisionError);
-      }
-    }
-
-    if (!notebook) return res.status(404).json({ error: { code: "NOTEBOOK_NOT_FOUND", message: "Notebook not found and could not be recovered" } });
-
-    const { content, authorId } = req.body;
+    next(provisionError);
+  } = req.body;
     if (!content) {
-      return res.status(400).json({ error: "Note content is required" });
+      return next(new AppError(400, 'BAD_REQUEST', 'Note content is required'));
     }
 
     const id = uuidv4();
@@ -215,8 +165,7 @@ router.post("/:id/notes", async (req, res) => {
 
     res.status(201).json({ id, content, author_id, notebook_id: req.params.id });
   } catch (error) {
-    console.error("Create note error:", error);
-    res.status(500).json({ error: "Failed to create note" });
+    next(error);
   }
 });
 
@@ -224,13 +173,13 @@ router.post("/:id/notes", async (req, res) => {
  * GET /api/notebooks/:id/notes/:noteId
  * Get a single note
  */
-router.get("/:id/notes/:noteId", async (req, res) => {
+router.get("/:id/notes/:noteId", async (req, res, next) => {
   try {
     const note = await dbHelpers.getNoteById(req.params.noteId, req.user.userId);
-    if (!note) return res.status(404).json({ error: "Note not found" });
+    if (!note) return next(new AppError(404, 'NOT_FOUND', 'Note not found'));
     res.json(note);
   } catch (error) {
-    res.status(500).json({ error: "Failed to get note" });
+    next(error);
   }
 });
 
@@ -238,15 +187,15 @@ router.get("/:id/notes/:noteId", async (req, res) => {
  * PUT /api/notebooks/:id/notes/:noteId
  * Update note content
  */
-router.put("/:id/notes/:noteId", async (req, res) => {
+router.put("/:id/notes/:noteId", async (req, res, next) => {
   try {
     const { content } = req.body;
-    if (!content) return res.status(400).json({ error: "content is required" });
+    if (!content) return next(new AppError(400, 'BAD_REQUEST', 'content is required'));
     const result = await dbHelpers.updateNote(req.params.noteId, req.user.userId, content);
-    if (result.changes === 0) return res.status(404).json({ error: "Note not found" });
+    if (result.changes === 0) return next(new AppError(404, 'NOT_FOUND', 'Note not found'));
     res.json(await dbHelpers.getNoteById(req.params.noteId, req.user.userId));
   } catch (error) {
-    res.status(500).json({ error: "Failed to update note" });
+    next(error);
   }
 });
 
@@ -254,13 +203,13 @@ router.put("/:id/notes/:noteId", async (req, res) => {
  * DELETE /api/notebooks/:id/notes/:noteId
  * Delete a note
  */
-router.delete("/:id/notes/:noteId", async (req, res) => {
+router.delete("/:id/notes/:noteId", async (req, res, next) => {
   try {
     const result = await dbHelpers.deleteNote(req.params.noteId, req.user.userId);
-    if (result.changes === 0) return res.status(404).json({ error: "Note not found" });
+    if (result.changes === 0) return next(new AppError(404, 'NOT_FOUND', 'Note not found'));
     res.json({ message: "Note deleted" });
   } catch (error) {
-    res.status(500).json({ error: "Failed to delete note" });
+    next(error);
   }
 });
 
@@ -269,11 +218,11 @@ router.delete("/:id/notes/:noteId", async (req, res) => {
  * POST /api/notebooks/:id/memory/search
  * Semantic search in EverMemOS for this notebook's context
  */
-router.post("/:id/memory/search", async (req, res) => {
+router.post("/:id/memory/search", async (req, res, next) => {
   try {
     const { query } = req.body;
     if (!query) {
-      return res.status(400).json({ error: "Search query is required" });
+      return next(new AppError(400, 'BAD_REQUEST', 'Search query is required'));
     }
 
     const userId = req.user.userId;
@@ -283,8 +232,7 @@ router.post("/:id/memory/search", async (req, res) => {
 
     res.json({ results: memories });
   } catch (error) {
-    console.error("Memory search error:", error);
-    res.status(500).json({ error: "Memory search failed" });
+    next(error);
   }
 });
 
@@ -293,7 +241,7 @@ router.post("/:id/memory/search", async (req, res) => {
  * POST /api/notebooks/:id/sources
  * Create a new source in a notebook
  */
-router.post("/:id/sources", async (req, res) => {
+router.post("/:id/sources", async (req, res, next) => {
   try {
     let notebook = await dbHelpers.getNotebookById(req.params.id, req.user.userId);
     
@@ -305,15 +253,10 @@ router.post("/:id/sources", async (req, res) => {
         await dbHelpers.createNotebook(req.params.id, req.user.userId, "Recovered Notebook", "Automatically provisioned after system reset");
         notebook = await dbHelpers.getNotebookById(req.params.id, req.user.userId);
       } catch (provisionError) {
-        console.error('Failed to auto-provision notebook:', provisionError);
-      }
-    }
-
-    if (!notebook) return res.status(404).json({ error: { code: "NOTEBOOK_NOT_FOUND", message: "Notebook not found and could not be recovered" } });
-
-    const { id: providedId, title, type, content, url, metadata, processing_status, file_path, file_size } = req.body;
+    next(provisionError);
+  } = req.body;
     if (!title || !type) {
-      return res.status(400).json({ error: "title and type are required" });
+      return next(new AppError(400, 'BAD_REQUEST', 'title and type are required'));
     }
     
     const id = providedId || uuidv4();
@@ -326,15 +269,10 @@ router.post("/:id/sources", async (req, res) => {
     if (processing_status && processing_status !== 'pending') {
       try {
         await dbHelpers.updateSource(id, req.user.userId, { processing_status });
-      } catch(e) {
-        console.warn('Could not update initial processing_status:', e.message);
-      }
-    }
-    
-    res.status(201).json({ id, notebook_id: req.params.id, title, type, processing_status: processing_status || 'pending' });
+      } catch (e) {
+    next(e);
   } catch (error) {
-    console.error("Create source error:", error);
-    res.status(500).json({ error: "Failed to create source", details: error.message });
+    next(error);
   }
 });
 
@@ -342,7 +280,7 @@ router.post("/:id/sources", async (req, res) => {
  * PUT /api/notebooks/:id/sources/:sourceId
  * Update an existing source
  */
-router.put("/:id/sources/:sourceId", async (req, res) => {
+router.put("/:id/sources/:sourceId", async (req, res, next) => {
   try {
     const updates = req.body;
     const result = await dbHelpers.updateSource(req.params.sourceId, req.user.userId, updates);
@@ -370,15 +308,13 @@ router.put("/:id/sources/:sourceId", async (req, res) => {
            await dbHelpers.updateSource(req.params.sourceId, req.user.userId, { processing_status: updates.processing_status });
         }
       } catch (e) {
-          console.error("Failed to auto-provision source:", e);
-          return res.status(404).json({ error: "Source not found and could not be recovered" });
-      }
+    next(e);
+  }
     }
     
     res.json({ success: true, message: "Source updated" });
   } catch (error) {
-    console.error("Update source error:", error);
-    res.status(500).json({ error: "Failed to update source" });
+    next(error);
   }
 });
 
@@ -386,18 +322,14 @@ router.put("/:id/sources/:sourceId", async (req, res) => {
  * GET /api/notebooks/:id/sources
  * List all sources in a notebook
  */
-router.get("/:id/sources", async (req, res) => {
+router.get("/:id/sources", async (req, res, next) => {
   try {
     let notebook = await dbHelpers.getNotebookById(req.params.id, req.user.userId);
     if (!notebook) {
-      try { await dbHelpers.createNotebook(req.params.id, req.user.userId, "Recovered Notebook", "Auto-provisioned"); notebook = await dbHelpers.getNotebookById(req.params.id, req.user.userId); } catch(e) {}
-    }
-    if (!notebook) return res.status(404).json({ error: { code: "NOTEBOOK_NOT_FOUND", message: "Notebook not found" } });
-    const sources = await dbHelpers.getSourcesByNotebookId(req.params.id, req.user.userId);
-    res.json(sources);
+      try { await dbHelpers.createNotebook(req.params.id, req.user.userId, "Recovered Notebook", "Auto-provisioned"); notebook = await dbHelpers.getNotebookById(req.params.id, req.user.userId); } catch (e) {
+    next(e);
   } catch (error) {
-    console.error("List sources error:", error);
-    res.status(500).json({ error: "Failed to list sources" });
+    next(error);
   }
 });
 
@@ -405,18 +337,14 @@ router.get("/:id/sources", async (req, res) => {
  * GET /api/notebooks/:id/messages
  * Get conversation history for a notebook
  */
-router.get("/:id/messages", async (req, res) => {
+router.get("/:id/messages", async (req, res, next) => {
   try {
     let notebook = await dbHelpers.getNotebookById(req.params.id, req.user.userId);
     if (!notebook) {
-      try { await dbHelpers.createNotebook(req.params.id, req.user.userId, "Recovered Notebook", "Auto-provisioned"); notebook = await dbHelpers.getNotebookById(req.params.id, req.user.userId); } catch(e) {}
-    }
-    if (!notebook) return res.status(404).json({ error: { code: "NOTEBOOK_NOT_FOUND", message: "Notebook not found" } });
-    const messages = await dbHelpers.getChatMessagesByNotebookId(req.params.id, req.user.userId);
-    res.json(messages);
+      try { await dbHelpers.createNotebook(req.params.id, req.user.userId, "Recovered Notebook", "Auto-provisioned"); notebook = await dbHelpers.getNotebookById(req.params.id, req.user.userId); } catch (e) {
+    next(e);
   } catch (error) {
-    console.error("Get messages error:", error);
-    res.status(500).json({ error: "Failed to get messages" });
+    next(error);
   }
 });
 
@@ -424,10 +352,10 @@ router.get("/:id/messages", async (req, res) => {
  * GET /api/notebooks/:id/context
  * Build an AI-optimized context payload for agents loading a notebook
  */
-router.get("/:id/context", async (req, res) => {
+router.get("/:id/context", async (req, res, next) => {
   try {
     const notebook = await dbHelpers.getNotebookById(req.params.id, req.user.userId);
-    if (!notebook) return res.status(404).json({ error: "Notebook not found" });
+    if (!notebook) return next(new AppError(404, 'NOT_FOUND', 'Notebook not found'));
 
     const sources = await dbHelpers.getSourcesByNotebookId(req.params.id, req.user.userId);
     const notes = await dbHelpers.getNotesByNotebookId(req.params.id, req.user.userId);
@@ -457,8 +385,7 @@ router.get("/:id/context", async (req, res) => {
       agentReady: true
     });
   } catch (error) {
-    console.error("Get context error:", error);
-    res.status(500).json({ error: "Failed to build context" });
+    next(error);
   }
 });
 
@@ -466,10 +393,10 @@ router.get("/:id/context", async (req, res) => {
  * POST /api/notebooks/:id/chat
  * Human/Agent conversation endpoint powered by notebook context
  */
-router.post("/:id/chat", async (req, res) => {
+router.post("/:id/chat", async (req, res, next) => {
   try {
     const { message, saveAsNote = false, agentId = null } = req.body;
-    if (!message) return res.status(400).json({ error: "message is required" });
+    if (!message) return next(new AppError(400, 'BAD_REQUEST', 'message is required'));
 
     const notebookId = req.params.id;
     const userId = req.user.userId;
@@ -482,31 +409,9 @@ router.post("/:id/chat", async (req, res) => {
       try {
         await dbHelpers.createNotebook(notebookId, userId, "Recovered Notebook", "Auto-provisioned");
         notebook = await dbHelpers.getNotebookById(notebookId, userId);
-      } catch(e) { 
-        console.error('Chat JIT provision failed:', e);
-        jitError = e.message;
-      }
-    }
-    if (!notebook) return res.status(404).json({ error: "Notebook not found", detail: jitError });
-
-    const sources = await dbHelpers.getSourcesByNotebookId(notebookId, userId);
-    const notes = await dbHelpers.getNotesByNotebookId(notebookId, userId);
-    const messages = await dbHelpers.getChatMessagesByNotebookId(notebookId, userId);
-
-    // Save the user's message to history
-    const userMsgId = uuidv4();
-    await dbHelpers.createChatMessage(userMsgId, notebookId, userId, agentId ? 'agent' : 'user', message);
-
-    try {
-      // Call Gemini using our context service
-      const chatResult = await chatWithNotebook({
-        notebook,
-        sources,
-        notes,
-        message,
-        history: messages,
-        callerType: agentId ? 'agent' : 'human'
-      });
+      } catch (e) {
+    next(e);
+  });
 
       // Save the AI's response to history
       const aiMsgId = uuidv4();
@@ -529,13 +434,11 @@ router.post("/:id/chat", async (req, res) => {
       });
 
     } catch (aiError) {
-      console.error("AI chat processing error:", aiError);
-      res.status(500).json({ error: "AI processing failed", details: aiError.message });
-    }
+    next(aiError);
+  }
 
   } catch (error) {
-    console.error("Chat endpoint error:", error);
-    res.status(500).json({ error: "Failed to process chat" });
+    next(error);
   }
 });
 

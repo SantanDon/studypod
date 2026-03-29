@@ -8,6 +8,7 @@
 import express from 'express';
 import { authenticateToken } from '../middleware/auth.js';
 import { getDatabase } from '../db/database.js';
+import { AppError } from '../middleware/errorHandler.js';
 
 const router = express.Router();
 
@@ -15,13 +16,13 @@ const router = express.Router();
  * Upload encrypted data
  * POST /api/sync/upload
  */
-router.post('/upload', authenticateToken, async (req, res) => {
+router.post('/upload', authenticateToken, async (req, res, next) => {
   try {
     const { id, type, encryptedData, checksum, version } = req.body;
     const userId = req.user.id;
 
     if (!id || !type || !encryptedData || !checksum) {
-      return res.status(400).json({ error: 'Missing required fields' });
+      return next(new AppError(400, 'BAD_REQUEST', 'Missing required fields'));
     }
 
     const db = getDb();
@@ -55,8 +56,7 @@ router.post('/upload', authenticateToken, async (req, res) => {
       version: version || (existing ? existing.version + 1 : 1)
     });
   } catch (error) {
-    console.error('Upload error:', error);
-    res.status(500).json({ error: 'Upload failed' });
+    next(error);
   }
 });
 
@@ -64,7 +64,7 @@ router.post('/upload', authenticateToken, async (req, res) => {
  * Download encrypted data
  * GET /api/sync/download/:id
  */
-router.get('/download/:id', authenticateToken, async (req, res) => {
+router.get('/download/:id', authenticateToken, async (req, res, next) => {
   try {
     const { id } = req.params;
     const userId = req.user.id;
@@ -77,7 +77,7 @@ router.get('/download/:id', authenticateToken, async (req, res) => {
     `).get(id, userId);
 
     if (!record) {
-      return res.status(404).json({ error: 'Data not found' });
+      return next(new AppError(404, 'NOT_FOUND', 'Data not found'));
     }
 
     res.json({
@@ -90,8 +90,7 @@ router.get('/download/:id', authenticateToken, async (req, res) => {
       updatedAt: record.updated_at,
     });
   } catch (error) {
-    console.error('Download error:', error);
-    res.status(500).json({ error: 'Download failed' });
+    next(error);
   }
 });
 
@@ -99,7 +98,7 @@ router.get('/download/:id', authenticateToken, async (req, res) => {
  * List all synced data for user
  * GET /api/sync/list
  */
-router.get('/list', authenticateToken, async (req, res) => {
+router.get('/list', authenticateToken, async (req, res, next) => {
   try {
     const userId = req.user.id;
     const { type } = req.query;
@@ -132,8 +131,7 @@ router.get('/list', authenticateToken, async (req, res) => {
       })),
     });
   } catch (error) {
-    console.error('List error:', error);
-    res.status(500).json({ error: 'List failed' });
+    next(error);
   }
 });
 
@@ -141,7 +139,7 @@ router.get('/list', authenticateToken, async (req, res) => {
  * Delete encrypted data
  * DELETE /api/sync/delete/:id
  */
-router.delete('/delete/:id', authenticateToken, async (req, res) => {
+router.delete('/delete/:id', authenticateToken, async (req, res, next) => {
   try {
     const { id } = req.params;
     const userId = req.user.id;
@@ -151,13 +149,12 @@ router.delete('/delete/:id', authenticateToken, async (req, res) => {
     const result = stmt.run(id, userId);
 
     if (result.changes === 0) {
-      return res.status(404).json({ error: 'Data not found' });
+      return next(new AppError(404, 'NOT_FOUND', 'Data not found'));
     }
 
     res.json({ success: true });
   } catch (error) {
-    console.error('Delete error:', error);
-    res.status(500).json({ error: 'Delete failed' });
+    next(error);
   }
 });
 
@@ -165,13 +162,13 @@ router.delete('/delete/:id', authenticateToken, async (req, res) => {
  * Batch upload multiple items
  * POST /api/sync/batch-upload
  */
-router.post('/batch-upload', authenticateToken, async (req, res) => {
+router.post('/batch-upload', authenticateToken, async (req, res, next) => {
   try {
     const { items } = req.body;
     const userId = req.user.id;
 
     if (!Array.isArray(items) || items.length === 0) {
-      return res.status(400).json({ error: 'Invalid items array' });
+      return next(new AppError(400, 'BAD_REQUEST', 'Invalid items array'));
     }
 
     const db = getDb();
@@ -214,17 +211,7 @@ router.post('/batch-upload', authenticateToken, async (req, res) => {
             version: version || (existing ? existing.version + 1 : 1)
           });
         } catch (error) {
-          results.push({ id, success: false, error: error.message });
-        }
-      }
-    });
-
-    transaction(items);
-
-    res.json({ results });
-  } catch (error) {
-    console.error('Batch upload error:', error);
-    res.status(500).json({ error: 'Batch upload failed' });
+    next(error);
   }
 });
 
@@ -232,7 +219,7 @@ router.post('/batch-upload', authenticateToken, async (req, res) => {
  * Get sync status and statistics
  * GET /api/sync/status
  */
-router.get('/status', authenticateToken, async (req, res) => {
+router.get('/status', authenticateToken, async (req, res, next) => {
   try {
     const userId = req.user.id;
 
@@ -252,8 +239,7 @@ router.get('/status', authenticateToken, async (req, res) => {
       lastSync: stats.last_sync,
     });
   } catch (error) {
-    console.error('Status error:', error);
-    res.status(500).json({ error: 'Status check failed' });
+    next(error);
   }
 });
 

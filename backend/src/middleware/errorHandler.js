@@ -36,10 +36,8 @@ export function errorHandler(err, req, res, _next) {
   }
 
   res.status(statusCode).json({
-    error: {
-      code,
-      message,
-      details: statusCode >= 500 ? { originalMessage: err.message, stack: err.stack } : err.details
-    }
+    error: message,
+    code,
+    details: statusCode >= 500 ? { originalMessage: err.message, stack: err.stack } : err.details
   });
 }

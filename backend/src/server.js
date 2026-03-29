@@ -229,7 +229,7 @@ const startServer = async () => {
 };
 
 // Export the app instance for the Vercel bridge
-export { app, initializeRoutes };
+export { app };
 
 // Default export for Vercel serverless functions
 export default app;
