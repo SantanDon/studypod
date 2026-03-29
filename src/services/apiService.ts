@@ -6,7 +6,31 @@
  * Handles identity authentication and cloud content management.
  */
 
-const API_BASE_URL = import.meta.env.VITE_API_URL || '/api';
+export const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:3001/api';
+
+/**
+ * Handle HTTP response globally for Auth events.
+ * If 401 or 403, clear corrupted localStorage state and force logout.
+ */
+async function handleResponse(response: Response) {
+  if (response.status === 401 || response.status === 403) {
+    if (typeof window !== 'undefined') {
+      localStorage.removeItem('currentSession');
+      localStorage.removeItem('users');
+      window.location.href = '/';
+    }
+    throw new Error('Authentication expired or invalid. Please sign in again.');
+  }
+  if (!response.ok) {
+    let errorMsg = 'API request failed';
+    try {
+      const errData = await response.json();
+      errorMsg = errData.error || errorMsg;
+    } catch (e) {}
+    throw new Error(errorMsg);
+  }
+  return response.json();
+}
 
 export const ApiService = {
   async signin(credentials: { email?: string; password?: string; displayName?: string; passphrase?: string }) {
@@ -95,14 +119,14 @@ export const ApiService = {
     const response = await fetch(`${API_BASE_URL}/user/profile`, {
       headers: { 'Authorization': `Bearer ${token}` }
     });
-    return response.json();
+    return handleResponse(response);
   },
 
   async fetchNotebooks(token: string) {
     const response = await fetch(`${API_BASE_URL}/notebooks`, {
       headers: { 'Authorization': `Bearer ${token}` }
     });
-    return response.json();
+    return handleResponse(response);
   },
 
   async createNotebook(title: string, description: string | undefined, token: string, id?: string) {
@@ -111,8 +135,7 @@ export const ApiService = {
       headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' },
       body: JSON.stringify({ title, description, id })
     });
-    if (!response.ok) throw new Error('Failed to create notebook');
-    return response.json();
+    return handleResponse(response);
   },
 
   async updateNotebook(notebookId: string, updates: { title?: string, description?: string, example_questions?: string[], generation_status?: string, icon?: string }, token: string) {
@@ -121,8 +144,7 @@ export const ApiService = {
       headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' },
       body: JSON.stringify(updates)
     });
-    if (!response.ok) throw new Error('Failed to update notebook');
-    return response.json();
+    return handleResponse(response);
   },
 
   async deleteNotebook(notebookId: string, token: string) {
@@ -130,22 +152,21 @@ export const ApiService = {
       method: 'DELETE',
       headers: { 'Authorization': `Bearer ${token}` }
     });
-    if (!response.ok) throw new Error('Failed to delete notebook');
-    return response.json();
+    return handleResponse(response);
   },
 
   async fetchNotes(notebookId: string, token: string) {
     const response = await fetch(`${API_BASE_URL}/notebooks/${notebookId}/notes`, {
       headers: { 'Authorization': `Bearer ${token}` }
     });
-    return response.json();
+    return handleResponse(response);
   },
 
   async fetchSources(notebookId: string, token: string) {
     const response = await fetch(`${API_BASE_URL}/notebooks/${notebookId}/sources`, {
       headers: { 'Authorization': `Bearer ${token}` }
     });
-    return response.json();
+    return handleResponse(response);
   },
 
   async createSource(notebookId: string, sourceData: Record<string, unknown>, token: string) {
