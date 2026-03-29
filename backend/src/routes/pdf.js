@@ -7,17 +7,8 @@ import { AppError } from '../middleware/errorHandler.js';
 
 const router = express.Router();
 
-// Configure multer for file uploads
-const getUploadDir = () => process.env.VERCEL ? '/tmp/uploads' : 'uploads/';
-
-const storage = multer.diskStorage({
-  destination: function (req, file, cb) {
-    cb(null, getUploadDir());
-  },
-  filename: function (req, file, cb) {
-    cb(null, Date.now() + path.extname(file.originalname));
-  }
-});
+// Configure multer for memory storage (Serverless Safe)
+const storage = multer.memoryStorage();
 
 const upload = multer({ 
   storage: storage,
@@ -33,33 +24,15 @@ const upload = multer({
   }
 });
 
-// Ensure uploads directory exists
-const ensureUploadsDir = async () => {
-  const dir = getUploadDir();
-  try {
-    await fs.access(dir);
-  } catch {
-    await fs.mkdir(dir, { recursive: true });
-  }
-};
-
-ensureUploadsDir();
-
 // PDF processing endpoint
-router.post('/process-pdf', upload.single('file'), async (req, res) => {
+router.post('/process-pdf', upload.single('file'), async (req, res, next) => {
     if (!req.file) {
-      throw new AppError(400, 'NO_FILE_UPLOADED', 'No file uploaded');
+      return next(new AppError(400, 'NO_FILE_UPLOADED', 'No file uploaded'));
     }
 
   try {
-    // Read the uploaded PDF file
-    const pdfBuffer = await fs.readFile(req.file.path);
-
-    // Parse the PDF to extract text
-    const pdfData = await pdfParse(pdfBuffer);
-
-    // Clean up the uploaded file
-    await fs.unlink(req.file.path);
+    // Parse the PDF to extract text directly from memory buffer
+    const pdfData = await pdfParse(req.file.buffer);
 
     // Create chunks for better processing
     const chunks = createChunks(pdfData.text, 1000);
@@ -77,19 +50,11 @@ router.post('/process-pdf', upload.single('file'), async (req, res) => {
     });
 
   } catch (error) {
-    if (error instanceof AppError) throw error;
     console.error('PDF processing error:', error);
-
-    // Clean up uploaded file if it exists
-    try {
-      if (req.file && req.file.path) {
-        await fs.unlink(req.file.path);
-      }
-    } catch (cleanupError) {
-      console.error('Error cleaning up file:', cleanupError);
+    if (error instanceof AppError) {
+      return next(error);
     }
-
-    throw new AppError(500, 'PDF_PROCESSING_FAILED', error.message);
+    return next(new AppError(500, 'PDF_PROCESSING_FAILED', error.message));
   }
 });
 

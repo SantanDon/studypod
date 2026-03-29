@@ -643,6 +643,31 @@ export const dbHelpers = {
       sql: "UPDATE agent_api_keys SET last_used_at = CURRENT_TIMESTAMP WHERE id = ?",
       args: [id]
     });
+  },
+
+  // Chat Messages
+  async getChatMessagesByNotebookId(notebookId, userId) {
+    const db = getDb();
+    const result = await db.execute({
+      sql: `SELECT cm.* 
+            FROM chat_messages cm
+            JOIN notebooks n ON cm.notebook_id = n.id
+            WHERE cm.notebook_id = ? 
+            AND (n.user_id = ? OR n.user_id IN (SELECT id FROM users WHERE owner_id = ?))
+            ORDER BY cm.created_at ASC`,
+      args: [notebookId, userId, userId]
+    });
+    return result.rows;
+  },
+
+  async createChatMessage(id, notebookId, userId, role, content, groundedSources = null) {
+    const db = getDb();
+    const sourcesStr = groundedSources ? JSON.stringify(groundedSources) : null;
+    return await db.execute({
+      sql: `INSERT INTO chat_messages (id, notebook_id, user_id, role, content, grounded_sources)
+            VALUES (?, ?, ?, ?, ?, ?)`,
+      args: [id, notebookId, userId, role, content, sourcesStr]
+    });
   }
 };
 
