@@ -16,11 +16,14 @@ import syncRoutes from './routes/sync.js';
 import notebookRoutes from './routes/notebooks.js';
 import agentRoutes from './routes/agent.js';
 import proxyRoutes from './routes/proxy.js';
-import { hocuspocusServer } from './services/syncRelay.js';
-
 // Middleware / DB Imports
 import { initializeDatabase } from './db/database.js';
 import { errorHandler } from './middleware/errorHandler.js';
+
+// ENI: Temporarily disabled risky services to debug 500 boot crash
+// import { hocuspocusServer } from './services/syncRelay.js';
+const hocuspocusServer = { handleUpgrade: () => {} }; 
+
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -88,7 +91,7 @@ app.use('/api/auth', authRoutes);
 app.use('/api/user', apiLimiter, userRoutes);
 app.use('/api/notebooks', apiLimiter, notebookRoutes);
 app.use('/api/pdf', apiLimiter, pdfRoutes);
-app.use('/api/sync', apiLimiter, syncRoutes);
+// app.use('/api/sync', apiLimiter, syncRoutes); // ENI: Disabled for debug
 app.use('/api/agent', apiLimiter, agentRoutes);
 app.use('/api', apiLimiter, youtubeRoutes);
 app.use('/api', proxyRoutes);
@@ -110,9 +113,15 @@ app.use(errorHandler);
 const server = http.createServer(app);
 
 // Handle WebSocket upgrades for Hocuspocus Sync Relay
-server.on('upgrade', (request, socket, head) => {
+server.on('upgrade', async (request, socket, head) => {
   const pathname = new URL(request.url, `http://${request.headers.host}`).pathname;
   if (pathname === '/api/sync-relay') {
+    // const { pipeline: transformersPipeline, env } = await import('@xenova/transformers');
+    // // ENI: Use /tmp for serverless environments (Vercel is read-only elsewhere)
+    // env.cacheDir = '/tmp/transformers';
+    // let pipeline = await transformersPipeline('feature-extraction', 'Xenova/all-MiniLM-L6-v2', {
+    //   quantized: true // Use INT8 quantization for speed on VPS/Vercel
+    // });
     hocuspocusServer.handleUpgrade(request, socket, head);
   } else {
     socket.destroy();
