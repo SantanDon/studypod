@@ -14,16 +14,17 @@ const __dirname = path.dirname(__filename);
 
 export default async (req, res) => {
   try {
-    const rootDir = process.cwd();
-    const serverPath = path.resolve(rootDir, 'backend/src/server.js');
+    // The Express backend is now co-located under api/_backend/ to ensure Vercel bundles correctly
+    const serverPath = path.resolve(__dirname, '_backend/server.js');
+    console.log('API Bridge: Loading backend from', serverPath);
     
     if (!fs.existsSync(serverPath)) {
       return res.status(500).json({
         error: 'Backend initialization failed',
         message: 'server.js not found at ' + serverPath,
-        cwd: rootDir,
+        cwd: process.cwd(),
         apiDir: __dirname,
-        rootContents: fs.readdirSync(rootDir)
+        rootContents: fs.readdirSync(path.dirname(__dirname))
       });
     }
 
