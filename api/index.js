@@ -4,14 +4,20 @@ import { initializeDatabase } from '../backend/src/db/database.js';
 let initialized = false;
 
 export default async (req, res) => {
-  if (!initialized) {
-    console.log('🚀 Bootstrapping serverless environment...');
-    try {
+  try {
+    if (!initialized) {
+      console.log('🚀 Bootstrapping serverless environment...');
       await initializeDatabase();
-    } catch (e) {
-      console.error('Failed to initialize database in serverless:', e);
+      initialized = true;
     }
-    initialized = true;
+    return app(req, res);
+  } catch (error) {
+    console.error('SERVERLESS_BOOT_ERROR:', error);
+    res.status(500).json({
+      error: 'Module or Architecture Error',
+      message: error.message,
+      stack: error.stack,
+      hint: 'This usually indicates a native dependency crash or binary mismatch on Vercel.'
+    });
   }
-  return app(req, res);
 };
