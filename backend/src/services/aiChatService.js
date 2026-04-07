@@ -2,8 +2,10 @@
  * AI Chat Service — StudyPodLM
  *
  * Powers the /chat endpoint. Consumes all notebook sources and notes,
- * builds a rich context prompt, and returns a grounded AI answer via Groq.
+ * builds a rich context prompt, and returns a grounded AI answer via Gemini API.
  */
+
+import { geminiPool } from './geminiPool.js';
 
 /**
  * Build a structured context block from all notebook sources and notes.
@@ -92,58 +94,38 @@ IMPORTANT: Emulate the professional, structured quality of NotebookLM. Be a stra
  * @returns {{ answer: string, groundedSources: string[], tokensUsed: number }}
  */
 export async function chatWithNotebook({ notebook, sources, notes, message, history = [], callerType = 'human' }) {
-  if (!process.env.VITE_GROQ_API_KEY) {
-    throw new Error('VITE_GROQ_API_KEY not configured in backend/.env to enable AI chat.');
+  if (!process.env.GEMINI_API_KEYS) {
+    throw new Error('GEMINI_API_KEYS not configured in backend/.env. Reasoning disabled.');
   }
 
   const notebookContext = buildNotebookContext(notebook, sources, notes);
   const systemPrompt = buildSystemPrompt(callerType);
 
-  const groqMessages = [
-    { role: 'system', content: systemPrompt }
-  ];
-
-  // Add conversation history
+  const geminiHistory = [];
+  
+  // Add conversation history mapped to Gemini format
   const recentHistory = history.slice(-10);
   for (const turn of recentHistory) {
-    groqMessages.push({
-      role: (turn.role === 'agent' || turn.role === 'assistant') ? 'assistant' : 'user',
-      content: turn.content || ''
+    geminiHistory.push({
+      role: (turn.role === 'agent' || turn.role === 'assistant') ? 'model' : 'user',
+      parts: [{ text: turn.content || '' }]
     });
   }
 
   // Current message includes full notebook context
   const fullMessage = `${notebookContext}\n\n=== USER QUESTION ===\n${message}`;
-  groqMessages.push({ role: 'user', content: fullMessage });
+  geminiHistory.push({ role: 'user', parts: [{ text: fullMessage }] });
 
   let answer = '';
   let tokensUsed = 0;
 
   try {
-    const groqResponse = await fetch('https://api.groq.com/openai/v1/chat/completions', {
-      method: 'POST',
-      headers: {
-        'Authorization': `Bearer ${process.env.VITE_GROQ_API_KEY}`,
-        'Content-Type': 'application/json'
-      },
-      body: JSON.stringify({
-        model: 'llama-3.3-70b-versatile',
-        messages: groqMessages,
-        temperature: 0.4,
-        max_tokens: 2048
-      })
-    });
-    
-    if (!groqResponse.ok) {
-      const err = await groqResponse.json().catch(()=>({}));
-      throw new Error(err.error?.message || `Groq API request failed with status ${groqResponse.status}`);
-    }
-    
-    const data = await groqResponse.json();
-    answer = data.choices?.[0]?.message?.content || "No response generated.";
-    tokensUsed = data.usage?.total_tokens || 0;
+    const response = await geminiPool.generateContent('gemini-2.5-flash', geminiHistory, systemPrompt);
+    answer = response.text || "No response generated.";
+    // Usage metadata exists if accessed properly, but we'll fall back to 0
+    tokensUsed = response.usageMetadata?.promptTokenCount || 0;
   } catch (error) {
-    console.error('Groq AI processing failed:', error);
+    console.error('Gemini AI processing failed:', error);
     throw new Error(`AI processing failed: ${error.message}`);
   }
 
