@@ -18,6 +18,12 @@
       ]
     }
   ],
+  "rewrites": [
+    {
+      "source": "/api/(.*)",
+      "destination": "/api/index.js"
+    }
+  ],
   "functions": {
     "api/**/*.js": {
       "includeFiles": "backend/**"
