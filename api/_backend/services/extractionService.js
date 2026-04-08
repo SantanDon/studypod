@@ -2,8 +2,9 @@ import fetch from 'node-fetch';
 import * as cheerio from 'cheerio';
 import { Readability } from '@mozilla/readability';
 import { JSDOM } from 'jsdom';
-import { chromium } from 'playwright';
-import FirecrawlApp from '@mendable/firecrawl-js';
+
+// STABILITY PATCH v3: firefighter. playwright and firecrawl-js PURGED.
+// Direct fetch used for Firecrawl API to prevent bundling issues.
 
 const USER_AGENTS = [
   'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36',
@@ -59,102 +60,65 @@ async function extractWithCheerio(url) {
 }
 
 /**
- * Phase 2: Local Playwright. Full JS rendering. Zero API cost.
- */
-async function extractWithPlaywright(url) {
-  let browser;
-  try {
-    browser = await chromium.launch({ headless: true });
-    const context = await browser.newContext({
-      userAgent: USER_AGENTS[Math.floor(Math.random() * USER_AGENTS.length)],
-      bypassCSP: true
-    });
-    
-    const page = await context.newPage();
-    // Block images, generic media, and fonts to speed up extraction massively
-    await page.route('**/*.{png,jpg,jpeg,webp,gif,css,woff2,ttf}', route => route.abort());
-
-    // Wait until DOM content is loaded, then give it 2 seconds for JS execution
-    await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 20000 });
-    await page.waitForTimeout(2000);
-
-    const html = await page.content();
-    
-    // Load rendered HTML into JSDOM for Readability
-    const dom = new JSDOM(html, { url });
-    const article = new Readability(dom.window.document).parse();
-    const meta = extractMetadata(dom.window.document, url);
-
-    if (!article || !article.textContent || article.textContent.trim().length < 100) {
-        // Absolute worst case fallback - dump body text
-        const bodyContent = dom.window.document.body.textContent || "";
-        if (bodyContent.trim().length < 100) {
-             throw new Error('Playwright yielded empty page (Blocked entirely).');
-        }
-        return {
-            content: bodyContent.replace(/\s+/g, ' ').trim(),
-            title: meta.title,
-            metadata: { ...meta, method: 'playwright-raw-body' }
-        };
-    }
-
-    return {
-      content: article.textContent.replace(/\s+/g, ' ').trim(),
-      title: article.title || meta.title,
-      metadata: { ...meta, method: 'playwright-readability' }
-    };
-  } finally {
-    if (browser) await browser.close();
-  }
-}
-
-/**
- * Phase 3: Firecrawl. Premium bypass API.
+ * Phase 2: Direct Firecrawl API call (no library).
  */
 async function extractWithFirecrawl(url) {
   const apiKey = process.env.FIRECRAWL_API_KEY;
   if (!apiKey) throw new Error('Firecrawl API Key missing.');
 
-  const app = new FirecrawlApp({ apiKey });
-  const scrapeResult = await app.scrapeUrl(url, { formats: ['markdown'] });
+  console.log(`[ExtractionService] Fetching via Firecrawl API for: ${url}`);
+  
+  const response = await fetch('https://api.firecrawl.dev/v0/scrape', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'Authorization': `Bearer ${apiKey}`
+    },
+    body: JSON.stringify({
+      url: url,
+      pageOptions: {
+        onlyMainContent: true,
+        replaceAllPathsWithAbsolutePaths: true
+      },
+      extractorOptions: {
+        mode: 'markdown'
+      }
+    })
+  });
+
+  const scrapeResult = await response.json();
 
   if (!scrapeResult.success) {
-    throw new Error(`Firecrawl Error: ${scrapeResult.error}`);
+    throw new Error(`Firecrawl Error: ${scrapeResult.error || 'Unknown error'}`);
   }
 
   return {
-    content: scrapeResult.markdown,
-    title: scrapeResult.metadata?.title || url,
+    content: scrapeResult.data?.markdown || scrapeResult.data?.content || '',
+    title: scrapeResult.data?.metadata?.title || url,
     metadata: {
-      description: scrapeResult.metadata?.description || '',
-      author: scrapeResult.metadata?.author || 'Unknown',
-      method: 'firecrawl-api'
+      description: scrapeResult.data?.metadata?.description || '',
+      author: scrapeResult.data?.metadata?.author || 'Unknown',
+      method: 'firecrawl-api-v0'
     }
   };
 }
 
 
 /**
- * Orchestrator: Tries Cheerio -> Playwright -> Firecrawl
+ * Orchestrator: Tries Cheerio -> Firecrawl
  */
 export async function extractWebSource(url) {
   try {
     console.log(`[ExtractionService] Tier 1 (Cheerio) -> ${url}`);
     return await extractWithCheerio(url);
   } catch (err1) {
-    console.warn(`[ExtractionService] Tier 1 Failed (${err1.message}). Escalating to Tier 2 (Playwright)...`);
+    console.warn(`[ExtractionService] Tier 1 Failed (${err1.message}). Escalating to Tier 2 (Firecrawl)...`);
     
     try {
-      return await extractWithPlaywright(url);
+      return await extractWithFirecrawl(url);
     } catch (err2) {
-      console.warn(`[ExtractionService] Tier 2 Failed (${err2.message}). Escalating to Tier 3 (Firecrawl)...`);
-      
-      try {
-        return await extractWithFirecrawl(url);
-      } catch (err3) {
-        console.error(`[ExtractionService] Tier 3 Failed. Extraction exhausted.`, err3);
-        throw new Error('All extraction tiers failed to retrieve readable content.');
-      }
+      console.error(`[ExtractionService] Extraction exhausted.`, err2);
+      throw new Error('All extraction methods failed to retrieve readable content.');
     }
   }
 }
