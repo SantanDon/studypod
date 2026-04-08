@@ -1,6 +1,6 @@
 import express from 'express';
-// removed youtube-transcript dependency for production stability
 import { AppError } from '../middleware/errorHandler.js';
+// STABILITY PATCH v2: youtube-transcript PURGED. 
 // ENI: Removed global playwright import. Vercel crashes heavily on Playwright native binaries.
 // import { chromium } from 'playwright';
 

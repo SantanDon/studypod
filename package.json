@@ -1,14 +1,11 @@
 {
     "name": "study-lm",
     "private": true,
-    "version": "0.0.0",
+    "version": "1.0.1-stabilized",
     "type": "module",
     "scripts": {
         "postinstall": "node scripts/install-backend.js",
         "dev": "concurrently \"vite\" \"nodemon backend/src/server.js\"",
-        "db:push": "drizzle-kit push --config=drizzle.config.js",
-        "db:generate": "drizzle-kit generate --config=drizzle.config.js",
-        "db:studio": "drizzle-kit studio --config=drizzle.config.js",
         "build": "vite build",
         "start": "node backend/src/server.js",
         "build:dev": "vite build --mode development",
