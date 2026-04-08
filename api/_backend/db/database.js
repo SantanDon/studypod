@@ -112,11 +112,24 @@ export const dbHelpers = {
     return await db.update(schema.users).set(dbUpdates).where(eq(schema.users.id, id));
   },
 
+  // User preferences (Dummy handles for legacy compatibility)
+  async createUserPreferences(id, userId) {
+    console.log(`[DB] Preferences creation skipped for ${userId} (Table not in schema)`);
+    return { success: true };
+  },
+
+  async createUserStats(id, userId) {
+    console.log(`[DB] Stats creation skipped for ${userId} (Table not in schema)`);
+    return { success: true };
+  },
+
+  async getUserStats(userId) {
+    return { level: 1, xp: 0, notebooks_created: 0 };
+  },
+
   // User preferences
   async getUserPreferences(userId) {
-    const db = await getDatabase();
-    // This table is not yet in schema.ts, needs to be added or managed
-    return null; 
+    return { theme: 'dark', language: 'en' }; 
   },
 
   // Recovery operations
