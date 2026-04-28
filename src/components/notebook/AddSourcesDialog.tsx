@@ -90,6 +90,7 @@ const AddSourcesDialog = ({
                     {isProcessingFiles ? (
                       "Synthesizing knowledge into the Sovereign core"
                     ) : (
+                      <>
                         PDF, Markdown, TXT, or Audio. Or{" "}
                         <button
                           className="text-white font-medium hover:underline decoration-white/30"
@@ -162,8 +163,6 @@ const AddSourcesDialog = ({
                 <div className="text-center">
                   <span className="font-semibold text-white block">Pasted Content</span>
                   <span className="text-xs text-white/40">Instant text ingestion</span>
-                </div>
-              </Button>
                 </div>
               </Button>
             </div>
