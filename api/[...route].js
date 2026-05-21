@@ -1,9 +1,30 @@
 // API BRIDGE v1.0.4
 import app from '../backend/src/server.js';
 
-// Force Vercel to bundle dynamic/optional dependencies
+// Force Vercel to bundle dynamic/optional and backend dependencies
 import '@danielxceron/youtube-transcript';
 import '@xenova/transformers';
+import 'cookie-parser';
+import 'cors';
+import 'helmet';
+import 'express-rate-limit';
+import 'dotenv';
+import 'express';
+import 'jsonwebtoken';
+import 'bcryptjs';
+import '@libsql/client';
+import 'drizzle-orm';
+import 'uuid';
+import 'qrcode';
+import 'otplib';
+import 'cheerio';
+import 'epub';
+import '@google/genai';
+import '@hocuspocus/server';
+import 'kokoro-js';
+import 'node-fetch';
+import 'mammoth';
+import 'multer';
 
 export default async (req, res) => {
   try {
