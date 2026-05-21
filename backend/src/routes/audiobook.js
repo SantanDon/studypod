@@ -4,7 +4,6 @@ import { fileURLToPath } from 'url';
 import fs from 'fs';
 import multer from 'multer';
 import { EPub } from 'epub';
-import { KokoroTTS } from 'kokoro-js';
 import { logger } from '../utils/logger.js';
 
 const router = express.Router();
@@ -23,10 +22,19 @@ if (!fs.existsSync(AUDIO_CACHE_DIR)) {
 
 const upload = multer({ dest: path.join(UPLOADS_DIR, 'temp/') });
 
+let KokoroTTS = null;
 let tts = null;
 const generationJobs = new Map();
 
 const getTTS = async () => {
+  if (process.env.VERCEL) {
+    throw new Error('Kokoro TTS is not supported in the Vercel serverless environment due to bundle size constraints.');
+  }
+  if (!KokoroTTS) {
+    const pkg = 'kokoro-js';
+    const mod = await import(pkg);
+    KokoroTTS = mod.KokoroTTS;
+  }
   if (!tts) {
     logger.info('🔊 Initializing Kokoro TTS engine (first load)...');
     tts = await KokoroTTS.from_pretrained("onnx-community/Kokoro-82M-ONNX", {

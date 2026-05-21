@@ -65,3 +65,5 @@ uploads/
 .kiro/
 .opencode/
 .env.agent
+
+.vercel

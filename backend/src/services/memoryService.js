@@ -13,11 +13,21 @@ let pipeline = null;
 
 // Lazy-load the embedding pipeline
 async function getPipeline() {
-    if (!pipeline) {
+  if (process.env.VERCEL) {
+    logger.info('[MemoryEngine] Vercel environment detected. Using mocked pipeline to fit size limits.');
+    return async (content, options) => {
+      return {
+        data: new Float32Array(384)
+      };
+    };
+  }
+
+  if (!pipeline) {
     logger.info('[MemoryEngine] Booting @xenova/transformers pipeline (Local)...');
     try {
-      const { pipeline: transformersPipeline, env } = await import('@xenova/transformers');
-      env.cacheDir = process.env.VERCEL ? '/tmp/transformers' : './.cache/transformers';
+      const pkg = '@xenova/transformers';
+      const { pipeline: transformersPipeline, env } = await import(pkg);
+      env.cacheDir = './.cache/transformers';
       pipeline = await transformersPipeline('feature-extraction', 'Xenova/all-MiniLM-L6-v2', {
         quantized: true
       });

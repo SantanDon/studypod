@@ -228,7 +228,8 @@ const server = http.createServer(app);
 server.on('upgrade', async (request, socket, head) => {
   const pathname = new URL(request.url, `http://${request.headers.host}`).pathname;
   if (pathname === '/api/sync-relay') {
-    const { pipeline: transformersPipeline, env } = await import('@xenova/transformers');
+    const pkg = '@xenova/transformers';
+    const { pipeline: transformersPipeline, env } = await import(pkg);
     // ENI: Use /tmp for serverless environments (Vercel is read-only elsewhere)
     env.cacheDir = process.env.VERCEL ? '/tmp/transformers' : './.cache/transformers';
     let pipeline = await transformersPipeline('feature-extraction', 'Xenova/all-MiniLM-L6-v2', {
