@@ -73,7 +73,7 @@ export const useSources = (notebookId?: string) => {
     mutationFn: async (sourceData: {
       notebookId: string;
       title: string;
-      type: "pdf" | "text" | "website" | "youtube" | "audio" | "image";
+      type: "pdf" | "text" | "website" | "youtube" | "audio" | "image" | "ebook";
       content?: string;
       url?: string;
       file_path?: string;

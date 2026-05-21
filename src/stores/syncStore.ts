@@ -84,7 +84,7 @@ export const useSyncStore = create<SyncState>()(
     }),
     {
       name: 'sync-store',
-      partialze: (state) => ({
+      partialize: (state) => ({
         lastSyncTime: state.lastSyncTime,
         conflicts: state.conflicts,
       }),

@@ -7,6 +7,7 @@ import { v4 as uuidv4 } from 'uuid';
 import { sql } from "drizzle-orm";
 import { authenticateToken } from '../middleware/auth.js';
 import { dbHelpers, getDatabase } from '../db/database.js';
+import { logger } from '../utils/logger.js';
 
 const router = express.Router();
 
@@ -67,7 +68,7 @@ router.post('/upload', authenticateToken, upload.single('file'), async (req, res
       uploadId: id
     });
   } catch (error) {
-    console.error('[Agent Upload] CRITICAL FAILURE:', error);
+    logger.error('[Agent Upload] CRITICAL FAILURE:', error);
     res.status(500).json({ error: `Failed to upload agent file: ${error.message}` });
   }
 });
@@ -97,7 +98,7 @@ router.get('/pending-uploads', authenticateToken, async (req, res) => {
     
     res.json({ success: true, pendingUploads: result.rows });
   } catch (error) {
-    console.error('[Agent Pending] CRITICAL FAILURE:', error);
+    logger.error('[Agent Pending] CRITICAL FAILURE:', error);
     res.status(500).json({ error: `Failed to list pending agent uploads: ${error.message}` });
   }
 });
@@ -124,7 +125,7 @@ router.delete('/upload/:id', authenticateToken, async (req, res) => {
       try {
         await fsPromises.unlink(record.file_path);
       } catch (fsError) {
-        console.warn('Could not delete physical file:', fsError);
+        logger.warn('Could not delete physical file:', fsError);
       }
     }
 
@@ -133,7 +134,7 @@ router.delete('/upload/:id', authenticateToken, async (req, res) => {
 
     res.json({ success: true, message: 'Agent upload cleaned up successfully' });
   } catch (error) {
-    console.error('Delete upload error:', error);
+    logger.error('Delete upload error:', error);
     res.status(500).json({ error: 'Failed to delete agent upload record' });
   }
 });
@@ -157,7 +158,7 @@ router.get('/download/:id', authenticateToken, async (req, res) => {
 
     res.download(record.file_path, record.file_name);
   } catch (error) {
-    console.error('Download upload error:', error);
+    logger.error('Download upload error:', error);
     res.status(500).json({ error: 'Failed to download agent upload' });
   }
 });

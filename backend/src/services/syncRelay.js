@@ -1,9 +1,12 @@
 import { Hocuspocus } from '@hocuspocus/server';
-import { TiptapTransformer } from '@hocuspocus/transformer';
 import { db, schema } from '../db/database.js';
 import { eq, and } from 'drizzle-orm';
 import jwt from 'jsonwebtoken';
-const JWT_SECRET = process.env.JWT_SECRET || 'study-lm-secret-key-2024';
+import { logger } from '../utils/logger.js';
+const JWT_SECRET = process.env.JWT_SECRET;
+if (!JWT_SECRET) {
+  throw new Error('[SyncRelay] JWT_SECRET must be set in environment');
+}
 
 /**
  * StudyPod Sync Relay (Powered by Hocuspocus)
@@ -37,22 +40,22 @@ export const hocuspocusServer = new Hocuspocus({
       });
 
       if (!membership) {
-        console.error(`[Sync] Access DENIED: User ${userId} is not a member of notebook ${notebookId}`);
+        logger.warn(`Access DENIED: User ${userId} is not a member of notebook ${notebookId}`);
         throw new Error('Unauthorized');
       }
 
-      console.log(`[Sync] Access GRANTED: User ${userId} authenticated for notebook ${notebookId}`);
+      logger.debug(`Access GRANTED: User ${userId} authenticated for notebook ${notebookId}`);
       return {
         user: { id: userId, role: membership.role },
       };
     } catch (error) {
-      console.error(`[Sync] Authentication failed: ${error.message}`);
+      logger.warn(`Authentication failed: ${error.message}`);
       throw new Error('Authentication failed');
     }
   },
 
   async onConnect(data) {
-    console.log(`[Sync] Client connected to document: ${data.documentName}`);
+    logger.debug(`Client connected to document: ${data.documentName}`);
   },
 
   async onLoadDocument(data) {

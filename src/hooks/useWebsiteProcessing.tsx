@@ -162,7 +162,8 @@ export const useWebsiteProcessing = () => {
           await processDocumentAsync({
             sourceId: savedSource.id,
             filePath: webContent.url, // Using URL as file path for web sources
-            sourceType: "website"
+            sourceType: "website",
+            notebookId
           });
           
           // Update source status to completed

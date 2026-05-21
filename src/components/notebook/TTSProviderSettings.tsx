@@ -8,6 +8,7 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Slider } from '@/components/ui/slider';
+import { Checkbox } from '@/components/ui/checkbox';
 import {
   Dialog,
   DialogContent,
@@ -27,6 +28,8 @@ import {
   getTTSConfig,
   saveTTSConfig,
   TTSConfig,
+  getPronunciationDict,
+  savePronunciationDict,
 } from '@/lib/tts/ttsService';
 import {
   getPodcastAudioConfig,
@@ -58,12 +61,20 @@ const TTSProviderSettings: React.FC<TTSProviderSettingsProps> = ({
   const [connectionStatus, setConnectionStatus] = useState<'unknown' | 'connected' | 'disconnected'>('unknown');
   const [voices, setVoices] = useState<VoiceOption[]>([]);
   const [isLoadingVoices, setIsLoadingVoices] = useState(false);
+  const [pronunciations, setPronunciations] = useState<Array<{ word: string; replacement: string }>>([]);
+  const [newWord, setNewWord] = useState('');
+  const [newReplacement, setNewReplacement] = useState('');
 
   useEffect(() => {
     if (isOpen) {
       const config = getTTSConfig();
       setTTSConfig(config);
       setAudioConfig(getPodcastAudioConfig());
+      
+      // Load pronunciation dictionary
+      const dict = getPronunciationDict();
+      setPronunciations(Object.entries(dict).map(([word, replacement]) => ({ word, replacement })));
+
       // Only check connection if provider is ultimate-tts
       if (config.provider === 'ultimate-tts') {
         checkConnection(config.provider, config.endpoint);
@@ -137,6 +148,16 @@ const TTSProviderSettings: React.FC<TTSProviderSettingsProps> = ({
   const handleSave = () => {
     saveTTSConfig(ttsConfig);
     savePodcastAudioConfig(audioConfig);
+
+    // Save pronunciation dictionary overrides
+    const dict: Record<string, string> = {};
+    for (const item of pronunciations) {
+      if (item.word.trim() && item.replacement.trim()) {
+        dict[item.word.trim().toLowerCase()] = item.replacement.trim();
+      }
+    }
+    savePronunciationDict(dict);
+
     toast({
       title: 'Settings Saved',
       description: 'TTS settings have been updated.',
@@ -169,7 +190,7 @@ const TTSProviderSettings: React.FC<TTSProviderSettingsProps> = ({
           </DialogDescription>
         </DialogHeader>
 
-        <div className="space-y-6 py-4">
+        <div className="space-y-6 py-4 max-h-[50vh] overflow-y-auto pr-2">
           {/* Provider Selection */}
           <div className="space-y-2">
             <Label>TTS Provider</Label>
@@ -395,15 +416,93 @@ const TTSProviderSettings: React.FC<TTSProviderSettingsProps> = ({
             />
           </div>
 
-          {/* Save Button */}
-          <div className="flex justify-end gap-2 pt-4 border-t">
-            <Button variant="outline" onClick={onClose}>
-              Cancel
-            </Button>
-            <Button onClick={handleSave}>
-              Save Settings
-            </Button>
+          {/* Studio Mastering */}
+          <div className="flex items-center justify-between space-x-2 rounded-lg border p-3 shadow-sm bg-slate-50 dark:bg-zinc-950/20">
+            <div className="space-y-0.5">
+              <Label className="text-sm font-medium">Acoustic Studio Mastering</Label>
+              <div className="text-[11px] text-gray-500">
+                Enhance sound with stereo panning, presence EQ, and dynamics compression
+              </div>
+            </div>
+            <Checkbox
+              checked={audioConfig.enableStudioEQ !== false}
+              onCheckedChange={(checked) => 
+                setAudioConfig(prev => ({ ...prev, enableStudioEQ: checked === true }))
+              }
+            />
           </div>
+
+          {/* Pronunciation Overrides */}
+          <div className="space-y-3 border-t pt-4">
+            <Label className="text-sm font-semibold flex flex-col gap-1">
+              <span>Pronunciation Dictionary</span>
+              <span className="text-xs font-normal text-gray-500">
+                Override words with custom phonetic spellings
+              </span>
+            </Label>
+            
+            <div className="flex gap-2">
+              <Input
+                placeholder="Word (e.g. studypodlm)"
+                value={newWord}
+                onChange={(e) => setNewWord(e.target.value)}
+                className="h-8 text-xs flex-1"
+              />
+              <Input
+                placeholder="Phonetic (e.g. study pod L M)"
+                value={newReplacement}
+                onChange={(e) => setNewReplacement(e.target.value)}
+                className="h-8 text-xs flex-1"
+              />
+              <Button 
+                variant="secondary"
+                size="sm"
+                className="h-8 px-3 text-xs"
+                onClick={() => {
+                  if (newWord.trim() && newReplacement.trim()) {
+                    setPronunciations(prev => [
+                      ...prev.filter(item => item.word.toLowerCase() !== newWord.trim().toLowerCase()),
+                      { word: newWord.trim(), replacement: newReplacement.trim() }
+                    ]);
+                    setNewWord('');
+                    setNewReplacement('');
+                  }
+                }}
+              >
+                Add
+              </Button>
+            </div>
+
+            {pronunciations.length > 0 && (
+              <div className="border rounded-md divide-y max-h-[120px] overflow-y-auto bg-slate-50 dark:bg-zinc-950/20">
+                {pronunciations.map((item) => (
+                  <div key={item.word} className="flex items-center justify-between p-2 text-xs">
+                    <span className="font-medium text-gray-700 dark:text-gray-300">{item.word}</span>
+                    <span className="text-gray-400">→</span>
+                    <span className="text-gray-600 dark:text-gray-400 italic">"{item.replacement}"</span>
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      className="h-5 w-5 p-0 text-red-500 hover:text-red-700 text-sm font-bold flex items-center justify-center"
+                      onClick={() => setPronunciations(prev => prev.filter(p => p.word !== item.word))}
+                    >
+                      ×
+                    </Button>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        </div>
+
+        {/* Save Button outside scrollable area */}
+        <div className="flex justify-end gap-2 pt-4 border-t">
+          <Button variant="outline" onClick={onClose}>
+            Cancel
+          </Button>
+          <Button onClick={handleSave}>
+            Save Settings
+          </Button>
         </div>
       </DialogContent>
     </Dialog>

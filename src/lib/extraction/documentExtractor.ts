@@ -21,6 +21,7 @@ export interface ExtractionResult {
     language?: string;
     lineCount?: number;
     paragraphCount?: number;
+    [key: string]: any;
   };
   chunks?: string[];
 }
@@ -126,6 +127,51 @@ export async function extractHTML(file: File): Promise<ExtractionResult> {
   } catch (error) {
     console.error("HTML extraction error:", error);
     throw new Error(`Failed to extract HTML: ${error}`);
+  }
+}
+
+/**
+ * Extract text from EPUB using server-side extraction
+ */
+export async function extractEPUB(file: File): Promise<ExtractionResult> {
+  console.log("📚 Extracting EPUB via server...");
+
+  try {
+    const formData = new FormData();
+    formData.append("file", file);
+
+    const backendUrl = import.meta.env.VITE_BACKEND_URL || "http://127.0.0.1:4000";
+    const response = await fetch(`${backendUrl}/api/audiobook/extract`, {
+      method: "POST",
+      body: formData,
+    });
+
+    if (!response.ok) {
+      throw new Error(`Server EPUB extraction failed: ${response.status}`);
+    }
+
+    const result = await response.json();
+    const content = result.content || "";
+
+    console.log(`✅ Extracted ${content.length} chars from EPUB (title: "${result.title}")`);
+
+    return {
+      content,
+      metadata: {
+        wordCount: content.split(/\s+/).filter((w: string) => w.length > 0).length,
+        charCount: content.length,
+        extractionMethod: "server-epub-parser",
+        epubTitle: result.title,
+        epubAuthor: result.author,
+        chapterCount: result.chapters?.length || 0,
+        chapters: result.chapters || [],
+        fileName: result.fileName
+      },
+      chunks: chunkText(content, 1000),
+    };
+  } catch (error) {
+    console.error("EPUB extraction error:", error);
+    throw new Error(`Failed to extract EPUB: ${error}`);
   }
 }
 
@@ -259,6 +305,11 @@ export async function extractContent(file: File): Promise<ExtractionResult> {
       fileName.endsWith(".htm")
     ) {
       return await extractHTML(file);
+    }
+
+    // EPUB
+    if (fileType === "application/epub+zip" || fileName.endsWith(".epub")) {
+      return await extractEPUB(file);
     }
 
     // Images
@@ -488,6 +539,7 @@ export function getFileCategory(file: File): string {
   )
     return "spreadsheet";
   if (fileName.endsWith(".html") || fileName.endsWith(".htm")) return "html";
+  if (fileType === "application/epub+zip" || fileName.endsWith(".epub")) return "ebook";
   if (fileType.startsWith("image/") || fileName.endsWith(".jpg") || fileName.endsWith(".jpeg") || fileName.endsWith(".png") || fileName.endsWith(".webp")) return "image";
 
   return "text";

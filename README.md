@@ -11,7 +11,7 @@
 StudyPodLM is not just a study tool; it's a **Memory Hub**. 
 
 Traditionally, study notes are silos. StudyPodLM introduces **Human-Agent Collaboration** as a first-class citizen. 
-- **EverMemOS Integration:** All agent-created notes are automatically persisted to the EverMemOS decentralized memory layer, ensuring long-term knowledge retention.
+- **Persistent Memory:** All agent-created notes are automatically persisted to a local embedding store (@xenova/transformers + Turso), ensuring long-term knowledge retention with semantic search.
 - **Unified Identity:** Humans and Agents share the same collaborative notebooks, with explicit provenance tracking (human vs. agent attribution).
 - **Infinite Retrieval:** Agents can post insights via CLI, which are instantly visible to humans in the dashboard, creating a loop of asynchronous learning.
 

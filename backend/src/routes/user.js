@@ -3,6 +3,7 @@ import { v4 as uuidv4 } from 'uuid';
 import { dbHelpers } from '../db/database.js';
 import { authenticateToken } from '../middleware/auth.js';
 import bcrypt from 'bcryptjs';
+import { logger } from '../utils/logger.js';
 
 const router = express.Router();
 
@@ -24,12 +25,12 @@ router.get('/profile', async (req, res) => {
       user: {
         id: user.id,
         email: user.email,
-        displayName: user.display_name,
-        avatarUrl: user.avatar_url,
+        displayName: user.displayName || user.display_name,
+        avatarUrl: user.avatarUrl || user.avatar_url,
         bio: user.bio,
-        createdAt: user.created_at,
-        updatedAt: user.updated_at,
-        twoFactorEnabled: !!user.two_factor_enabled
+        createdAt: user.createdAt || user.created_at,
+        updatedAt: user.updatedAt || user.updated_at,
+        twoFactorEnabled: !!(user.twoFactorEnabled !== undefined ? user.twoFactorEnabled : user.two_factor_enabled)
       },
       preferences,
       stats: {
@@ -39,7 +40,7 @@ router.get('/profile', async (req, res) => {
       }
     });
   } catch (error) {
-    console.error('Get profile error:', error);
+    logger.error('Get profile error:', error);
     res.status(500).json({ error: 'Failed to get profile' });
   }
 });
@@ -50,9 +51,9 @@ router.put('/profile', async (req, res) => {
     const { displayName, bio, avatarUrl } = req.body;
     const updates = {};
 
-    if (displayName !== undefined) updates.display_name = displayName;
+    if (displayName !== undefined) updates.displayName = displayName;
     if (bio !== undefined) updates.bio = bio;
-    if (avatarUrl !== undefined) updates.avatar_url = avatarUrl;
+    if (avatarUrl !== undefined) updates.avatarUrl = avatarUrl;
 
     if (Object.keys(updates).length === 0) {
       return res.status(400).json({ error: 'No updates provided' });
@@ -66,15 +67,15 @@ router.put('/profile', async (req, res) => {
       user: {
         id: user.id,
         email: user.email,
-        displayName: user.display_name,
-        avatarUrl: user.avatar_url,
+        displayName: user.displayName || user.display_name,
+        avatarUrl: user.avatarUrl || user.avatar_url,
         bio: user.bio,
-        updatedAt: user.updated_at,
-        twoFactorEnabled: !!user.two_factor_enabled
+        updatedAt: user.updatedAt || user.updated_at,
+        twoFactorEnabled: !!(user.twoFactorEnabled !== undefined ? user.twoFactorEnabled : user.two_factor_enabled)
       }
     });
   } catch (error) {
-    console.error('Update profile error:', error);
+    logger.error('Update profile error:', error);
     res.status(500).json({ error: 'Failed to update profile' });
   }
 });
@@ -88,7 +89,7 @@ router.get('/preferences', async (req, res) => {
     }
     res.json(preferences);
   } catch (error) {
-    console.error('Get preferences error:', error);
+    logger.error('Get preferences error:', error);
     res.status(500).json({ error: 'Failed to get preferences' });
   }
 });
@@ -132,7 +133,7 @@ router.put('/preferences', async (req, res) => {
       preferences
     });
   } catch (error) {
-    console.error('Update preferences error:', error);
+    logger.error('Update preferences error:', error);
     res.status(500).json({ error: 'Failed to update preferences' });
   }
 });
@@ -146,7 +147,7 @@ router.get('/stats', async (req, res) => {
     }
     res.json(stats);
   } catch (error) {
-    console.error('Get stats error:', error);
+    logger.error('Get stats error:', error);
     res.status(500).json({ error: 'Failed to get stats' });
   }
 });
@@ -171,7 +172,7 @@ router.put('/password', async (req, res) => {
     }
 
     // Verify current password
-    const isValidPassword = await bcrypt.compare(currentPassword, user.password_hash);
+    const isValidPassword = await bcrypt.compare(currentPassword, user.passwordHash || user.password_hash);
     if (!isValidPassword) {
       return res.status(401).json({ error: 'Current password is incorrect' });
     }
@@ -180,11 +181,11 @@ router.put('/password', async (req, res) => {
     const newPasswordHash = await bcrypt.hash(newPassword, 10);
 
     // Update password
-    await dbHelpers.updateUser(req.user.userId, { password_hash: newPasswordHash });
+    await dbHelpers.updateUser(req.user.userId, { passwordHash: newPasswordHash });
 
     res.json({ message: 'Password updated successfully' });
   } catch (error) {
-    console.error('Update password error:', error);
+    logger.error('Update password error:', error);
     res.status(500).json({ error: 'Failed to update password' });
   }
 });
@@ -201,11 +202,11 @@ router.get('/export', async (req, res) => {
       user: {
         id: user.id,
         email: user.email,
-        displayName: user.display_name,
+        displayName: user.displayName || user.display_name,
         bio: user.bio,
-        avatarUrl: user.avatar_url,
-        createdAt: user.created_at,
-        updatedAt: user.updated_at
+        avatarUrl: user.avatarUrl || user.avatar_url,
+        createdAt: user.createdAt || user.created_at,
+        updatedAt: user.updatedAt || user.updated_at
       },
       preferences,
       stats,
@@ -226,7 +227,7 @@ router.get('/export', async (req, res) => {
 
     res.json(exportData);
   } catch (error) {
-    console.error('Export data error:', error);
+    logger.error('Export data error:', error);
     res.status(500).json({ error: 'Failed to export data' });
   }
 });
@@ -247,7 +248,7 @@ router.delete('/account', async (req, res) => {
     }
 
     // Verify password
-    const isValidPassword = await bcrypt.compare(password, user.password_hash);
+    const isValidPassword = await bcrypt.compare(password, user.passwordHash || user.password_hash);
     if (!isValidPassword) {
       return res.status(401).json({ error: 'Incorrect password' });
     }
@@ -257,35 +258,78 @@ router.delete('/account', async (req, res) => {
 
     res.json({ message: 'Account deleted successfully' });
   } catch (error) {
-    console.error('Delete account error:', error);
+    logger.error('Delete account error:', error);
     res.status(500).json({ error: 'Failed to delete account' });
   }
 });
 
-// Update user API keys (BYOK)
+async function validateProviderKey(provider, key) {
+  const PING_ENDPOINTS = {
+    openai: { url: 'https://api.openai.com/v1/models', headers: { 'Authorization': `Bearer ${key}` } },
+    groq: { url: 'https://api.groq.com/openai/v1/models', headers: { 'Authorization': `Bearer ${key}` } },
+    nvidia: { url: 'https://integrate.api.nvidia.com/v1/models', headers: { 'Authorization': `Bearer ${key}` } },
+    gemini: { url: 'https://generativelanguage.googleapis.com/v1beta/models?key=' + key, headers: {} },
+    anthropic: { url: 'https://api.anthropic.com/v1/messages', headers: { 'x-api-key': key, 'anthropic-version': '2023-06-01', 'Content-Type': 'application/json' } }
+  };
+
+  const config = PING_ENDPOINTS[provider];
+  if (!config) return { valid: false, error: 'Unknown provider' };
+
+  try {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 5000);
+    const res = await fetch(config.url, { method: 'GET', headers: config.headers, signal: controller.signal });
+    clearTimeout(timeout);
+    if (res.ok || res.status === 400 || res.status === 401) {
+      if (res.status === 401) return { valid: false, error: 'Invalid key (401)' };
+      return { valid: res.ok, status: res.status };
+    }
+    return { valid: false, error: `HTTP ${res.status}` };
+  } catch (err) {
+    return { valid: false, error: err.message };
+  }
+}
+
+// Update user API keys (BYOK) with key validation
 router.put('/api_keys', async (req, res) => {
   try {
-    const { apiKeys } = req.body;
+    const { apiKeys, skipValidation } = req.body;
     
     if (!apiKeys || typeof apiKeys !== 'object') {
       return res.status(400).json({ error: 'Valid apiKeys object is required' });
     }
 
-    // Basic validation of key structure
-    const providers = ['gemini', 'groq', 'nvidia', 'openai', 'anthropic'];
-    const hasValidKey = Object.keys(apiKeys).some(provider => 
-      providers.includes(provider) && typeof apiKeys[provider] === 'string'
+    const SUPPORTED = ['gemini', 'groq', 'nvidia', 'openai', 'anthropic'];
+    const hasValidKey = Object.keys(apiKeys).some(p => 
+      SUPPORTED.includes(p) && typeof apiKeys[p] === 'string' && apiKeys[p].length > 0
     );
 
     if (!hasValidKey) {
-      return res.status(400).json({ error: 'At least one valid provider key must be provided' });
+      return res.status(400).json({ error: 'At least one non-empty provider key must be provided' });
+    }
+
+    if (!skipValidation) {
+      const results = {};
+      for (const provider of SUPPORTED) {
+        if (apiKeys[provider]) {
+          results[provider] = await validateProviderKey(provider, apiKeys[provider]);
+        }
+      }
+      const failures = Object.entries(results).filter(([, r]) => !r.valid);
+      if (failures.length > 0) {
+        return res.status(400).json({
+          error: 'Some provider keys failed validation',
+          validationResults: results,
+          hint: 'Set skipValidation: true to bypass'
+        });
+      }
     }
 
     await dbHelpers.updateUserApiKeys(req.user.userId, apiKeys);
     
-    res.json({ message: 'API keys updated successfully' });
+    res.json({ message: 'API keys updated and validated successfully' });
   } catch (error) {
-    console.error('Update API keys error:', error);
+    logger.error('Update API keys error:', error);
     res.status(500).json({ error: 'Failed to update API keys' });
   }
 });

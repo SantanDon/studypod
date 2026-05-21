@@ -123,8 +123,8 @@ export async function processDocument(
   if (shouldGenerateEmbeddings && chunks.length > 0) {
 
     try {
-      // Limit chunks to process - too many chunks slow down chat
-      const maxChunks = Math.min(chunks.length, 20);
+      // Limit chunks to process - increased limit to 150 to support longer documents/transcripts
+      const maxChunks = Math.min(chunks.length, 150);
       const chunksToProcess = chunks.slice(0, maxChunks);
 
       // Increase batch size for better parallelization

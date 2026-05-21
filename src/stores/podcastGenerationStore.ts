@@ -22,6 +22,7 @@ interface PodcastGenerationState {
   host1Name: string;
   host2Name: string;
   podcastType: 'brief' | 'standard' | 'deep-dive';
+  podcastFormat: 'dialogue' | 'solo';
   
   // Audio state
   audioUrl: string | null;
@@ -32,10 +33,10 @@ interface PodcastGenerationState {
   notebookId: string | null;
   
   // Actions
-  startGeneration: (notebookId: string, script: PodcastScript, options?: { host1Name?: string, host2Name?: string, type?: 'brief' | 'standard' | 'deep-dive' }) => void;
+  startGeneration: (notebookId: string, script: PodcastScript, options?: { host1Name?: string, host2Name?: string, type?: 'brief' | 'standard' | 'deep-dive', format?: 'dialogue' | 'solo' }) => void;
   updateProgress: (progress: StreamingProgress) => void;
   setAudioReady: (audioUrls: string[]) => void;
-  setFinalAudio: (audioUrl: string) => void;
+  setFinalAudio: (audioUrl: string, notebookId?: string, title?: string) => void;
   saveIntermediateState: () => void;
   rehydrateState: (notebookId: string) => boolean;
   cancelGeneration: () => void;
@@ -50,6 +51,7 @@ export const usePodcastGenerationStore = create<PodcastGenerationState>((set, ge
   host1Name: 'Alex',
   host2Name: 'Sarah',
   podcastType: 'standard',
+  podcastFormat: 'dialogue',
   audioUrl: null,
   partialAudioUrls: [],
   canPlayPartial: false,
@@ -64,6 +66,7 @@ export const usePodcastGenerationStore = create<PodcastGenerationState>((set, ge
       host1Name: options?.host1Name || 'Alex',
       host2Name: options?.host2Name || 'Sarah',
       podcastType: options?.type || 'standard',
+      podcastFormat: options?.format || 'dialogue',
       audioUrl: null,
       partialAudioUrls: [],
       canPlayPartial: false,
@@ -88,8 +91,8 @@ export const usePodcastGenerationStore = create<PodcastGenerationState>((set, ge
       canPlayPartial: progress.canPlay,
     });
 
-    // Check if complete or cancelled
-    if (progress.phase === 'complete' || progress.phase === 'cancelled' || progress.phase === 'error') {
+    // Check if cancelled or error (complete is handled by setFinalAudio to avoid race conditions)
+    if (progress.phase === 'cancelled' || progress.phase === 'error') {
       set({ isGenerating: false });
     }
   },
@@ -103,13 +106,15 @@ export const usePodcastGenerationStore = create<PodcastGenerationState>((set, ge
   },
 
   // Set final combined audio
-  setFinalAudio: (audioUrl) => {
-    set({
+  setFinalAudio: (audioUrl, notebookId, title) => {
+    set((state) => ({
       audioUrl,
+      notebookId: notebookId || state.notebookId,
       isGenerating: false,
-    });
+      script: title ? { title, segments: [] } : state.script,
+    }));
     // Final clear of intermediate state as it's now in history
-    localStorage.removeItem(`active_podcast_${get().notebookId}`);
+    localStorage.removeItem(`active_podcast_${notebookId || get().notebookId}`);
   },
 
   // Rehydrate state from localStorage
@@ -125,6 +130,14 @@ export const usePodcastGenerationStore = create<PodcastGenerationState>((set, ge
         return false;
       }
 
+      // Check if generator is actually running
+      const generator = getStreamingTTSGenerator();
+      if (!generator.isRunning()) {
+        console.log('🎙️ Stale podcast session found in localStorage, clearing.');
+        localStorage.removeItem(`active_podcast_${notebookId}`);
+        return false;
+      }
+
       set({
         isGenerating: true,
         notebookId: data.notebookId,
@@ -132,6 +145,7 @@ export const usePodcastGenerationStore = create<PodcastGenerationState>((set, ge
         host1Name: data.host1Name || 'Alex',
         host2Name: data.host2Name || 'Sarah',
         podcastType: data.podcastType || 'standard',
+        podcastFormat: data.podcastFormat || 'dialogue',
         partialAudioUrls: data.partialAudioUrls || [],
         progress: {
           phase: 'generating',
@@ -160,6 +174,7 @@ export const usePodcastGenerationStore = create<PodcastGenerationState>((set, ge
       host1Name: state.host1Name,
       host2Name: state.host2Name,
       podcastType: state.podcastType,
+      podcastFormat: state.podcastFormat,
       partialAudioUrls: state.partialAudioUrls,
       timestamp: Date.now(),
     };
@@ -171,6 +186,10 @@ export const usePodcastGenerationStore = create<PodcastGenerationState>((set, ge
   cancelGeneration: () => {
     const generator = getStreamingTTSGenerator();
     generator.cancel();
+    const currentNotebookId = get().notebookId;
+    if (currentNotebookId) {
+      localStorage.removeItem(`active_podcast_${currentNotebookId}`);
+    }
     set({
       isGenerating: false,
       progress: {
@@ -186,6 +205,10 @@ export const usePodcastGenerationStore = create<PodcastGenerationState>((set, ge
 
   // Reset state
   reset: () => {
+    const currentNotebookId = get().notebookId;
+    if (currentNotebookId) {
+      localStorage.removeItem(`active_podcast_${currentNotebookId}`);
+    }
     set({
       isGenerating: false,
       progress: null,

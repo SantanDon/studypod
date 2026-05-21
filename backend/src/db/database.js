@@ -5,6 +5,7 @@ import dotenv from 'dotenv';
 import { fileURLToPath } from 'url';
 import { dirname, join } from 'path';
 import { eq, sql, and, or, desc, asc, inArray } from 'drizzle-orm';
+import { logger } from '../utils/logger.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -24,11 +25,11 @@ if (!url || !authToken) {
     throw new Error('❌ [SECURITY] TURSO_DATABASE_URL and TURSO_AUTH_TOKEN must be set in Vercel environment.');
   }
   // Local fallback logic if needed, but the secret MUST be removed
-  console.warn('⚠️ [SECURITY] Database credentials missing. Falling back to local configuration check.');
+  logger.warn('Database credentials missing. Falling back to local configuration check.');
 }
 
 if (isVercel) {
-  console.log(`📂 [VERCEL] Forcing Turso connection to ${url}`);
+  logger.info(`[VERCEL] Forcing Turso connection to ${url}`);
 }
 
 
@@ -38,15 +39,15 @@ let dbInstance;
 export async function getDatabase() {
   if (!dbInstance) {
     try {
-      console.log(`📂 Connecting to database at: ${url}`);
+      logger.info(`Connecting to database at: ${url}`);
       client = createClient({
         url: url,
         authToken: authToken
       });
       dbInstance = drizzle(client, { schema });
-      console.log('✅ Drizzle ORM initialized with LibSQL');
+      logger.info('Drizzle ORM initialized with LibSQL');
     } catch (error) {
-      console.error('❌ Database load failure:', error);
+      logger.error('Database load failure:', error);
       throw error;
     }
   }
@@ -54,10 +55,64 @@ export async function getDatabase() {
 }
 
 export async function initializeDatabase() {
-  console.log('Initializing database schema (Drizzle mode)...');
-  await getDatabase();
-  // Tables are managed via schema.ts and push/migrate
-  console.log('Database initialization complete.');
+  logger.info('Initializing database schema...');
+  const db = await getDatabase();
+
+  try {
+    await db.run(sql`CREATE TABLE IF NOT EXISTS "api_keys" (
+      "id" text PRIMARY KEY NOT NULL,
+      "user_id" text NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      "key_hash" text NOT NULL UNIQUE,
+      "prefix" text NOT NULL,
+      "label" text DEFAULT 'My Agent Key',
+      "scopes" text DEFAULT '["notebooks:read","notes:create","chat:all"]',
+      "notebook_ids" text,
+      "expires_at" integer,
+      "rate_limit" integer DEFAULT 0,
+      "last_used_at" integer,
+      "created_at" integer DEFAULT (strftime('%s', 'now'))
+    )`);
+    try { await db.run(sql`ALTER TABLE api_keys ADD COLUMN scopes text DEFAULT '["notebooks:read","notes:create","chat:all"]'`); } catch (e) { logger.debug(`Schema migration (scopes): ${e.message}`); }
+    try { await db.run(sql`ALTER TABLE api_keys ADD COLUMN notebook_ids text`); } catch (e) { logger.debug(`Schema migration (notebook_ids): ${e.message}`); }
+    try { await db.run(sql`ALTER TABLE api_keys ADD COLUMN expires_at integer`); } catch (e) { logger.debug(`Schema migration (expires_at): ${e.message}`); }
+    try { await db.run(sql`ALTER TABLE api_keys ADD COLUMN rate_limit integer DEFAULT 0`); } catch (e) { logger.debug(`Schema migration (rate_limit): ${e.message}`); }
+    await db.run(sql`CREATE TABLE IF NOT EXISTS "pairing_codes" (
+      "code" text PRIMARY KEY NOT NULL,
+      "user_id" text NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      "expires_at" integer NOT NULL,
+      "created_at" integer DEFAULT (strftime('%s', 'now'))
+    )`);
+    await db.run(sql`CREATE TABLE IF NOT EXISTS "agent_missions" (
+      "id" text PRIMARY KEY NOT NULL,
+      "user_id" text NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      "notebook_id" text NOT NULL REFERENCES notebooks(id) ON DELETE CASCADE,
+      "goal" text NOT NULL,
+      "cron" text,
+      "max_notes" integer DEFAULT 5,
+      "status" text DEFAULT 'active',
+      "last_run_at" integer,
+      "next_run_at" integer,
+      "result" text,
+      "created_at" integer DEFAULT (strftime('%s', 'now')),
+      "updated_at" integer DEFAULT (strftime('%s', 'now'))
+    )`);
+    await db.run(sql`CREATE TABLE IF NOT EXISTS "agent_messages" (
+      "id" text PRIMARY KEY NOT NULL,
+      "notebook_id" text NOT NULL REFERENCES notebooks(id) ON DELETE CASCADE,
+      "from_agent_id" text NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      "to_agent_id" text REFERENCES users(id) ON DELETE SET NULL,
+      "message_type" text DEFAULT 'thought',
+      "subject" text,
+      "content" text NOT NULL,
+      "read" integer DEFAULT 0,
+      "created_at" integer DEFAULT (strftime('%s', 'now'))
+    )`);
+    logger.info('Schema tables verified.');
+  } catch (err) {
+    logger.warn('Schema fallback creation skipped (tables may already exist via Drizzle):', err.message);
+  }
+
+  logger.info('Database initialization complete.');
 }
 
 export function closeDatabase() {
@@ -124,12 +179,12 @@ export const dbHelpers = {
 
   // User preferences (Dummy handles for legacy compatibility)
   async createUserPreferences(id, userId) {
-    console.log(`[DB] Preferences creation skipped for ${userId} (Table not in schema)`);
+    logger.debug(`Preferences creation skipped for ${userId}`);
     return { success: true };
   },
 
   async createUserStats(id, userId) {
-    console.log(`[DB] Stats creation skipped for ${userId} (Table not in schema)`);
+    logger.debug(`Stats creation skipped for ${userId}`);
     return { success: true };
   },
 
@@ -332,9 +387,9 @@ export const dbHelpers = {
         role: 'editor',
         joinedAt: new Date()
       });
-      console.log('[DB] Final Join Successful');
+      logger.debug('Final Join Successful');
     } catch (e) {
-      console.error("[DB] ULTIMATE JOIN ERROR:", e.message);
+      logger.error("Join error:", e.message);
       if (e.message.includes('UNIQUE') || e.message.includes('already exists')) {
         return notebook;
       }
@@ -506,7 +561,7 @@ export const dbHelpers = {
   async globalSearch(userId, query) {
     const db = await getDatabase();
     const cleanQuery = `%${query}%`;
-    console.log(`🔍 [GLOBAL SEARCH] User: ${userId}, Query: ${query}`);
+    logger.debug(`Global search: User ${userId}, Query: ${query}`);
 
     // Query across notebooks, sources, and notes
     const results = {
@@ -532,16 +587,257 @@ export const dbHelpers = {
     return await db.select().from(schema.tags).where(eq(schema.tags.userId, userId));
   },
 
-  async createTask(userId, notebookId, content, priority = 'medium', sourceId = null) {
+  async createTask(userId, notebookId, content, assignee = 'human', priority = 'medium', sourceId = null, dueDate = null) {
     const db = await getDatabase();
     const id = "task-" + Math.random().toString(36).substring(2, 12);
-    return await db.insert(schema.tasks).values({ id, userId, notebookId, content, priority, sourceId });
+    return await db.insert(schema.tasks).values({ id, userId, notebookId, content, assignee, priority, sourceId, dueDate: dueDate ? new Date(dueDate) : null });
   },
 
   async getTasksByNotebookId(notebookId) {
     const db = await getDatabase();
     return await db.select().from(schema.tasks).where(eq(schema.tasks.notebookId, notebookId))
       .orderBy(desc(schema.tasks.createdAt));
+  },
+
+  async updateTask(id, updates) {
+    const db = await getDatabase();
+    return await db.update(schema.tasks)
+      .set({ ...updates, updatedAt: new Date() })
+      .where(eq(schema.tasks.id, id));
+  },
+
+  // Sovereign Bridge - Activity Log
+  async createActivityLog(notebookId, userId, actor, actionType, contentPreview = null) {
+    const db = await getDatabase();
+    const id = "act-" + Math.random().toString(36).substring(2, 12);
+    return await db.insert(schema.activityLog).values({ id, notebookId, userId, actor, actionType, contentPreview });
+  },
+
+  async getActivityLogsByNotebookId(notebookId) {
+    const db = await getDatabase();
+    return await db.select().from(schema.activityLog).where(eq(schema.activityLog.notebookId, notebookId))
+      .orderBy(desc(schema.activityLog.createdAt));
+  },
+
+  // Sovereign Bridge - Scratchpad
+  async createScratchpadEntry(notebookId, userId, content, ttlExpiresAt = null) {
+    const db = await getDatabase();
+    const id = "scr-" + Math.random().toString(36).substring(2, 12);
+    return await db.insert(schema.scratchpad).values({ id, notebookId, userId, content, ttlExpiresAt: ttlExpiresAt ? new Date(ttlExpiresAt) : null });
+  },
+
+  async getScratchpadByNotebookId(notebookId, userId) {
+    const db = await getDatabase();
+    return await db.select().from(schema.scratchpad).where(and(
+      eq(schema.scratchpad.notebookId, notebookId),
+      eq(schema.scratchpad.userId, userId)
+    )).orderBy(desc(schema.scratchpad.createdAt));
+  },
+
+  async deleteScratchpadEntry(id) {
+    const db = await getDatabase();
+    return await db.delete(schema.scratchpad).where(eq(schema.scratchpad.id, id));
+  },
+
+  // Sovereign Bridge - Webhooks
+  async createWebhook(notebookId, userId, url, eventsJson) {
+    const db = await getDatabase();
+    const id = "whk-" + Math.random().toString(36).substring(2, 12);
+    return await db.insert(schema.webhooks).values({ id, notebookId, userId, url, eventsJson });
+  },
+
+  async getWebhooksByNotebookId(notebookId) {
+    const db = await getDatabase();
+    return await db.select().from(schema.webhooks).where(eq(schema.webhooks.notebookId, notebookId));
+  },
+
+  // ---- Missing CRUD Methods ----
+
+  async createMemory(id, userId, notebookId, content, embedding, metadata = {}) {
+    const db = await getDatabase();
+    return await db.insert(schema.memories).values({
+      id,
+      userId,
+      notebookId,
+      content,
+      embedding: JSON.stringify(embedding),
+      metadata: JSON.stringify(metadata),
+    });
+  },
+
+  async getMemoriesByNotebook(notebookId) {
+    const db = await getDatabase();
+    return await db.select().from(schema.memories)
+      .where(eq(schema.memories.notebookId, notebookId))
+      .orderBy(desc(schema.memories.createdAt));
+  },
+
+  async createApiKey(id, userId, keyHash, prefix, label, scopes = null, notebookIds = null, expiresAt = null, rateLimit = 0) {
+    const db = await getDatabase();
+    return await db.insert(schema.apiKeys).values({
+      id, userId, keyHash, prefix, label,
+      scopes: scopes || '["notebooks:read","notes:create","chat:all"]',
+      notebookIds: notebookIds ? JSON.stringify(notebookIds) : null,
+      expiresAt: expiresAt ? new Date(expiresAt) : null,
+      rateLimit
+    });
+  },
+
+  async listApiKeys(userId) {
+    const db = await getDatabase();
+    return await db.select({
+      id: schema.apiKeys.id,
+      prefix: schema.apiKeys.prefix,
+      label: schema.apiKeys.label,
+      scopes: schema.apiKeys.scopes,
+      notebookIds: schema.apiKeys.notebookIds,
+      expiresAt: schema.apiKeys.expiresAt,
+      rateLimit: schema.apiKeys.rateLimit,
+      lastUsedAt: schema.apiKeys.lastUsedAt,
+      createdAt: schema.apiKeys.createdAt,
+    }).from(schema.apiKeys).where(eq(schema.apiKeys.userId, userId))
+      .orderBy(desc(schema.apiKeys.createdAt));
+  },
+
+  async deleteApiKey(id, userId) {
+    const db = await getDatabase();
+    const result = await db.delete(schema.apiKeys)
+      .where(and(eq(schema.apiKeys.id, id), eq(schema.apiKeys.userId, userId)));
+    return { changes: result.rowsAffected };
+  },
+
+  async getApiKeyByHash(keyHash) {
+    const db = await getDatabase();
+    const result = await db.select().from(schema.apiKeys)
+      .where(eq(schema.apiKeys.keyHash, keyHash)).limit(1);
+    return result[0];
+  },
+
+  async touchApiKey(id) {
+    const db = await getDatabase();
+    return await db.update(schema.apiKeys)
+      .set({ lastUsedAt: new Date() })
+      .where(eq(schema.apiKeys.id, id));
+  },
+
+  async createPairingCode(code, userId, expiresAt) {
+    const db = await getDatabase();
+    return await db.insert(schema.pairingCodes).values({ code, userId, expiresAt: new Date(expiresAt) });
+  },
+
+  async getPairingCode(code) {
+    const db = await getDatabase();
+    const result = await db.select().from(schema.pairingCodes)
+      .where(eq(schema.pairingCodes.code, code)).limit(1);
+    return result[0];
+  },
+
+  async deletePairingCode(code) {
+    const db = await getDatabase();
+    return await db.delete(schema.pairingCodes).where(eq(schema.pairingCodes.code, code));
+  },
+
+  async getNoteById(noteId, userId) {
+    const db = await getDatabase();
+    const result = await db.select({
+      id: schema.notes.id,
+      notebookId: schema.notes.notebookId,
+      content: schema.notes.content,
+      version: schema.notes.version,
+      authorId: schema.notes.authorId,
+      createdAt: schema.notes.createdAt,
+      updatedAt: schema.notes.updatedAt,
+    }).from(schema.notes).where(and(
+      eq(schema.notes.id, noteId),
+      eq(schema.notes.userId, userId)
+    )).limit(1);
+    return result[0];
+  },
+
+  async updateNote(noteId, userId, content) {
+    const db = await getDatabase();
+    const result = await db.update(schema.notes)
+      .set({ content, version: sql`version + 1`, updatedAt: new Date() })
+      .where(and(eq(schema.notes.id, noteId), eq(schema.notes.userId, userId)));
+    return { changes: result.rowsAffected };
+  },
+
+  // Agent Missions
+  async createAgentMission(id, userId, notebookId, goal, cron = null, maxNotes = 5) {
+    const db = await getDatabase();
+    return await db.insert(schema.agentMissions).values({ id, userId, notebookId, goal, cron, maxNotes });
+  },
+
+  async getAgentMissionsByUserId(userId) {
+    const db = await getDatabase();
+    return await db.select().from(schema.agentMissions)
+      .where(eq(schema.agentMissions.userId, userId))
+      .orderBy(desc(schema.agentMissions.createdAt));
+  },
+
+  async getAgentMissionsByNotebookId(notebookId) {
+    const db = await getDatabase();
+    return await db.select().from(schema.agentMissions)
+      .where(eq(schema.agentMissions.notebookId, notebookId))
+      .orderBy(desc(schema.agentMissions.createdAt));
+  },
+
+  async getAgentMissionById(id) {
+    const db = await getDatabase();
+    const result = await db.select().from(schema.agentMissions)
+      .where(eq(schema.agentMissions.id, id)).limit(1);
+    return result[0];
+  },
+
+  async updateAgentMission(id, updates) {
+    const db = await getDatabase();
+    return await db.update(schema.agentMissions)
+      .set({ ...updates, updatedAt: new Date() })
+      .where(eq(schema.agentMissions.id, id));
+  },
+
+  async deleteAgentMission(id) {
+    const db = await getDatabase();
+    return await db.delete(schema.agentMissions).where(eq(schema.agentMissions.id, id));
+  },
+
+  // Agent-to-Agent Messages
+  async createAgentMessage(id, notebookId, fromAgentId, content, toAgentId = null, messageType = 'thought', subject = null) {
+    const db = await getDatabase();
+    return await db.insert(schema.agentMessages).values({
+      id, notebookId, fromAgentId, toAgentId, content, messageType, subject
+    });
+  },
+
+  async getAgentMessages(notebookId, agentId = null) {
+    const db = await getDatabase();
+    const conditions = [eq(schema.agentMessages.notebookId, notebookId)];
+    if (agentId) {
+      conditions.push(or(
+        eq(schema.agentMessages.toAgentId, agentId),
+        eq(schema.agentMessages.fromAgentId, agentId)
+      ));
+    }
+    return await db.select().from(schema.agentMessages)
+      .where(and(...conditions))
+      .orderBy(desc(schema.agentMessages.createdAt));
+  },
+
+  async markAgentMessageRead(id) {
+    const db = await getDatabase();
+    return await db.update(schema.agentMessages)
+      .set({ read: true })
+      .where(eq(schema.agentMessages.id, id));
+  },
+
+  async getUnreadAgentMessageCount(agentId) {
+    const db = await getDatabase();
+    const result = await db.select({ count: sql`count(*)` }).from(schema.agentMessages)
+      .where(and(
+        eq(schema.agentMessages.toAgentId, agentId),
+        eq(schema.agentMessages.read, false)
+      ));
+    return Number(result[0]?.count || 0);
   }
 };
 

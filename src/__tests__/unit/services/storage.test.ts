@@ -6,6 +6,7 @@ describe('LocalStorageService', () => {
   let service: LocalStorageServiceImpl;
 
   beforeEach(() => {
+    localStorage.clear();
     service = new LocalStorageServiceImpl();
   });
 

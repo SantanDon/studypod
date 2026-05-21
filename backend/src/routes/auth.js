@@ -1,7 +1,16 @@
 import express from "express";
 import bcrypt from "bcryptjs";
+import { rateLimit } from 'express-rate-limit';
 import { v4 as uuidv4 } from "uuid";
 import { dbHelpers } from "../db/database.js";
+
+const authLimiter = rateLimit({
+  windowMs: 5 * 60 * 1000, // 5 minutes
+  limit: 10, // 10 attempts
+  message: { error: 'Too many attempts. Please try again in 5 minutes.' },
+  standardHeaders: 'draft-7',
+  legacyHeaders: false,
+});
 import {
   generateToken,
   generateRefreshToken,
@@ -15,6 +24,7 @@ import * as otplib from 'otplib';
 const { authenticator } = otplib;
 import QRCode from 'qrcode';
 import jwt from 'jsonwebtoken';
+import { logger } from "../utils/logger.js";
 
 // Encryption for MFA secrets
 const MFA_ENCRYPTION_KEY = process.env.JWT_SECRET?.substring(0, 32).padEnd(32, '0');
@@ -92,7 +102,7 @@ router.post("/register", authenticateToken, async (req, res, next) => {
   }
 });
 // CREATE USER WITH CONSENT AND VERIFICATION STATUS
-router.post("/signup", async (req, res, next) => {
+router.post("/signup", authLimiter, async (req, res, next) => {
   try {
     const { email, password, displayName, passphrase, recovery_key_hash, emailConsent } = req.body;
 
@@ -206,15 +216,14 @@ router.post("/signup", async (req, res, next) => {
 });
 
 // Sign In
-router.post("/signin", async (req, res, next) => {
-  console.log("--> SIGNIN REQUEST RECEIVED:", req.body);
+router.post("/signin", authLimiter, async (req, res, next) => {
   try {
     const { email, password, displayName, passphrase } = req.body;
 
     let user;
 
     if (email && password) {
-      console.log("--> Human auth flow...");
+      logger.debug("Human auth flow...");
       // Human auth flow
       user = await dbHelpers.getUserByEmail(email);
       if (!user) {
@@ -229,28 +238,22 @@ router.post("/signin", async (req, res, next) => {
         throw new AppError(401, 'INVALID_CREDENTIALS', 'Invalid email or password');
       }
     } else if (displayName && passphrase) {
-      console.log("--> Agent auth flow... DisplayName:", displayName);
-      // Agent auth flow
+      logger.debug("Agent auth flow... DisplayName:", displayName);
       user = await dbHelpers.getUserByDisplayName(displayName);
-      console.log("--> User found:", user ? user.id : "NO");
       if (!user) {
         throw new AppError(401, 'INVALID_CREDENTIALS', 'Invalid display name or passphrase');
       }
 
-      console.log("--> Comparing passwords...");
       const isValidPassword = await bcrypt.compare(passphrase, user.passwordHash);
-      console.log("--> Password valid:", isValidPassword);
       if (!isValidPassword) {
         throw new AppError(401, 'INVALID_CREDENTIALS', 'Invalid display name or passphrase');
       }
     } else {
-      console.log("--> Missing credentials");
       throw new AppError(400, 'MISSING_CREDENTIALS', 'Missing required credentials');
     }
 
-    // Check MFA requirement
     if (user.twoFactorEnabled) {
-      console.log("--> MFA REQUIRED for user", user.id);
+      logger.debug("MFA required for user", user.id);
       // Generate a short-lived pre-auth token (5 minutes)
       const mfaToken = jwt.sign(
         { userId: user.id, purpose: 'mfa_verification' },
@@ -265,7 +268,6 @@ router.post("/signin", async (req, res, next) => {
       });
     }
 
-    console.log("--> Generating tokens for", user.email);
     // Generate tokens
     const accessToken = generateToken(user.id, user.email);
     const refreshToken = generateRefreshToken(user.id, user.email);
@@ -280,12 +282,10 @@ router.post("/signin", async (req, res, next) => {
     res.cookie('accessToken', accessToken, cookieOptions);
     res.cookie('refreshToken', refreshToken, { ...cookieOptions, maxAge: 30 * 24 * 60 * 60 * 1000 });
 
-    console.log("--> Getting preferences and stats...");
     // Get user preferences and stats
     const preferences = await dbHelpers.getUserPreferences(user.id);
     const stats = await dbHelpers.getUserStats(user.id);
 
-    console.log("--> Sending response...");
     res.json({
       message: "Sign in successful",
       user: {
@@ -504,7 +504,7 @@ router.get("/verify-email", async (req, res, next) => {
       throw new AppError(400, 'INVALID_TOKEN', 'Invalid or already used verification token');
     }
 
-    if (new Date(user.token_expires_at) < new Date()) {
+    if (new Date(user.tokenExpiresAt || user.token_expires_at) < new Date()) {
       throw new AppError(400, 'TOKEN_EXPIRED', 'Verification token has expired');
     }
 
@@ -554,21 +554,43 @@ router.post("/resend-verification", async (req, res, next) => {
  */
 router.post("/agent-key", authenticateToken, async (req, res) => {
   try {
-    const { label = 'My Agent Key' } = req.body;
+    const {
+      label = 'My Agent Key',
+      scopes = ['notebooks:read', 'notes:create', 'chat:all'],
+      notebookIds = null,
+      expiresInHours = null,
+      rateLimit = 0
+    } = req.body;
+
+    const VALID_SCOPES = ['notebooks:read', 'notebooks:write', 'notes:read', 'notes:create', 'notes:delete', 'sources:read', 'chat:all', 'chat:readonly', 'memories:read', 'memories:write', 'tasks:read', 'tasks:write', 'admin:keys'];
+    const invalid = (scopes || []).filter(s => !VALID_SCOPES.includes(s));
+    if (invalid.length > 0) {
+      return res.status(400).json({
+        error: `Invalid scopes: ${invalid.join(', ')}`,
+        validScopes: VALID_SCOPES
+      });
+    }
+
+    const expiresAt = expiresInHours ? new Date(Date.now() + expiresInHours * 60 * 60 * 1000) : null;
+
     const rawKey = 'spm_' + randomBytes(32).toString('hex');
     const keyHash = hashApiKey(rawKey);
     const prefix = rawKey.slice(0, 12) + '...';
     const id = uuidv4();
-    await dbHelpers.createApiKey(id, req.user.userId, keyHash, prefix, label);
+    await dbHelpers.createApiKey(id, req.user.userId, keyHash, prefix, label, JSON.stringify(scopes), notebookIds, expiresAt, rateLimit);
     res.status(201).json({
       message: 'API key created — save this now, it will not be shown again.',
       key: rawKey,
       label,
       prefix,
       id,
+      scopes,
+      notebookIds,
+      expiresAt,
+      rateLimit,
     });
   } catch (error) {
-    console.error('Create API key error:', error);
+    logger.error('Create API key error:', error);
     res.status(500).json({ error: 'Failed to create API key' });
   }
 });
@@ -581,6 +603,7 @@ router.get("/agent-key", authenticateToken, async (req, res) => {
   try {
     res.json(await dbHelpers.listApiKeys(req.user.userId));
   } catch (error) {
+    logger.error('Failed to list API keys:', error);
     res.status(500).json({ error: 'Failed to list API keys' });
   }
 });
@@ -595,6 +618,7 @@ router.delete("/agent-key/:id", authenticateToken, async (req, res) => {
     if (result.changes === 0) return res.status(404).json({ error: 'Key not found' });
     res.json({ message: 'API key revoked' });
   } catch (error) {
+    logger.error('Revoke API key error:', error);
     res.status(500).json({ error: 'Failed to revoke API key' });
   }
 });
@@ -651,7 +675,7 @@ router.post("/reset-passphrase", async (req, res, next) => {
       return res.status(401).json({ error: "Invalid or expired reset token" });
     }
 
-    const user = await dbHelpers.getUserById(tokenRecord.user_id);
+    const user = await dbHelpers.getUserById(tokenRecord.userId);
     if (!user) {
       return res.status(404).json({ error: "User not found" });
     }
@@ -690,8 +714,8 @@ router.post("/reset-passphrase", async (req, res, next) => {
  */
 router.post("/pair/initiate", authenticateToken, async (req, res) => {
   try {
-    // Generate 6-digit numeric code
-    const code = Math.floor(100000 + Math.random() * 900000).toString();
+    // Generate secure 6-digit numeric code
+    const code = crypto.randomInt(100000, 1000000).toString();
     const expiresAt = new Date(Date.now() + 5 * 60 * 1000).toISOString(); // 5 minute window
     
     await dbHelpers.createPairingCode(code, req.user.userId, expiresAt);
@@ -702,7 +726,7 @@ router.post("/pair/initiate", authenticateToken, async (req, res) => {
       message: "Pairing initiated. Provide this code to your agent."
     });
   } catch (error) {
-    console.error("Pairing initiation error:", error);
+    logger.error("Pairing initiation error:", error);
     res.status(500).json({ error: "Failed to initiate pairing" });
   }
 });
@@ -711,9 +735,16 @@ router.post("/pair/initiate", authenticateToken, async (req, res) => {
  * POST /api/auth/pair/complete
  * Agent provides the 6-digit PIN to receive a persistent API key.
  */
-router.post("/pair/complete", async (req, res) => {
+router.post("/pair/complete", authLimiter, async (req, res) => {
   try {
-    const { code, label = 'Paired Agent' } = req.body;
+    const { 
+      code, 
+      label = 'Paired Agent',
+      scopes,
+      notebookIds,
+      expiresInHours,
+      rateLimit = 0
+    } = req.body;
     
     if (!code) return res.status(400).json({ error: "Pairing code required" });
     
@@ -723,10 +754,24 @@ router.post("/pair/complete", async (req, res) => {
       return res.status(401).json({ error: "Invalid or expired pairing code" });
     }
     
-    if (new Date(record.expires_at) < new Date()) {
+    if (new Date(record.expiresAt || record.expires_at) < new Date()) {
       await dbHelpers.deletePairingCode(code);
       return res.status(401).json({ error: "Pairing code has expired" });
     }
+
+    // Validate scopes if specified
+    if (scopes) {
+      const VALID_SCOPES = ['notebooks:read', 'notebooks:write', 'notes:read', 'notes:create', 'notes:delete', 'sources:read', 'chat:all', 'chat:readonly', 'memories:read', 'memories:write', 'tasks:read', 'tasks:write', 'admin:keys'];
+      const invalid = (scopes || []).filter(s => !VALID_SCOPES.includes(s));
+      if (invalid.length > 0) {
+        return res.status(400).json({
+          error: `Invalid scopes: ${invalid.join(', ')}`,
+          validScopes: VALID_SCOPES
+        });
+      }
+    }
+
+    const expiresAt = expiresInHours ? new Date(Date.now() + expiresInHours * 60 * 60 * 1000) : null;
     
     // Valid code! Generate persistent API key
     const rawKey = 'spm_' + crypto.randomBytes(32).toString('hex');
@@ -734,7 +779,17 @@ router.post("/pair/complete", async (req, res) => {
     const prefix = rawKey.slice(0, 12) + '...';
     const id = uuidv4();
     
-    await dbHelpers.createApiKey(id, record.user_id, keyHash, prefix, label);
+    await dbHelpers.createApiKey(
+      id, 
+      record.userId, 
+      keyHash, 
+      prefix, 
+      label, 
+      scopes ? JSON.stringify(scopes) : null, 
+      notebookIds, 
+      expiresAt, 
+      rateLimit
+    );
     
     // Clean up code immediately
     await dbHelpers.deletePairingCode(code);
@@ -745,9 +800,13 @@ router.post("/pair/complete", async (req, res) => {
       label,
       prefix,
       id,
+      scopes,
+      notebookIds,
+      expiresAt,
+      rateLimit
     });
   } catch (error) {
-    console.error("Pairing completion error:", error);
+    logger.error("Pairing completion error:", error);
     res.status(500).json({ error: "Failed to complete pairing" });
   }
 });
@@ -773,7 +832,7 @@ router.get("/me", authenticateToken, async (req, res) => {
       createdAt: user.createdAt,
     });
   } catch (error) {
-    console.error("Get current user error:", error);
+    logger.error("Get current user error:", error);
     res.status(500).json({ error: { code: "INTERNAL_ERROR", message: "Failed to get user" } });
   }
 });

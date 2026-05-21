@@ -1,7 +1,13 @@
+import React from 'react';
 import { describe, it, expect, vi } from 'vitest';
 import { render, screen } from '@testing-library/react';
 import ChatMessages from '@/components/chat/ChatMessages';
 import { EnhancedChatMessage } from '@/types/message';
+
+// Mock SaveToNoteButton to avoid AuthProvider dependency
+vi.mock('@/components/notebook/SaveToNoteButton', () => ({
+  default: () => <button data-testid="save-to-note-button">Save</button>,
+}));
 
 describe('ChatMessages Component', () => {
   const mockMessages: EnhancedChatMessage[] = [

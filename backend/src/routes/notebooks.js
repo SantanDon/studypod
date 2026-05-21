@@ -2,13 +2,35 @@ import express from "express";
 import { v4 as uuidv4 } from "uuid";
 import { generateSovereignHooks } from "../services/outreachService.js";
 import { dbHelpers } from "../db/database.js";
-import { authenticateToken } from "../middleware/auth.js";
+import { authenticateToken, requireScope } from "../middleware/auth.js";
 import { MemoryService } from "../services/memoryService.js";
 import { chatWithNotebook } from "../services/aiChatService.js";
 import { MasticationService } from "../services/masticationService.js";
+import { agentPulse } from "../services/agentPulse.js";
+import { WebhookDispatcher } from "../services/webhookDispatcher.js";
 import { logger } from "../utils/logger.js";
 
 const router = express.Router();
+
+// Track explicitly deleted notebooks to prevent JIT recovery race condition
+const deletedNotebooks = new Set();
+
+async function getNotebookOrRecover(id, userId, description = "Auto-provisioned") {
+  if (deletedNotebooks.has(id)) {
+    return null;
+  }
+  let notebook = await dbHelpers.getNotebookById(id, userId);
+  if (!notebook) {
+    logger.info(`🛠️ JIT Recovery: Notebook ${id} missing. Attempting auto-provision...`);
+    try {
+      await dbHelpers.createNotebook(id, userId, "Recovered Notebook", description);
+      notebook = await dbHelpers.getNotebookById(id, userId);
+    } catch (e) {
+      logger.error(`Failed to JIT recover notebook ${id}:`, e);
+    }
+  }
+  return notebook;
+}
 
 /**
  * All notebook routes require authentication
@@ -112,14 +134,7 @@ router.post("/join", async (req, res) => {
  */
 router.get("/:id", async (req, res) => {
   try {
-    let notebook = await dbHelpers.getNotebookById(req.params.id, req.user.userId);
-    if (!notebook) {
-      // JIT recovery for Vercel cold-start DB wipes
-      try {
-        await dbHelpers.createNotebook(req.params.id, req.user.userId, "Recovered Notebook", "Auto-provisioned");
-        notebook = await dbHelpers.getNotebookById(req.params.id, req.user.userId);
-      } catch(e) {}
-    }
+    let notebook = await getNotebookOrRecover(req.params.id, req.user.userId);
     if (!notebook) {
       return res.status(404).json({ error: "Notebook not found" });
     }
@@ -128,7 +143,7 @@ router.get("/:id", async (req, res) => {
       try {
         notebook.exampleQuestions = JSON.parse(notebook.exampleQuestions);
       } catch (e) {
-        console.error('Failed to parse example questions:', e);
+        logger.error('Failed to parse example questions:', e);
       }
     }
     res.json(notebook);
@@ -162,15 +177,7 @@ router.put("/:id", async (req, res) => {
     }
 
     // VERCEL WORKAROUND: Auto-provision notebook if it was wiped before updating
-    let notebook = await dbHelpers.getNotebookById(req.params.id, req.user.userId);
-    if (!notebook) {
-      console.log(`🛠️ PUT /:id: Auto-provisioning missing notebook ${req.params.id}...`);
-      try {
-        await dbHelpers.createNotebook(req.params.id, req.user.userId, title || "Recovered Notebook", description || "Automatically provisioned");
-      } catch (e) {
-        console.error('Auto-provision failed:', e);
-      }
-    }
+    let notebook = await getNotebookOrRecover(req.params.id, req.user.userId, 'Auto-provisioned from PUT');
 
     await dbHelpers.updateNotebook(req.params.id, req.user.userId, updates);
     notebook = await dbHelpers.getNotebookById(req.params.id, req.user.userId);
@@ -184,13 +191,13 @@ router.put("/:id", async (req, res) => {
       try {
         notebook.exampleQuestions = JSON.parse(notebook.exampleQuestions);
       } catch (e) {
-        console.error('Failed to parse example questions:', e);
+        logger.error('Failed to parse example questions:', e);
       }
     }
     
     res.json(notebook);
   } catch (error) {
-    console.error("Update notebook error:", error);
+    logger.error("Update notebook error:", error);
     res.status(500).json({ error: "Failed to update notebook", detail: error.message, stack: error.stack });
   }
 });
@@ -206,6 +213,9 @@ router.delete("/batch", async (req, res) => {
       return res.status(400).json({ error: "No notebook IDs provided" });
     }
     const result = await dbHelpers.batchDeleteNotebooks(ids, req.user.userId);
+    if (result.changes > 0) {
+      ids.forEach(id => deletedNotebooks.add(id));
+    }
     res.json({ message: `${result.changes} notebooks deleted successfully`, deletedCount: result.changes });
   } catch (error) {
     logger.error("Batch delete notebooks failed:", error.message);
@@ -223,6 +233,9 @@ router.delete("/:id", async (req, res) => {
     if (result.action === 'none') {
       return res.status(404).json({ error: "Notebook not found" });
     }
+    if (result.action === 'deleted') {
+      deletedNotebooks.add(req.params.id);
+    }
     const message = result.action === 'deleted' 
       ? "Notebook deleted successfully" 
       : "You have successfully left the notebook";
@@ -239,15 +252,12 @@ router.delete("/:id", async (req, res) => {
  */
 router.get("/:id/notes", async (req, res) => {
   try {
-    let notebook = await dbHelpers.getNotebookById(req.params.id, req.user.userId);
-    if (!notebook) {
-      try { await dbHelpers.createNotebook(req.params.id, req.user.userId, "Recovered Notebook", "Auto-provisioned"); notebook = await dbHelpers.getNotebookById(req.params.id, req.user.userId); } catch(e) {}
-    }
+    let notebook = await getNotebookOrRecover(req.params.id, req.user.userId);
     if (!notebook) return res.status(404).json({ error: { code: "NOTEBOOK_NOT_FOUND", message: "Notebook not found" } });
     const notes = await dbHelpers.getNotesByNotebookId(req.params.id, req.user.userId);
     res.json(notes);
   } catch (error) {
-    console.error("List notes error:", error);
+    logger.error("List notes error:", error);
     res.status(500).json({ error: "Failed to list notes" });
   }
 });
@@ -256,21 +266,9 @@ router.get("/:id/notes", async (req, res) => {
  * POST /api/notebooks/:id/notes
  * Create a new note in a notebook
  */
-router.post("/:id/notes", async (req, res) => {
+router.post("/:id/notes", requireScope('notes:create'), async (req, res) => {
   try {
-    let notebook = await dbHelpers.getNotebookById(req.params.id, req.user.userId);
-    
-    // VERCEL WORKAROUND: If notebook missing but we have userId (DB reset)
-    if (!notebook) {
-      console.log(`🛠️ Auto-provisioning notebook ${req.params.id} for user ${req.user.userId}...`);
-      try {
-        await dbHelpers.createNotebook(req.params.id, req.user.userId, "Recovered Notebook", "Automatically provisioned after system reset");
-        notebook = await dbHelpers.getNotebookById(req.params.id, req.user.userId);
-      } catch (provisionError) {
-        console.error('Failed to auto-provision notebook:', provisionError);
-      }
-    }
-
+    let notebook = await getNotebookOrRecover(req.params.id, req.user.userId, "Automatically provisioned after system reset");
     if (!notebook) return res.status(404).json({ error: { code: "NOTEBOOK_NOT_FOUND", message: "Notebook not found and could not be recovered" } });
 
     const { content, authorId } = req.body;
@@ -284,20 +282,22 @@ router.post("/:id/notes", async (req, res) => {
     
     await dbHelpers.createNote(id, req.params.id, userId, content, author_id);
     
-    // Phase 3 Hook: Auto-sync to EverMemOS for AI agents
     const authorUser = await dbHelpers.getUserById(author_id);
-    if (authorUser && authorUser.account_type === 'agent') {
-      console.log(`[Phase 3] Auto-syncing agent note ${id} to EverMemOS...`);
-      // We don't await this to avoid blocking the main API response
-      MemoryService.storeMemory(author_id, content, {
-        notebook_id: req.params.id,
-        note_id: id
+    if (authorUser && authorUser.accountType === 'agent') {
+      MemoryService.storeMemory(userId, req.params.id, content, {
+        source: 'agent_note',
+        noteId: id
       });
     }
 
+    WebhookDispatcher.recordActivityAndNotify(
+      req.params.id, userId, req.user.displayName || 'agent', 'note.created',
+      content.substring(0, 100)
+    );
+
     res.status(201).json({ id, content, author_id, notebook_id: req.params.id });
   } catch (error) {
-    console.error("Create note error:", error);
+    logger.error("Create note error:", error);
     res.status(500).json({ error: "Failed to create note" });
   }
 });
@@ -361,13 +361,8 @@ router.post("/:id/memory/store", async (req, res) => {
     const userId = req.user.userId;
     const notebookId = req.params.id;
     
-    // Auto-provision check in case of Vercel DB wipe
-    let notebook = await dbHelpers.getNotebookById(notebookId, userId);
-    if (!notebook) {
-      try {
-        await dbHelpers.createNotebook(notebookId, userId, "Recovered Notebook", "Auto-provisioned");
-      } catch(e) {}
-    }
+    let notebook = await getNotebookOrRecover(notebookId, userId);
+    if (!notebook) return res.status(404).json({ error: "Notebook not found" });
 
     const memory = await MemoryService.storeMemory(userId, notebookId, content, metadata || {});
     if (!memory) {
@@ -376,7 +371,7 @@ router.post("/:id/memory/store", async (req, res) => {
 
     res.status(201).json({ success: true, memory });
   } catch (error) {
-    console.error("Memory store error:", error);
+    logger.error("Memory store error:", error);
     res.status(500).json({ error: "Memory store failed" });
   }
 });
@@ -387,7 +382,7 @@ router.post("/:id/memory/store", async (req, res) => {
  */
 router.post("/:id/memory/search", async (req, res) => {
   try {
-    const { query, limit = 5 } = req.body;
+    const { query, limit = 5, metadataFilter } = req.body;
     if (!query) {
       return res.status(400).json({ error: "Search query is required" });
     }
@@ -395,11 +390,11 @@ router.post("/:id/memory/search", async (req, res) => {
     const userId = req.user.userId;
     const notebookId = req.params.id;
     
-    const memories = await MemoryService.searchMemories(userId, notebookId, query, limit);
+    const result = await MemoryService.searchMemories(userId, notebookId, query, limit, { metadataFilter });
 
-    res.json({ results: memories });
+    res.json(result);
   } catch (error) {
-    console.error("Memory search error:", error);
+    logger.error("Memory search error:", error);
     res.status(500).json({ error: "Memory search failed" });
   }
 });
@@ -411,20 +406,7 @@ router.post("/:id/memory/search", async (req, res) => {
  */
 router.post("/:id/sources", async (req, res) => {
   try {
-    let notebook = await dbHelpers.getNotebookById(req.params.id, req.user.userId);
-    
-    // VERCEL WORKAROUND: If notebook missing but we have userId (DB reset)
-    // Auto-provision a placeholder so sources can be attached
-    if (!notebook) {
-      console.log(`🛠️ Auto-provisioning notebook ${req.params.id} for user ${req.user.userId}...`);
-      try {
-        await dbHelpers.createNotebook(req.params.id, req.user.userId, "Recovered Notebook", "Automatically provisioned after system reset");
-        notebook = await dbHelpers.getNotebookById(req.params.id, req.user.userId);
-      } catch (provisionError) {
-        console.error('Failed to auto-provision notebook:', provisionError);
-      }
-    }
-
+    let notebook = await getNotebookOrRecover(req.params.id, req.user.userId, "Automatically provisioned after system reset");
     if (!notebook) return res.status(404).json({ error: { code: "NOTEBOOK_NOT_FOUND", message: "Notebook not found and could not be recovered" } });
 
     const { id: providedId, title, type, content, url, metadata, processing_status, file_path, file_size } = req.body;
@@ -443,13 +425,13 @@ router.post("/:id/sources", async (req, res) => {
       try {
         await dbHelpers.updateSource(id, req.user.userId, { processing_status });
       } catch(e) {
-        console.warn('Could not update initial processing_status:', e.message);
+        logger.warn('Could not update initial processing_status:', e.message);
       }
     }
     
     res.status(201).json({ id, notebook_id: req.params.id, title, type, processing_status: processing_status || 'pending' });
   } catch (error) {
-    console.error("Create source error:", error);
+    logger.error("Create source error:", error);
     res.status(500).json({ error: "Failed to create source", details: error.message });
   }
 });
@@ -465,12 +447,9 @@ router.put("/:id/sources/:sourceId", async (req, res) => {
     
     // VERCEL WORKAROUND: If changes is 0, the source was wiped by Vercel serverless. We MUST auto-provision it.
     if (result.changes === 0) {
-      console.log(`🛠️ PUT /sources/:sourceId: Source missing, auto-provisioning...`);
+      logger.info(`🛠️ PUT /sources/:sourceId: Source missing, auto-provisioning...`);
       try {
-        let notebook = await dbHelpers.getNotebookById(req.params.id, req.user.userId);
-        if (!notebook) {
-           await dbHelpers.createNotebook(req.params.id, req.user.userId, "Recovered Notebook", "Auto-provisioned");
-        }
+        let notebook = await getNotebookOrRecover(req.params.id, req.user.userId);
         
         await dbHelpers.createSource(
             req.params.sourceId, req.params.id, req.user.userId, 
@@ -486,14 +465,14 @@ router.put("/:id/sources/:sourceId", async (req, res) => {
            await dbHelpers.updateSource(req.params.sourceId, req.user.userId, { processing_status: updates.processing_status });
         }
       } catch (e) {
-          console.error("Failed to auto-provision source:", e);
+          logger.error("Failed to auto-provision source:", e);
           return res.status(404).json({ error: "Source not found and could not be recovered" });
       }
     }
     
     res.json({ success: true, message: "Source updated" });
   } catch (error) {
-    console.error("Update source error:", error);
+    logger.error("Update source error:", error);
     res.status(500).json({ error: "Failed to update source" });
   }
 });
@@ -504,15 +483,12 @@ router.put("/:id/sources/:sourceId", async (req, res) => {
  */
 router.get("/:id/sources", async (req, res) => {
   try {
-    let notebook = await dbHelpers.getNotebookById(req.params.id, req.user.userId);
-    if (!notebook) {
-      try { await dbHelpers.createNotebook(req.params.id, req.user.userId, "Recovered Notebook", "Auto-provisioned"); notebook = await dbHelpers.getNotebookById(req.params.id, req.user.userId); } catch(e) {}
-    }
+    let notebook = await getNotebookOrRecover(req.params.id, req.user.userId);
     if (!notebook) return res.status(404).json({ error: { code: "NOTEBOOK_NOT_FOUND", message: "Notebook not found" } });
     const sources = await dbHelpers.getSourcesByNotebookId(req.params.id, req.user.userId);
     res.json(sources);
   } catch (error) {
-    console.error("List sources error:", error);
+    logger.error("List sources error:", error);
     res.status(500).json({ error: "Failed to list sources" });
   }
 });
@@ -539,7 +515,7 @@ router.post("/:id/sources/:sourceId/generate-hooks", async (req, res) => {
     }
 
     // 2. Generate Hooks
-    console.log(`🧬 [SOVEREIGN SIGNAL] Generating hooks for source: ${source.title}`);
+    logger.info(`🧬 [SOVEREIGN SIGNAL] Generating hooks for source: ${source.title}`);
     const hooks = await generateSovereignHooks(source.content, source.title);
 
     // 3. Persist as Note for later refinement (as requested by LO)
@@ -554,7 +530,7 @@ router.post("/:id/sources/:sourceId/generate-hooks", async (req, res) => {
       message: "Sovereign Signal generated and persisted as a note for later refinement." 
     });
   } catch (error) {
-    console.error("Signal generation error:", error);
+    logger.error("Signal generation error:", error);
     res.status(500).json({ error: "Sovereign Signal failed", details: error.message });
   }
 });
@@ -565,15 +541,12 @@ router.post("/:id/sources/:sourceId/generate-hooks", async (req, res) => {
  */
 router.get("/:id/messages", async (req, res) => {
   try {
-    let notebook = await dbHelpers.getNotebookById(req.params.id, req.user.userId);
-    if (!notebook) {
-      try { await dbHelpers.createNotebook(req.params.id, req.user.userId, "Recovered Notebook", "Auto-provisioned"); notebook = await dbHelpers.getNotebookById(req.params.id, req.user.userId); } catch(e) {}
-    }
+    let notebook = await getNotebookOrRecover(req.params.id, req.user.userId);
     if (!notebook) return res.status(404).json({ error: { code: "NOTEBOOK_NOT_FOUND", message: "Notebook not found" } });
     const messages = await dbHelpers.getChatMessagesByNotebookId(req.params.id, req.user.userId);
     res.json(messages);
   } catch (error) {
-    console.error("Get messages error:", error);
+    logger.error("Get messages error:", error);
     res.status(500).json({ error: "Failed to get messages" });
   }
 });
@@ -596,26 +569,26 @@ router.get("/:id/context", async (req, res) => {
         id: notebook.id,
         title: notebook.title,
         description: notebook.description,
-        created_at: notebook.created_at
+        createdAt: notebook.createdAt
       },
       sources: sources.map(s => ({
         id: s.id,
         title: s.title,
         type: s.type,
-        status: s.processing_status,
+        status: s.processingStatus,
         contentPreview: s.content ? s.content.substring(0, 500) + (s.content.length > 500 ? '...' : '') : null,
         contentLength: s.content ? s.content.length : 0
       })),
       notes: notes.map(n => ({
         id: n.id,
         content: n.content,
-        author: n.author_name,
-        created_at: n.created_at
+        authorId: n.authorId,
+        createdAt: n.createdAt
       })),
       agentReady: true
     });
   } catch (error) {
-    console.error("Get context error:", error);
+    logger.error("Get context error:", error);
     res.status(500).json({ error: "Failed to build context" });
   }
 });
@@ -656,20 +629,8 @@ router.post("/:id/chat", async (req, res) => {
     const notebookId = req.params.id;
     const userId = req.user.userId;
 
-    // JIT recovery: the chat endpoint often hits a blank Vercel DB after a serverless cold-start
-    let notebook = await dbHelpers.getNotebookById(notebookId, userId);
-    let jitError = null;
-    if (!notebook) {
-      console.log(`🛠️ Chat: Auto-provisioning notebook ${notebookId}...`);
-      try {
-        await dbHelpers.createNotebook(notebookId, userId, "Recovered Notebook", "Auto-provisioned");
-        notebook = await dbHelpers.getNotebookById(notebookId, userId);
-      } catch(e) { 
-        console.error('Chat JIT provision failed:', e);
-        jitError = e.message;
-      }
-    }
-    if (!notebook) return res.status(404).json({ error: "Notebook not found", detail: jitError });
+    let notebook = await getNotebookOrRecover(notebookId, userId);
+    if (!notebook) return res.status(404).json({ error: "Notebook not found" });
 
     const sources = await dbHelpers.getSourcesByNotebookId(notebookId, userId);
     const notes = await dbHelpers.getNotesByNotebookId(notebookId, userId);
@@ -714,23 +675,264 @@ router.post("/:id/chat", async (req, res) => {
         await dbHelpers.createNote(noteId, notebookId, userId, noteContent, agentId || userId);
       }
 
+      WebhookDispatcher.recordActivityAndNotify(
+        notebookId, userId, agentId ? 'agent' : 'human', 'chat.message',
+        message.substring(0, 100)
+      );
+
       res.json({
         answer: chatResult.answer,
         groundedSources: chatResult.groundedSources,
         tokensUsed: chatResult.tokensUsed,
         messageId: aiMsgId,
         noteId,
-        joinCode: notebook.joinCode // Proactively return join code so users can share it immediately after chat
+        joinCode: notebook.joinCode
       });
 
     } catch (aiError) {
-      console.error("AI chat processing error:", aiError);
+      logger.error("AI chat processing error:", aiError);
       res.status(500).json({ error: "AI processing failed", details: aiError.message });
     }
 
   } catch (error) {
-    console.error("Chat endpoint error:", error);
+    logger.error("Chat endpoint error:", error);
     res.status(500).json({ error: "Failed to process chat" });
+  }
+});
+
+// ====== SOVEREIGN BRIDGE ROUTES ======
+
+// Helper to verify notebook access
+const requireNotebookAccess = async (req, res, next) => {
+  try {
+    const access = await dbHelpers.getNotebookById(req.params.id, req.user.userId);
+    if (!access) return res.status(404).json({ error: "Notebook not found" });
+    next();
+  } catch (error) {
+    logger.error("Access check failed:", error);
+    res.status(500).json({ error: "Access check failed" });
+  }
+};
+
+/**
+ * GET /api/notebooks/:id/activity
+ * Get activity log
+ */
+router.get("/:id/activity", requireNotebookAccess, async (req, res) => {
+  try {
+    const activities = await dbHelpers.getActivityLogsByNotebookId(req.params.id);
+    res.json({ activities });
+  } catch (error) {
+    logger.error("Failed to get activity log:", error);
+    res.status(500).json({ error: "Failed to get activity log" });
+  }
+});
+
+/**
+ * POST /api/notebooks/:id/activity
+ * Record an activity log entry (for agents reporting actions)
+ */
+router.post("/:id/activity", requireNotebookAccess, async (req, res) => {
+  try {
+    const { actionType, contentPreview } = req.body;
+    if (!actionType) return res.status(400).json({ error: "actionType is required" });
+
+    await dbHelpers.createActivityLog(
+      req.params.id,
+      req.user.userId,
+      req.user.displayName || 'Agent',
+      actionType,
+      contentPreview || null
+    );
+    res.status(201).json({ message: "Activity recorded" });
+  } catch (error) {
+    logger.error("Failed to record activity:", error);
+    res.status(500).json({ error: "Failed to record activity" });
+  }
+});
+
+/**
+ * GET /api/notebooks/:id/sources/:sourceId/content
+ * Get full untruncated source content
+ */
+router.get("/:id/sources/:sourceId/content", requireNotebookAccess, async (req, res) => {
+  try {
+    const sources = await dbHelpers.getSourcesByNotebookId(req.params.id, req.user.userId);
+    const source = sources.find(s => s.id === req.params.sourceId);
+    if (!source) return res.status(404).json({ error: "Source not found" });
+    
+    // Log activity if it's an agent reading
+    if (req.user.accountType === 'agent') {
+      await dbHelpers.createActivityLog(req.params.id, req.user.userId, req.user.displayName || 'Agent', 'read_source', `Read full source: ${source.title}`);
+    }
+    
+    res.json({
+      id: source.id,
+      title: source.title,
+      type: source.type,
+      content: source.content,
+      contentLength: source.content ? source.content.length : 0
+    });
+  } catch (error) {
+    logger.error("Failed to get full source content:", error);
+    res.status(500).json({ error: "Failed to get full source content" });
+  }
+});
+
+/**
+ * GET /api/notebooks/:id/tasks
+ */
+router.get("/:id/tasks", requireNotebookAccess, async (req, res) => {
+  try {
+    const tasks = await dbHelpers.getTasksByNotebookId(req.params.id);
+    res.json({ tasks });
+  } catch (error) {
+    logger.error("Failed to list tasks:", error);
+    res.status(500).json({ error: "Failed to list tasks" });
+  }
+});
+
+/**
+ * POST /api/notebooks/:id/tasks
+ */
+router.post("/:id/tasks", requireNotebookAccess, async (req, res) => {
+  try {
+    const { instruction, assignee, priority, due_by } = req.body;
+    const task = await dbHelpers.createTask(req.user.userId, req.params.id, instruction, assignee, priority, null, due_by);
+    
+    await dbHelpers.createActivityLog(req.params.id, req.user.userId, req.user.displayName || 'User', 'created_task', `Task assigned to ${assignee || 'human'}: ${instruction.substring(0, 50)}...`);
+    
+    res.status(201).json(task);
+  } catch (error) {
+    logger.error("Failed to create task:", error);
+    res.status(500).json({ error: "Failed to create task" });
+  }
+});
+
+/**
+ * PUT /api/notebooks/:id/tasks/:taskId
+ */
+router.put("/:id/tasks/:taskId", requireNotebookAccess, async (req, res) => {
+  try {
+    const { status, result } = req.body;
+    const updates = { status, result };
+    if (status === 'completed') updates.completedAt = new Date();
+    
+    await dbHelpers.updateTask(req.params.taskId, updates);
+    await dbHelpers.createActivityLog(req.params.id, req.user.userId, req.user.displayName || 'User', 'updated_task', `Task ${req.params.taskId} marked as ${status}`);
+    
+    res.json({ message: "Task updated" });
+  } catch (error) {
+    logger.error("Failed to update task:", error);
+    res.status(500).json({ error: "Failed to update task" });
+  }
+});
+
+/**
+ * GET /api/notebooks/:id/scratch
+ */
+router.get("/:id/scratch", requireNotebookAccess, async (req, res) => {
+  try {
+    const entries = await dbHelpers.getScratchpadByNotebookId(req.params.id, req.user.userId);
+    res.json({ scratchpad: entries });
+  } catch (error) {
+    logger.error("Failed to get scratchpad:", error);
+    res.status(500).json({ error: "Failed to get scratchpad" });
+  }
+});
+
+/**
+ * POST /api/notebooks/:id/scratch
+ */
+router.post("/:id/scratch", requireNotebookAccess, async (req, res) => {
+  try {
+    const { content, ttl_hours } = req.body;
+    const expiresAt = ttl_hours ? new Date(Date.now() + ttl_hours * 60 * 60 * 1000) : null;
+    const entry = await dbHelpers.createScratchpadEntry(req.params.id, req.user.userId, content, expiresAt);
+    res.status(201).json(entry);
+  } catch (error) {
+    logger.error("Failed to create scratchpad entry:", error);
+    res.status(500).json({ error: "Failed to create scratchpad entry" });
+  }
+});
+
+/**
+ * POST /api/notebooks/:id/scratch/:scratchId/promote
+ */
+router.post("/:id/scratch/:scratchId/promote", requireNotebookAccess, async (req, res) => {
+  try {
+    const entries = await dbHelpers.getScratchpadByNotebookId(req.params.id, req.user.userId);
+    const entry = entries.find(e => e.id === req.params.scratchId);
+    if (!entry) return res.status(404).json({ error: "Scratchpad entry not found" });
+    
+    const noteId = uuidv4();
+    await dbHelpers.createNote(noteId, req.params.id, req.user.userId, entry.content, req.user.userId);
+    await dbHelpers.deleteScratchpadEntry(entry.id);
+    
+    await dbHelpers.createActivityLog(req.params.id, req.user.userId, req.user.displayName || 'User', 'promoted_scratchpad', "Promoted a scratchpad entry to a persistent note");
+    
+    res.json({ message: "Promoted to note successfully", noteId });
+  } catch (error) {
+    logger.error("Failed to promote scratchpad entry:", error);
+    res.status(500).json({ error: "Failed to promote scratchpad entry" });
+  }
+});
+
+/**
+ * GET /api/notebooks/:id/webhooks
+ */
+router.get("/:id/webhooks", requireNotebookAccess, async (req, res) => {
+  try {
+    const hooks = await dbHelpers.getWebhooksByNotebookId(req.params.id);
+    res.json({ webhooks: hooks });
+  } catch (error) {
+    logger.error("Failed to get webhooks:", error);
+    res.status(500).json({ error: "Failed to get webhooks" });
+  }
+});
+
+/**
+ * POST /api/notebooks/:id/webhooks
+ */
+router.post("/:id/webhooks", requireNotebookAccess, async (req, res) => {
+  try {
+    const { url, events } = req.body;
+    const hook = await dbHelpers.createWebhook(req.params.id, req.user.userId, url, JSON.stringify(events || []));
+    res.status(201).json(hook);
+  } catch (error) {
+    logger.error("Failed to create webhook:", error);
+    res.status(500).json({ error: "Failed to create webhook" });
+  }
+});
+
+/**
+ * POST /api/notebooks/:id/pulse
+ * Agent broadcasts a thought to the notebook activity stream.
+ */
+router.post("/:id/pulse", async (req, res) => {
+  try {
+    const { thought, mission } = req.body;
+    const notebookId = req.params.id;
+    const userId = req.user.userId;
+
+    if (mission === 'start') {
+      await agentPulse.startMission(userId, notebookId, thought || 'Unnamed mission');
+      return res.json({ message: "Mission started" });
+    }
+    if (mission === 'end') {
+      await agentPulse.endMission(userId, notebookId);
+      return res.json({ message: "Mission ended" });
+    }
+
+    if (!thought) {
+      return res.status(400).json({ error: "thought is required" });
+    }
+
+    await agentPulse.broadcastThought(userId, notebookId, thought);
+    res.json({ message: "Thought broadcast" });
+  } catch (error) {
+    logger.error("Pulse error:", error);
+    res.status(500).json({ error: "Failed to broadcast thought" });
   }
 });
 

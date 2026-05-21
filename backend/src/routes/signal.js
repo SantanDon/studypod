@@ -2,6 +2,7 @@ import express from 'express';
 import { authenticateToken } from '../middleware/auth.js';
 import { MasticationService } from '../services/masticationService.js';
 import { AppError } from '../middleware/errorHandler.js';
+import { logger } from '../utils/logger.js';
 
 const router = express.Router();
 
@@ -21,7 +22,7 @@ router.post('/generate', authenticateToken, async (req, res, next) => {
     // Trigger sovereign signal generation (asynchronous)
     // We return a 202 Accepted and let the masticator work its magic
     MasticationService.generateSovereignSignal(notebookId, userId, sourceId)
-      .catch(err => console.error(`[Signal] Async failure for source ${sourceId}:`, err));
+      .catch(err => logger.error(`[Signal] Async failure for source ${sourceId}:`, err));
 
     res.status(202).json({
       success: true,
@@ -46,7 +47,7 @@ router.post('/memory-sync', authenticateToken, async (req, res, next) => {
     }
 
     MasticationService.syncToSovereignMemory(notebookId, userId, sourceId)
-      .catch(err => console.error(`[Memory] Async sync failure for source ${sourceId}:`, err));
+      .catch(err => logger.error(`[Memory] Async sync failure for source ${sourceId}:`, err));
 
     res.status(202).json({
       success: true,

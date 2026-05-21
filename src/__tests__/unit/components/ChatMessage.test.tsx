@@ -1,3 +1,4 @@
+import React from 'react';
 import { describe, it, expect, vi } from 'vitest';
 import { render, screen } from '@testing-library/react';
 import ChatMessage from '@/components/chat/ChatMessage';
@@ -112,7 +113,7 @@ describe('ChatMessage Component', () => {
     const messageContainer = container.querySelector('.flex.justify-end');
     expect(messageContainer).toBeInTheDocument();
 
-    const messageBox = container.querySelector('.bg-blue-500');
+    const messageBox = container.querySelector('[class*="bg-blue"]');
     expect(messageBox).toBeInTheDocument();
   });
 

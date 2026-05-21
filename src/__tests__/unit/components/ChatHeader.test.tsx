@@ -1,3 +1,4 @@
+import React from 'react';
 import { describe, it, expect, vi } from 'vitest';
 import { render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
@@ -155,7 +156,7 @@ describe('ChatHeader Component', () => {
       />
     );
 
-    const refreshButton = screen.getByText('Clear Chat');
+    const refreshButton = screen.getByRole('button', { name: /Clear Chat/i });
     expect(refreshButton).toBeDisabled();
   });
 
@@ -192,7 +193,7 @@ describe('ChatHeader Component', () => {
       />
     );
 
-    const header = container.querySelector('.bg-slate-950');
+    const header = container.querySelector('[class*="bg-slate-950"]');
     expect(header).toBeInTheDocument();
 
     expect(screen.getByText('Video Assistant')).toHaveClass('text-slate-100');
@@ -206,7 +207,7 @@ describe('ChatHeader Component', () => {
       />
     );
 
-    const header = container.querySelector('.bg-background');
+    const header = container.querySelector('[class*="bg-background"]');
     expect(header).toBeInTheDocument();
   });
 

@@ -30,9 +30,9 @@ export class SyncManager {
     this.persistence.set(notebookId, indexeddb);
 
     // 2. Network Sync (Hocuspocus)
-    // In a real app, this URL would come from config
+    const wsUrl = import.meta.env.VITE_WS_URL || `ws://localhost:${import.meta.env.VITE_BACKEND_PORT || '4000'}/api/sync-relay`;
     const provider = new HocuspocusProvider({
-      url: 'ws://localhost:3001/api/sync-relay',
+      url: wsUrl,
       name: notebookId,
       document: doc,
       token: token,

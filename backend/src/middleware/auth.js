@@ -3,11 +3,12 @@ import { createHash } from 'crypto';
 import { v4 as uuidv4 } from 'uuid';
 import { dbHelpers, getDatabase, schema } from '../db/database.js';
 import { eq, asc } from 'drizzle-orm';
+import { logger } from '../utils/logger.js';
 
 const JWT_SECRET = process.env.JWT_SECRET;
 
 if (!JWT_SECRET) {
-  console.warn('⚠️ [AUTH] JWT_SECRET is not set. Token verification will fail, but the server is booting...');
+  logger.warn('JWT_SECRET is not set. Token verification will fail.');
 }
 
 export function hashApiKey(rawKey) {
@@ -43,12 +44,35 @@ export async function authenticateToken(req, res, next) {
       if (!keyRow) {
         return res.status(401).json({ error: 'Invalid API key' });
       }
+
+      if (keyRow.expiresAt && new Date(keyRow.expiresAt) < new Date()) {
+        return res.status(401).json({ error: 'API key has expired' });
+      }
+
       await dbHelpers.touchApiKey(keyRow.id);
-      const user = await dbHelpers.getUserById(keyRow.user_id);
+      const user = await dbHelpers.getUserById(keyRow.userId);
       if (!user) {
         return res.status(401).json({ error: 'User not found' });
       }
-      req.user = { userId: user.id, email: user.email };
+
+      let scopes = [];
+      try { scopes = JSON.parse(keyRow.scopes || '[]'); } catch {}
+
+      let restrictedNotebooks = null;
+      if (keyRow.notebookIds) {
+        try { restrictedNotebooks = JSON.parse(keyRow.notebookIds); } catch {}
+      }
+
+      req.user = {
+        userId: user.id,
+        email: user.email,
+        apiKeyId: keyRow.id,
+        scopes,
+        restrictedNotebooks,
+        rateLimit: keyRow.rateLimit || 0,
+        authMethod: 'api_key'
+      };
+      req.keyRow = keyRow;
       return next();
     } catch (err) {
       return res.status(500).json({ error: 'API key validation failed' });
@@ -65,12 +89,12 @@ export async function authenticateToken(req, res, next) {
     if (userId) {
       const existing = await dbHelpers.getUserById(userId);
       if (!existing) {
-        console.log(`🛠️ Auto-provisioning missing user ${userId} after DB reset...`);
+        logger.warn(`Auto-provisioning missing user ${userId} after DB reset...`);
         try {
           const fallbackEmail = user.email || `recovered_${userId.substring(0, 8)}@studypod.local`;
           await dbHelpers.createUser(userId, fallbackEmail, 'AUTOPROVISIONED_SESSION_RECOVERY', user.displayName || 'Recovered User', user.accountType || 'human');
         } catch (provisionError) {
-          console.error('Failed to auto-provision user:', provisionError);
+          logger.error('Failed to auto-provision user:', provisionError);
         }
       }
     }
@@ -79,10 +103,10 @@ export async function authenticateToken(req, res, next) {
     next();
   } catch (error) {
     if (error.name === 'TokenExpiredError') {
-      console.log(`--> [AUTH] Token expired for token starting with: ${token ? token.substring(0, 10) : 'none'}`);
+      logger.debug(`Token expired for token starting with: ${token ? token.substring(0, 10) : 'none'}`);
       return res.status(401).json({ error: 'Token expired' });
     }
-    console.error(`--> [AUTH] Invalid token precisely because: ${error.name} - ${error.message}. Token string: '${token}'`);
+    logger.warn(`Invalid token: ${error.name} - ${error.message}`);
     return res.status(403).json({ error: 'Invalid token' });
   }
 }
@@ -103,4 +127,35 @@ export function verifyRefreshToken(token) {
   } catch {
     throw new Error('Invalid refresh token');
   }
+}
+
+export function requireScope(requiredScope) {
+  return (req, res, next) => {
+    if (!req.user || !req.user.scopes) {
+      return next();
+    }
+    if (req.user.authMethod !== 'api_key') {
+      return next();
+    }
+    if (req.user.scopes.includes('admin:keys') || req.user.scopes.includes('admin:all')) {
+      return next();
+    }
+    if (!req.user.scopes.includes(requiredScope)) {
+      return res.status(403).json({
+        error: `API key lacks required scope: ${requiredScope}`,
+        keyScopes: req.user.scopes
+      });
+    }
+
+    if (req.user.restrictedNotebooks && req.params.id) {
+      if (!req.user.restrictedNotebooks.includes(req.params.id)) {
+        return res.status(403).json({
+          error: 'API key is not authorized for this notebook',
+          allowedNotebooks: req.user.restrictedNotebooks
+        });
+      }
+    }
+
+    next();
+  };
 }

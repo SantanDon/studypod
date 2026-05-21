@@ -217,11 +217,11 @@ const SourcesSidebar = ({
       : getSourceUrl(selectedCitation);
 
     return (
-      <div className="w-full bg-gray-50 border-r border-gray-200 flex flex-col h-full overflow-hidden">
-        <div className="p-4 border-b border-gray-200 flex-shrink-0">
+      <div className="w-full bg-gray-50 dark:bg-background border-r border-gray-200 dark:border-border flex flex-col h-full overflow-hidden">
+        <div className="p-4 border-b border-gray-200 dark:border-border flex-shrink-0">
           <div className="flex items-center justify-between">
             <h2
-              className="text-lg font-medium text-gray-900 cursor-pointer hover:text-gray-700"
+              className="text-lg font-medium text-gray-900 dark:text-foreground cursor-pointer hover:text-gray-700 dark:hover:text-zinc-300"
               onClick={handleBackToSources}
             >
               Sources
@@ -249,17 +249,17 @@ const SourcesSidebar = ({
   }
 
   return (
-    <div className="w-full bg-gray-50 border-r border-gray-200 flex flex-col h-full overflow-hidden">
-      <div className="p-4 border-b border-gray-200 flex-shrink-0">
+    <div className="w-full bg-gray-50 dark:bg-background border-r border-gray-200 dark:border-border flex flex-col h-full overflow-hidden">
+      <div className="p-4 border-b border-gray-200 dark:border-border flex-shrink-0">
         <div className="flex items-center justify-between mb-4">
-          <h2 className="text-lg font-medium text-gray-900">Sources</h2>
+          <h2 className="text-lg font-medium text-gray-900 dark:text-foreground">Sources</h2>
         </div>
 
         <div className="flex space-x-2">
           <Button
             variant="outline"
             size="sm"
-            className="flex-1"
+            className="flex-1 bg-white dark:bg-card border-gray-200 dark:border-border text-gray-700 dark:text-foreground hover:bg-gray-50 dark:hover:bg-muted"
             onClick={() => setShowAddSourcesDialog(true)}
           >
             <i className="fi fi-rr-plus h-4 w-4 mr-2"></i>
@@ -272,7 +272,7 @@ const SourcesSidebar = ({
         <div className="p-4">
           {isLoading ? (
             <div className="text-center py-8">
-              <p className="text-sm text-gray-600">Loading sources...</p>
+              <p className="text-sm text-gray-600 dark:text-gray-400">Loading sources...</p>
             </div>
           ) : sources && sources.length > 0 ? (
             <div className="space-y-4">
@@ -280,16 +280,16 @@ const SourcesSidebar = ({
                 <ContextMenu key={source.id}>
                   <ContextMenuTrigger>
                     <Card
-                      className="p-3 border border-gray-200 cursor-pointer hover:bg-gray-50"
+                      className="p-3 border border-gray-200 dark:border-border cursor-pointer bg-white dark:bg-card hover:bg-gray-50 dark:hover:bg-muted/50 transition-colors shadow-sm"
                       onClick={() => handleSourceClick(source)}
                     >
                       <div className="flex items-start justify-between space-x-3">
                         <div className="flex items-center space-x-2 flex-1 min-w-0">
-                          <div className="w-6 h-6 bg-white rounded border border-gray-200 flex items-center justify-center flex-shrink-0 overflow-hidden">
+                          <div className="w-6 h-6 bg-white dark:bg-zinc-950 rounded border border-gray-200 dark:border-border flex items-center justify-center flex-shrink-0 overflow-hidden">
                             {renderSourceIcon(source.type)}
                           </div>
                           <div className="flex-1 min-w-0">
-                            <span className="text-sm text-gray-900 truncate block">
+                            <span className="text-sm text-gray-900 dark:text-foreground truncate block font-medium">
                               {source.title}
                             </span>
                           </div>
@@ -318,13 +318,13 @@ const SourcesSidebar = ({
             </div>
           ) : (
             <div className="text-center py-8">
-              <div className="w-16 h-16 bg-gray-200 rounded-lg mx-auto mb-4 flex items-center justify-center">
-                <span className="text-gray-400 text-2xl">📄</span>
+              <div className="w-16 h-16 bg-gray-200 dark:bg-muted rounded-lg mx-auto mb-4 flex items-center justify-center">
+                <span className="text-gray-400 dark:text-gray-500 text-2xl">📄</span>
               </div>
-              <h3 className="text-lg font-medium text-gray-900 mb-2">
+              <h3 className="text-lg font-medium text-gray-900 dark:text-foreground mb-2">
                 Saved sources will appear here
               </h3>
-              <p className="text-sm text-gray-600 mb-4">
+              <p className="text-sm text-gray-600 dark:text-gray-400 mb-4">
                 Click Add source above to add PDFs, text, or audio files.
               </p>
             </div>

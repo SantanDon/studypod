@@ -69,30 +69,30 @@ export const PodcastHistory: React.FC<PodcastHistoryProps> = ({
   };
 
   if (isLoading) {
-    return <div className="text-center p-4 text-gray-500">Loading history...</div>;
+    return <div className="text-center p-4 text-gray-500 dark:text-gray-400">Loading history...</div>;
   }
 
   if (!podcasts || podcasts.length === 0) {
     return (
-      <div className="mt-8 border-t pt-6 text-center text-gray-400">
+      <div className="mt-8 border-t dark:border-zinc-800 pt-6 text-center text-gray-400 dark:text-gray-500">
         <p className="text-sm">No saved episodes yet.</p>
       </div>
     );
   }
 
   return (
-    <div className="mt-8 border-t pt-6">
-      <h4 className="text-sm font-semibold text-gray-700 mb-4 uppercase tracking-wider">
+    <div className="mt-8 border-t dark:border-zinc-800 pt-6">
+      <h4 className="text-sm font-semibold text-gray-700 dark:text-gray-300 mb-4 uppercase tracking-wider">
         Past Episodes
       </h4>
       <div className="space-y-3">
         {podcasts.map((podcast) => (
           <div 
             key={podcast.id} 
-            className="flex items-center justify-between p-3 bg-gray-50 rounded-lg hover:bg-gray-100 transition-colors border border-transparent hover:border-gray-200 group"
+            className="flex items-center justify-between p-3 bg-gray-50 dark:bg-zinc-900/50 rounded-lg hover:bg-gray-100 dark:hover:bg-zinc-900 transition-colors border border-transparent hover:border-gray-200 dark:hover:border-zinc-800 group"
           >
             <div className="flex items-center space-x-3 overflow-hidden">
-              <div className="w-8 h-8 rounded-full bg-indigo-100 text-indigo-600 flex items-center justify-center flex-shrink-0">
+              <div className="w-8 h-8 rounded-full bg-indigo-100 dark:bg-indigo-950/60 text-indigo-600 dark:text-indigo-400 flex items-center justify-center flex-shrink-0">
                 {loadingAudioId === podcast.id ? (
                   <FontAwesomeIcon icon={faSpinner} spin className="text-xs" />
                 ) : (
@@ -102,8 +102,8 @@ export const PodcastHistory: React.FC<PodcastHistoryProps> = ({
                 )}
               </div>
               <div className="min-w-0">
-                <p className="font-medium text-gray-900 text-sm truncate">{podcast.title}</p>
-                <p className="text-xs text-gray-500">
+                <p className="font-medium text-gray-900 dark:text-gray-100 text-sm truncate">{podcast.title}</p>
+                <p className="text-xs text-gray-500 dark:text-gray-400">
                   {format(new Date(podcast.created_at), 'MMM d, yyyy • h:mm a')}
                   {podcast.duration && ` • ${Math.round(podcast.duration / 60)} min`}
                 </p>
@@ -113,7 +113,7 @@ export const PodcastHistory: React.FC<PodcastHistoryProps> = ({
             <div className="flex items-center space-x-1 opacity-0 group-hover:opacity-100 transition-opacity">
                <button 
                 onClick={() => handleDownload(podcast)}
-                className="p-2 text-gray-400 hover:text-gray-700 rounded-full hover:bg-gray-200 transition-colors"
+                className="p-2 text-gray-400 hover:text-gray-700 dark:hover:text-gray-200 rounded-full hover:bg-gray-200 dark:hover:bg-zinc-800 transition-colors"
                 title="Download"
               >
                 <FontAwesomeIcon icon={faDownload} className="text-xs" />
@@ -121,7 +121,7 @@ export const PodcastHistory: React.FC<PodcastHistoryProps> = ({
               <button 
                 onClick={() => handleDelete(podcast)}
                 disabled={isDeleting}
-                className="p-2 text-gray-400 hover:text-red-600 rounded-full hover:bg-red-50 transition-colors"
+                className="p-2 text-gray-400 hover:text-red-600 dark:hover:text-red-400 rounded-full hover:bg-red-50 dark:hover:bg-red-950/30 transition-colors"
                 title="Delete"
               >
                 <FontAwesomeIcon icon={faTrash} className="text-xs" />

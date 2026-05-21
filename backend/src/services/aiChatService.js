@@ -6,48 +6,119 @@
  */
 
 import { dispatchToTitan } from './titanProvider.js';
+import { logger } from '../utils/logger.js';
+
+const BASE64_IMAGE_RE = /data:image\/[a-z+]+;base64,[A-Za-z0-9+/=]+/g;
+
+const RESPONSE_CACHE_TTL = 60_000;
+const responseCache = new Map();
+
+function getCachedResponse(notebookId, message) {
+  const key = `${notebookId}::${message}`;
+  const entry = responseCache.get(key);
+  if (entry && Date.now() - entry.timestamp < RESPONSE_CACHE_TTL) {
+    return entry.response;
+  }
+  responseCache.delete(key);
+  return null;
+}
+
+function setCachedResponse(notebookId, message, response) {
+  const key = `${notebookId}::${message}`;
+  responseCache.set(key, { response, timestamp: Date.now() });
+  if (responseCache.size > 500) {
+    const oldest = responseCache.entries().next().value;
+    if (oldest) responseCache.delete(oldest[0]);
+  }
+}
+
+/**
+ * Strips base64 image data from a string so text-only AI models
+ * never receive binary payloads they cannot process.
+ */
+function stripBase64Images(text) {
+  return text.replace(BASE64_IMAGE_RE, '[image omitted — text-only model]');
+}
 
 /**
  * Build a structured context block from all notebook sources and notes.
  * With the 128k Titan context, we raise limits significantly.
  */
 function buildNotebookContext(notebook, sources, notes) {
-  const MAX_SOURCE_CHARS = 250000; // 128k context limit is roughly 250k chars
-  const MAX_NOTE_CHARS = 20000;
+  const MAX_COMBINED_CHARS = 35000; // Safeguard to stay under Groq 12k TPM rate limits (~8.5k tokens)
+  const MAX_NOTE_CHARS = 10000;
 
   let ctx = `=== NOTEBOOK: "${notebook.title}" ===\n`;
   if (notebook.description) ctx += `Description: ${notebook.description}\n`;
   ctx += `\n`;
 
+  let currentLength = ctx.length;
+
   if (sources.length > 0) {
     ctx += `=== SOURCES (${sources.length}) ===\n`;
+    currentLength = ctx.length;
+    
     for (const s of sources) {
-      ctx += `\n[SOURCE: ${s.title} | type: ${s.type}]\n`;
-      if (s.content && s.content.length > 0 && !s.content.startsWith('Client-side PDF processing failed')) {
-        const truncated = s.content.length > MAX_SOURCE_CHARS
-          ? s.content.substring(0, MAX_SOURCE_CHARS) + '\n... [content truncated]'
-          : s.content;
-        ctx += truncated + '\n';
-      } else if (s.url) {
-        ctx += `URL: ${s.url}\n`;
-        ctx += `[Note: Content not extracted — URL source only]\n`;
-      } else {
-        ctx += `[Content not available]\n`;
+      if (currentLength >= MAX_COMBINED_CHARS) {
+        ctx += `\n[Remaining sources truncated due to context limits]\n`;
+        break;
       }
+      
+      let sourceBlock = `\n[SOURCE: ${s.title} | type: ${s.type}]\n`;
+      if (s.content && s.content.length > 0 && !s.content.startsWith('Client-side PDF processing failed')) {
+        const cleanContent = stripBase64Images(s.content);
+        const remainingBudget = MAX_COMBINED_CHARS - currentLength - sourceBlock.length;
+        
+        if (remainingBudget <= 100) {
+          ctx += `\n[Source "${s.title}" omitted due to context limits]\n`;
+          currentLength = ctx.length;
+          continue;
+        }
+        
+        const truncated = cleanContent.length > remainingBudget
+          ? cleanContent.substring(0, remainingBudget) + '\n... [content truncated]'
+          : cleanContent;
+          
+        sourceBlock += truncated + '\n';
+      } else if (s.url) {
+        sourceBlock += `URL: ${s.url}\n`;
+        sourceBlock += `[Note: Content not extracted — URL source only]\n`;
+      } else {
+        sourceBlock += `[Content not available]\n`;
+      }
+      
+      ctx += sourceBlock;
+      currentLength = ctx.length;
     }
   } else {
     ctx += `[No sources in this notebook yet]\n`;
   }
 
-  if (notes.length > 0) {
+  if (notes.length > 0 && currentLength < MAX_COMBINED_CHARS) {
     ctx += `\n=== NOTES (${notes.length} most recent) ===\n`;
-    const recentNotes = notes.slice(0, 50); // limit to 50 most recent (raised)
+    currentLength = ctx.length;
+    
+    const recentNotes = notes.slice(0, 50);
     for (const n of recentNotes) {
-      const noteContent = n.content.length > MAX_NOTE_CHARS
-        ? n.content.substring(0, MAX_NOTE_CHARS) + '...'
-        : n.content;
-      ctx += `\n[NOTE — ${n.created_at}${n.author_name ? ` by ${n.author_name}` : ''}]\n`;
-      ctx += noteContent + '\n';
+      if (currentLength >= MAX_COMBINED_CHARS) {
+        ctx += `\n[Remaining notes truncated]\n`;
+        break;
+      }
+      
+      const cleanNote = stripBase64Images(n.content);
+      const remainingBudget = MAX_COMBINED_CHARS - currentLength;
+      
+      if (remainingBudget <= 50) break;
+      
+      const noteContent = cleanNote.length > Math.min(MAX_NOTE_CHARS, remainingBudget)
+        ? cleanNote.substring(0, Math.min(MAX_NOTE_CHARS, remainingBudget)) + '...'
+        : cleanNote;
+        
+      let noteBlock = `\n[NOTE — ${n.created_at}${n.author_name ? ` by ${n.author_name}` : ''}]\n`;
+      noteBlock += noteContent + '\n';
+      
+      ctx += noteBlock;
+      currentLength = ctx.length;
     }
   }
 
@@ -87,16 +158,17 @@ export async function chatWithNotebook({ notebook, sources, notes, message, hist
   const messages = [{ role: 'system', content: systemPrompt }];
   
   // Add conversation history
-  const recentHistory = history.slice(-20); // History limit raised
+  const recentHistory = history.slice(-20);
   for (const turn of recentHistory) {
     messages.push({
       role: (turn.role === 'agent' || turn.role === 'assistant') ? 'assistant' : 'user',
-      content: turn.content || ''
+      content: stripBase64Images(turn.content || '')
     });
   }
 
   // Current message includes full notebook context
-  const fullMessage = `${notebookContext}\n\n=== USER QUESTION ===\n${message}`;
+  const cleanMessage = stripBase64Images(message);
+  const fullMessage = `${notebookContext}\n\n=== USER QUESTION ===\n${cleanMessage}`;
   messages.push({ role: 'user', content: fullMessage });
 
   // --- Phase 4: Stochastic Insight Drift (JIT) ---
@@ -113,6 +185,14 @@ export async function chatWithNotebook({ notebook, sources, notes, message, hist
   }
 
   try {
+    // Check response cache before hitting providers
+    const notebookId = notebook.id;
+    const cached = getCachedResponse(notebookId, message);
+    if (cached) {
+      logger.debug(`Cache hit for notebook ${notebookId}`);
+      return cached;
+    }
+
     const priority = notebookContext.length > 20000 ? 'context' : 'reasoning';
     // --- Step 1: Draft the Initial Answer ---
     let { answer, tokensUsed, modelUsed } = await dispatchToTitan({ 
@@ -167,14 +247,11 @@ Internal Audit: ${critique}`;
       .filter(s => answer.toLowerCase().includes(s.title.toLowerCase().slice(0, 20)))
       .map(s => s.id);
 
-    return {
-      answer,
-      groundedSources,
-      tokensUsed,
-      modelUsed
-    };
+    const result = { answer, groundedSources, tokensUsed, modelUsed };
+    setCachedResponse(notebookId, message, result);
+    return result;
   } catch (error) {
-    console.error('Titan processing failed:', error);
+    logger.error('Titan processing failed:', error);
     throw new Error(`Titan Synapse failed: ${error.message}`);
   }
 }

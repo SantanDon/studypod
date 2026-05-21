@@ -3,7 +3,7 @@
  * Orchestrates semantic search operations
  */
 
-export { ISearchService, SearchResult, SearchOptions } from './ISearchService';
+export type { ISearchService, SearchResult, SearchOptions } from './ISearchService';
 export { SearchService } from './SearchService';
 
 // Create singleton instance

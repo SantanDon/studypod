@@ -8,7 +8,7 @@
  */
 
 import { generateVerificationToken, hashToken, validateToken, isTokenExpired } from './tokenUtils';
-import { localStorageService, LocalUser } from '@/services/localStorageService';
+import { localStorageService, LocalUser, VerificationTokenRecord } from '@/services/localStorageService';
 
 /**
  * Result of email verification

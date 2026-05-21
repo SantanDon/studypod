@@ -1471,3 +1471,96 @@
 .transcript-line:hover {
   background: rgba(255, 255, 255, 0.05);
 }
+
+/* ============================================
+   LIGHT MODE STYLES FOR AUDIO LAB
+   ============================================ */
+
+:root:not(.dark) .audio-lab-overlay,
+.light .audio-lab-overlay {
+  background: rgba(255, 255, 255, 0.95);
+  border-color: rgba(0, 0, 0, 0.1);
+  box-shadow: 
+    0 10px 30px rgba(0, 0, 0, 0.08),
+    0 1px 3px rgba(0, 0, 0, 0.04);
+}
+
+:root:not(.dark) .audio-lab-header h4,
+.light .audio-lab-header h4 {
+  color: #1e293b;
+}
+
+:root:not(.dark) .audio-lab-header h4 svg,
+.light .audio-lab-header h4 svg {
+  color: #6366f1;
+}
+
+:root:not(.dark) .close-lab,
+.light .close-lab {
+  background: rgba(0, 0, 0, 0.05);
+  border-color: rgba(0, 0, 0, 0.1);
+  color: #64748b;
+}
+
+:root:not(.dark) .close-lab:hover,
+.light .close-lab:hover {
+  background: rgba(239, 68, 68, 0.1);
+  color: #ef4444;
+  border-color: rgba(239, 68, 68, 0.2);
+}
+
+:root:not(.dark) .audio-lab-overlay label,
+.light .audio-lab-overlay label {
+  color: #475569;
+}
+
+:root:not(.dark) .lab-input,
+.light .lab-input {
+  background: #ffffff !important;
+  border-color: rgba(0, 0, 0, 0.15) !important;
+  color: #1e293b !important;
+}
+
+:root:not(.dark) .lab-input:focus,
+.light .lab-input:focus {
+  border-color: #6366f1 !important;
+  box-shadow: 0 0 0 2px rgba(99, 102, 241, 0.2) !important;
+}
+
+:root:not(.dark) .lab-hint,
+.light .lab-hint {
+  color: #64748b;
+}
+
+:root:not(.dark) .glassmorphism,
+.light .glassmorphism {
+  background: rgba(255, 255, 255, 0.95);
+  border-color: rgba(0, 0, 0, 0.1);
+  box-shadow: 0 8px 32px 0 rgba(0, 0, 0, 0.1);
+}
+
+/* Light mode Tabs styling inside Audio Lab */
+:root:not(.dark) .audio-lab-overlay [data-slot="tabs-list"],
+.light .audio-lab-overlay [data-slot="tabs-list"],
+:root:not(.dark) .audio-lab-overlay .tabs-list,
+.light .audio-lab-overlay .tabs-list,
+:root:not(.dark) .audio-lab-overlay [role="tablist"],
+.light .audio-lab-overlay [role="tablist"] {
+  background-color: rgba(0, 0, 0, 0.05) !important;
+}
+
+:root:not(.dark) .audio-lab-overlay [data-slot="tabs-trigger"],
+.light .audio-lab-overlay [data-slot="tabs-trigger"],
+:root:not(.dark) .audio-lab-overlay [role="tab"],
+.light .audio-lab-overlay [role="tab"] {
+  color: #64748b !important;
+}
+
+:root:not(.dark) .audio-lab-overlay [data-slot="tabs-trigger"][data-state="active"],
+.light .audio-lab-overlay [data-slot="tabs-trigger"][data-state="active"],
+:root:not(.dark) .audio-lab-overlay [role="tab"][data-state="active"],
+.light .audio-lab-overlay [role="tab"][data-state="active"] {
+  background-color: #ffffff !important;
+  color: #6366f1 !important;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1) !important;
+}

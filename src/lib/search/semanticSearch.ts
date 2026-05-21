@@ -14,6 +14,8 @@ import {
   LocalChatMessage,
 } from "@/services/localStorageService";
 
+const isSemanticDisabled = false;
+
 export interface SearchResult {
   id: string;
   type: "note" | "source" | "chat";

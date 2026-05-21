@@ -63,3 +63,22 @@ export function saveTTSConfig(config: Partial<TTSConfig>): void {
   const updated = { ...current, ...config };
   localStorage.setItem(TTS_CONFIG_KEY, JSON.stringify(updated));
 }
+
+// Pronunciation dictionary storage helpers
+const PRONUNCIATION_DICT_KEY = 'tts_pronunciation_dictionary';
+
+export function getPronunciationDict(): Record<string, string> {
+  try {
+    const stored = localStorage.getItem(PRONUNCIATION_DICT_KEY);
+    if (stored) {
+      return JSON.parse(stored);
+    }
+  } catch (e) {
+    console.warn('Failed to load pronunciation dictionary:', e);
+  }
+  return {};
+}
+
+export function savePronunciationDict(dict: Record<string, string>): void {
+  localStorage.setItem(PRONUNCIATION_DICT_KEY, JSON.stringify(dict));
+}

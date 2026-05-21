@@ -15,11 +15,13 @@ export interface LocalUser {
   displayName?: string;
   account_type?: string;
   created_at: string;
+  emailVerified?: boolean;
 }
 
 export interface LocalSession {
   user: LocalUser;
   expires_at: number;
+  access_token?: string;
 }
 
 export interface LocalNotebook {
@@ -80,6 +82,29 @@ export interface LocalPodcast {
   created_at: string;
   duration?: number;
   audio_blob_id: string; // Key for IndexedDB
+}
+
+export interface ResetTokenRecord {
+  id: string;
+  userId: string;
+  email: string;
+  tokenHash: string;
+  expiresAt: string;
+  createdAt: string;
+  used: boolean;
+  usedAt?: string;
+  invalidatedAt?: string;
+}
+
+export interface VerificationTokenRecord {
+  id: string;
+  userId: string;
+  tokenHash: string;
+  expiresAt: string;
+  createdAt: string;
+  used: boolean;
+  usedAt?: string;
+  invalidatedAt?: string;
 }
 
 export interface StorageSaveResult {
@@ -187,6 +212,54 @@ class LocalStorageService {
     dryRun?: boolean;
   }): StorageCleanupResult {
     return storageManager.cleanupOldData(options);
+  }
+
+  // Password Recovery Reset Tokens
+  getResetTokens(): ResetTokenRecord[] {
+    return this.getFromStorage<ResetTokenRecord>("reset_tokens");
+  }
+
+  saveResetToken(record: ResetTokenRecord): void {
+    const tokens = this.getResetTokens();
+    tokens.push(record);
+    this.saveToStorage("reset_tokens", tokens);
+  }
+
+  updateResetToken(id: string, updates: Partial<ResetTokenRecord>): ResetTokenRecord | null {
+    const tokens = this.getResetTokens();
+    const index = tokens.findIndex((t) => t.id === id);
+    if (index === -1) return null;
+
+    tokens[index] = {
+      ...tokens[index],
+      ...updates,
+    };
+    this.saveToStorage("reset_tokens", tokens);
+    return tokens[index];
+  }
+
+  // Email Verification Tokens
+  getVerificationTokens(): VerificationTokenRecord[] {
+    return this.getFromStorage<VerificationTokenRecord>("verification_tokens");
+  }
+
+  saveVerificationToken(record: VerificationTokenRecord): void {
+    const tokens = this.getVerificationTokens();
+    tokens.push(record);
+    this.saveToStorage("verification_tokens", tokens);
+  }
+
+  updateVerificationToken(id: string, updates: Partial<VerificationTokenRecord>): VerificationTokenRecord | null {
+    const tokens = this.getVerificationTokens();
+    const index = tokens.findIndex((t) => t.id === id);
+    if (index === -1) return null;
+
+    tokens[index] = {
+      ...tokens[index],
+      ...updates,
+    };
+    this.saveToStorage("verification_tokens", tokens);
+    return tokens[index];
   }
 
   // User and Session Management

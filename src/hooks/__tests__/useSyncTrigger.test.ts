@@ -20,6 +20,7 @@ describe('useSyncTrigger', () => {
   beforeEach(() => {
     // Reset mocks
     vi.clearAllMocks();
+    mockQueueSync.mockReset();
 
     // Setup default mock implementations
     mockGetSyncManager.mockReturnValue({
@@ -46,7 +47,7 @@ describe('useSyncTrigger', () => {
       await result.current.triggerSync('notebook', 'notebook-1', testData);
     });
 
-    expect(mockQueueSync).toHaveBeenCalledWith('notebook-1', 'notebook', testData);
+    expect(mockQueueSync).toHaveBeenCalledWith('notebook-1', 'notebook', testData, 'update');
     expect(mockQueueSync).toHaveBeenCalledTimes(1);
   });
 
@@ -113,11 +114,9 @@ describe('useSyncTrigger', () => {
 
     const testData = { title: 'Test Notebook' };
     
-    await expect(async () => {
-      await act(async () => {
-        await result.current.triggerSync('notebook', 'notebook-1', testData);
-      });
-    }).rejects.toThrow('Sync failed');
+    await expect(
+      result.current.triggerSync('notebook', 'notebook-1', testData)
+    ).rejects.toThrow('Sync failed');
 
     expect(consoleErrorSpy).toHaveBeenCalledWith('Failed to trigger sync:', testError);
 
@@ -139,7 +138,7 @@ describe('useSyncTrigger', () => {
       await result.current.triggerSync('source', 'source-1', sourceData);
     });
 
-    expect(mockQueueSync).toHaveBeenCalledWith('source-1', 'source', sourceData);
+    expect(mockQueueSync).toHaveBeenCalledWith('source-1', 'source', sourceData, 'update');
 
     // Test with flashcard entity
     const flashcardData = { question: 'Q?', answer: 'A' };
@@ -147,7 +146,7 @@ describe('useSyncTrigger', () => {
       await result.current.triggerSync('flashcard', 'flashcard-1', flashcardData);
     });
 
-    expect(mockQueueSync).toHaveBeenCalledWith('flashcard-1', 'flashcard', flashcardData);
+    expect(mockQueueSync).toHaveBeenCalledWith('flashcard-1', 'flashcard', flashcardData, 'update');
     expect(mockQueueSync).toHaveBeenCalledTimes(2);
   });
 

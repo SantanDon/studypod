@@ -10,7 +10,6 @@ import ChatArea from '@/components/notebook/ChatArea';
 import StudioSidebar from '@/components/notebook/StudioSidebar';
 import MobileNotebookTabs from '@/components/notebook/MobileNotebookTabs';
 import PodcastGenerationIndicator from '@/components/notebook/PodcastGenerationIndicator';
-import { AgentPulse } from '@/components/agent/AgentPulse';
 import ErrorBoundary from '@/components/ErrorBoundary';
 import { Citation } from '@/types/message';
 import { ResizablePanelGroup, ResizablePanel, ResizableHandle } from '@/components/ui/resizable';
@@ -43,7 +42,7 @@ const Notebook = () => {
   console.log("DEBUG: Notebook.tsx executing", { notebookId, notebooks, sources, isDesktop });
 
   return (
-    <div className="h-screen bg-white flex flex-col overflow-hidden">
+    <div className="h-screen bg-background flex flex-col overflow-hidden">
       <NotebookHeader 
         title={notebook?.title || 'Untitled Notebook'} 
         notebookId={notebookId} 
@@ -147,8 +146,6 @@ const Notebook = () => {
         </ErrorBoundary>
       )}
 
-      {/* Real-time Council Telemetry */}
-      <AgentPulse notebookId={notebookId || ''} />
     </div>
   );
 };

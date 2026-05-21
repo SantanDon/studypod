@@ -6,6 +6,7 @@ import { useNotebookGeneration } from "@/hooks/useNotebookGeneration";
 import { useWebsiteProcessing } from "@/hooks/useWebsiteProcessing";
 import { useYoutubeProcessing } from "@/hooks/useYoutubeProcessing";
 import { useGuest, useNotebookLimits } from "@/hooks/useGuest";
+import { useNotebookUpdate } from "@/hooks/useNotebookUpdate";
 import { useToast } from "@/hooks/use-toast";
 
 export function useAddSourcesHandlers(
@@ -20,6 +21,7 @@ export function useAddSourcesHandlers(
   const { uploadFile } = useFileUpload();
   const { processDocumentAsync } = useDocumentProcessing();
   const { generateNotebookContentAsync } = useNotebookGeneration();
+  const { updateNotebook } = useNotebookUpdate();
   const { addWebsitesAsSources, isProcessing: isWebsiteProcessing } = useWebsiteProcessing();
   const { addYoutubeVideoAsSource, isProcessing: isYoutubeProcessing } = useYoutubeProcessing();
 
@@ -50,9 +52,17 @@ export function useAddSourcesHandlers(
         return;
       }
 
+      const detectFileType = (file: File): "pdf" | "text" | "website" | "youtube" | "audio" | "image" | "ebook" => {
+        if (file.type.includes("pdf") || file.name.toLowerCase().endsWith(".pdf")) return "pdf";
+        if (file.type.includes("audio")) return "audio";
+        if (file.type.includes("image")) return "image";
+        if (file.type === "application/epub+zip" || file.name.toLowerCase().endsWith(".epub")) return "ebook";
+        return "text";
+      };
+
       const processFileAsync = async (file: File, sourceId: string, notebookId: string) => {
         try {
-          const fileType = file.type.includes("pdf") ? "pdf" : file.type.includes("audio") ? "audio" : file.type.includes("image") ? "image" : "text";
+          const fileType = detectFileType(file);
 
           updateSource({ sourceId, updates: { processing_status: "uploading" } });
 
@@ -67,6 +77,17 @@ export function useAddSourcesHandlers(
           const { filePath, content } = uploadResult;
 
           updateSource({ sourceId, updates: { file_path: filePath, processing_status: "processing", content } });
+
+          // Auto-update notebook title from EPUB metadata if it's an ebook
+          if (fileType === "ebook" && uploadResult.metadata) {
+            const epubTitle = (uploadResult.metadata as Record<string, unknown>)?.epubTitle as string;
+            if (epubTitle && epubTitle.length > 0) {
+              console.log(`📖 Auto-setting notebook title from EPUB: "${epubTitle}"`);
+              updateNotebook({ id: notebookId, updates: { title: epubTitle } });
+              // Also update the source title to the book title
+              updateSource({ sourceId, updates: { title: epubTitle } });
+            }
+          }
 
           try {
             await processDocumentAsync({ sourceId, filePath, sourceType: fileType, notebookId });
@@ -95,12 +116,12 @@ export function useAddSourcesHandlers(
 
       try {
         const firstFile = files[0];
-        const firstFileType = firstFile.type.includes("pdf") ? "pdf" : firstFile.type.includes("audio") ? "audio" : firstFile.type.includes("image") ? "image" : "text";
+        const firstFileType = detectFileType(firstFile);
         
         const firstSource = await addSourceAsync({
           notebookId,
           title: firstFile.name,
-          type: firstFileType as "pdf" | "text" | "website" | "youtube" | "audio" | "image",
+          type: firstFileType as "pdf" | "text" | "website" | "youtube" | "audio" | "image" | "ebook",
           file_size: firstFile.size,
           processing_status: "pending",
           metadata: { fileName: firstFile.name, fileType: firstFile.type },
@@ -113,11 +134,11 @@ export function useAddSourcesHandlers(
           await new Promise((resolve) => setTimeout(resolve, 150));
           remainingSources = await Promise.all(
             files.slice(1).map(async (file) => {
-              const fileType = file.type.includes("pdf") ? "pdf" : file.type.includes("audio") ? "audio" : file.type.includes("image") ? "image" : "text";
+              const fileType = detectFileType(file);
               return await addSourceAsync({
                 notebookId,
                 title: file.name,
-                type: fileType as "pdf" | "text" | "website" | "youtube" | "audio" | "image",
+                type: fileType as "pdf" | "text" | "website" | "youtube" | "audio" | "image" | "ebook",
                 file_size: file.size,
                 processing_status: "pending",
                 metadata: { fileName: file.name, fileType: file.type },

@@ -1,5 +1,6 @@
 import fetch from 'node-fetch';
 import * as cheerio from 'cheerio';
+import { logger } from '../utils/logger.js';
 
 // STABILITY PATCH v8: jsdom and readability PURGED.
 // These libraries trigger fatal linkage errors (ERR_REQUIRE_ESM) on Vercel.
@@ -110,7 +111,7 @@ async function extractWithCheerio(url) {
  */
 async function extractWithJina(url) {
   const jinaUrl = `https://r.jina.ai/${url}`;
-  console.log(`[Extraction] Attempting Jina Reader fallback for: ${url}`);
+  logger.info(`[Extraction] Attempting Jina Reader fallback for: ${url}`);
   
   const response = await fetch(jinaUrl, {
     method: 'GET',
@@ -173,11 +174,11 @@ export async function extractWebSource(url) {
   try {
     return await extractWithCheerio(url);
   } catch (err) {
-    console.warn(`[Extraction] Cheerio failed for ${url}, trying Jina Reader...`);
+    logger.warn(`[Extraction] Cheerio failed for ${url}, trying Jina Reader...`);
     try {
       return await extractWithJina(url);
     } catch (err2) {
-      console.warn(`[Extraction] Jina Reader failed, checking Firecrawl...`);
+      logger.warn(`[Extraction] Jina Reader failed, checking Firecrawl...`);
       try {
         return await extractWithFirecrawl(url);
       } catch (err3) {

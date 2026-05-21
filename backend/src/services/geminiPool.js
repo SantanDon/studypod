@@ -1,4 +1,5 @@
 import { GoogleGenAI } from '@google/genai';
+import { logger } from '../utils/logger.js';
 
 // STABILITY PATCH v4: user-agents PURGED.
 const UA_LIST = [
@@ -20,12 +21,12 @@ class GeminiKeyPool {
   loadKeys() {
     const envKeys = process.env.GEMINI_API_KEYS;
     if (!envKeys) {
-      console.warn('[GeminiStealth] No GEMINI_API_KEYS found. Reasoning disabled.');
+      logger.warn('[GeminiStealth] No GEMINI_API_KEYS found. Reasoning disabled.');
       return;
     }
     
     this.keys = envKeys.split(/[,;]/).map(k => k.trim()).filter(k => k.length > 0);
-    console.log(`[GeminiStealth] Loaded ${this.keys.length} keys. Fingerprint evasion ACTIVE.`);
+    logger.info(`[GeminiStealth] Loaded ${this.keys.length} keys. Fingerprint evasion ACTIVE.`);
     
     for (const key of this.keys) {
       this.keyHealth.set(key, { failures: 0, lastUsed: 0, isExhausted: false });
@@ -46,7 +47,7 @@ class GeminiKeyPool {
       const now = Date.now();
       for (const [key, stats] of this.keyHealth.entries()) {
         if (now - stats.lastUsed > 600000) { // 10 minutes for fast rotation
-          console.log(`[GeminiStealth] Attempting recovery for key: ${key.substring(0, 8)}...`);
+          logger.info(`[GeminiStealth] Attempting recovery for key: ${key.substring(0, 8)}...`);
           stats.isExhausted = false;
           stats.failures = 0;
           return key;
@@ -111,13 +112,13 @@ class GeminiKeyPool {
         attempts++;
         
         const errorStatus = error.status || (error.message.includes('429') ? 429 : 500);
-        console.error(`[GeminiStealth] Request Error (Key: ${apiKey.substring(0, 8)}... Status: ${errorStatus}):`, error.message);
+        logger.error(`[GeminiStealth] Request Error (Key: ${apiKey.substring(0, 8)}... Status: ${errorStatus}):`, error.message);
 
         if (errorStatus === 429 || error.message.includes('quota')) {
           stats.isExhausted = true;
           // Continue to next attempt
         } else if (errorStatus === 403 || errorStatus === 401) {
-          console.warn(`[GeminiStealth] Key Revoked or Invalid Permission. Purging.`);
+          logger.warn(`[GeminiStealth] Key Revoked or Invalid Permission. Purging.`);
           stats.isExhausted = true; // Mark as exhausted permanently for this session
         } else {
           errors.push(error.message);

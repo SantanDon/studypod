@@ -187,7 +187,8 @@ const NotebookGrid = () => {
               sources: notebook.sources?.[0]?.count || 0,
               icon: notebook.icon || '📝',
               color: notebook.color || 'bg-gray-100'
-            }} />
+            }}
+            isSelectionMode={isSelectionMode} />
             
             {isSelectionMode && (
               <div className="absolute inset-0 bg-blue-500/10 rounded-lg pointer-events-none border-2 border-transparent transition-all group-hover:border-blue-400">

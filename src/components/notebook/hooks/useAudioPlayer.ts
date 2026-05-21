@@ -1,6 +1,7 @@
 import { useState, useRef, useEffect, RefObject } from "react";
 import { useToast } from "@/hooks/use-toast";
 import { localStorageService } from "@/services/localStorageService";
+import { getStreamingTTSGenerator } from "@/lib/tts/streamingTTSGenerator";
 
 interface UseAudioPlayerProps {
   audioUrl: string;
@@ -38,8 +39,31 @@ export function useAudioPlayer({
   const { toast } = useToast();
 
   const isExpired = expiresAt ? new Date(expiresAt) <= new Date() : false;
+  const isWebSpeech = audioUrl === "webspeech_fallback";
 
   useEffect(() => {
+    if (isWebSpeech) {
+      setLoading(false);
+      setAudioError(null);
+      const generator = getStreamingTTSGenerator();
+      const segments = generator.getGeneratedSegments();
+      const totalDur = segments.reduce((sum, s) => sum + s.duration, 0);
+      const computedDuration = totalDur || 180;
+      setDuration(computedDuration);
+
+      if (notebookId) {
+        const savedTime = localStorage.getItem(`podcast_pos_${notebookId}`);
+        if (savedTime) {
+          const time = parseFloat(savedTime);
+          if (time > 0 && time < computedDuration - 5) {
+            setCurrentTime(time);
+            console.log(`🎙️ Resumed Web Speech podcast for ${notebookId} at ${time}s`);
+          }
+        }
+      }
+      return;
+    }
+
     const audio = audioRef.current;
     if (!audio) return;
 
@@ -146,17 +170,52 @@ export function useAudioPlayer({
     onUrlRefresh,
     audioError,
     autoRetryInProgress,
+    isWebSpeech,
   ]);
 
   useEffect(() => {
     const audio = audioRef.current;
-    if (audio && autoRetryInProgress) {
+    if (audio && autoRetryInProgress && !isWebSpeech) {
       console.log("Reloading audio with new URL...");
       audio.load();
     }
-  }, [audioUrl, autoRetryInProgress]);
+  }, [audioUrl, autoRetryInProgress, isWebSpeech]);
 
   const togglePlayPause = () => {
+    if (isWebSpeech) {
+      const generator = getStreamingTTSGenerator();
+      if (isPlaying) {
+        generator.stopPlayback();
+        setIsPlaying(false);
+      } else {
+        setIsPlaying(true);
+        const segments = generator.getGeneratedSegments();
+        
+        let accumulated = 0;
+        let startIndex = 0;
+        for (let i = 0; i < segments.length; i++) {
+          if (accumulated + segments[i].duration >= currentTime) {
+            startIndex = i;
+            break;
+          }
+          accumulated += segments[i].duration;
+        }
+
+        generator.playAll(
+          startIndex,
+          (index) => {
+            const prevDuration = segments.slice(0, index).reduce((sum, s) => sum + s.duration, 0);
+            setCurrentTime(prevDuration);
+          },
+          () => {
+            setIsPlaying(false);
+            setCurrentTime(0);
+          }
+        );
+      }
+      return;
+    }
+
     const audio = audioRef.current;
     if (!audio || audioError) return;
 
@@ -175,12 +234,44 @@ export function useAudioPlayer({
   };
 
   const handleSeek = (value: number[]) => {
+    const time = value[0];
+    setCurrentTime(time);
+
+    if (isWebSpeech) {
+      if (isPlaying) {
+        const generator = getStreamingTTSGenerator();
+        generator.stopPlayback();
+        const segments = generator.getGeneratedSegments();
+        
+        let accumulated = 0;
+        let startIndex = 0;
+        for (let i = 0; i < segments.length; i++) {
+          if (accumulated + segments[i].duration >= time) {
+            startIndex = i;
+            break;
+          }
+          accumulated += segments[i].duration;
+        }
+
+        generator.playAll(
+          startIndex,
+          (index) => {
+            const prevDuration = segments.slice(0, index).reduce((sum, s) => sum + s.duration, 0);
+            setCurrentTime(prevDuration);
+          },
+          () => {
+            setIsPlaying(false);
+            setCurrentTime(0);
+          }
+        );
+      }
+      return;
+    }
+
     const audio = audioRef.current;
     if (!audio || audioError) return;
 
-    const time = value[0];
     audio.currentTime = time;
-    setCurrentTime(time);
   };
 
   const handleVolumeChange = (value: number[]) => {
@@ -193,14 +284,35 @@ export function useAudioPlayer({
   };
 
   const restart = () => {
-    const audio = audioRef.current;
-    if (!audio || audioError) return;
-
-    audio.currentTime = 0;
     setCurrentTime(0);
     if (notebookId) {
         localStorage.removeItem(`podcast_pos_${notebookId}`);
     }
+
+    if (isWebSpeech) {
+      const generator = getStreamingTTSGenerator();
+      generator.stopPlayback();
+      if (isPlaying) {
+        const segments = generator.getGeneratedSegments();
+        generator.playAll(
+          0,
+          (index) => {
+            const prevDuration = segments.slice(0, index).reduce((sum, s) => sum + s.duration, 0);
+            setCurrentTime(prevDuration);
+          },
+          () => {
+            setIsPlaying(false);
+            setCurrentTime(0);
+          }
+        );
+      }
+      return;
+    }
+
+    const audio = audioRef.current;
+    if (!audio || audioError) return;
+
+    audio.currentTime = 0;
   };
 
   const handlePlaybackRateChange = (rate: number) => {
@@ -228,6 +340,15 @@ export function useAudioPlayer({
   };
 
   const downloadAudio = async () => {
+    if (isWebSpeech) {
+      toast({
+        title: "Download Unavailable",
+        description: "Browser Speech audio cannot be downloaded as it is synthesized in real time.",
+        variant: "destructive",
+      });
+      return;
+    }
+
     setIsDownloading(true);
 
     try {

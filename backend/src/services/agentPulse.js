@@ -1,37 +1,64 @@
-/**
- * THE AGENT PULSE — Council Telemetry Service
- * 
- * This service hooks into the StudyPod Sync Relay to provide 
- * real-time visibility of the Council's internal reasoning.
- */
-
-import { hocuspocusServer } from './syncRelay.js';
+import { dbHelpers } from '../db/database.js';
+import { logger } from '../utils/logger.js';
 
 class AgentPulse {
-    constructor() {
-        this.activeMissions = new Map();
-    }
+  constructor() {
+    this.activeMissions = new Map();
+  }
 
-    /**
-     * Broadcast a thought from the Council to a specific notebook.
-     * Use this when ENI is thinking/reasoning about a notebook's data.
-     */
-    async broadcastThought(userId, notebookId, thought) {
-        console.log(`[PULSE] Broadcasting thought for Notebook ${notebookId}: "${thought.slice(0, 30)}..."`);
-        
-        // Push the thought to the Hocuspocus document (the Yjs doc)
-        // This will appear as a live-updating "Agent Console" in the UI.
-        
-        /* 
-        Implementation Note: 
-        We use hocuspocusServer.on('step', ...) to push the 
-        agent's reasoning state into a document-level 'agent_stream' 
-        Yjs type. 
-        */
+  async broadcastThought(userId, notebookId, thought) {
+    if (!userId || !notebookId || !thought) return;
 
-        // Placeholder for real Yjs update logic
-        // This would use a Yjs Provider to update the shared state
+    logger.debug(`[Pulse] Broadcasting thought for Notebook ${notebookId}: "${thought.slice(0, 60)}..."`);
+
+    try {
+      await dbHelpers.createActivityLog(
+        notebookId,
+        userId,
+        'agent',
+        'agent_thought',
+        thought.slice(0, 200)
+      );
+    } catch (error) {
+      logger.error('[Pulse] Failed to broadcast thought:', error.message);
     }
+  }
+
+  async startMission(userId, notebookId, mission) {
+    const missionKey = `${userId}:${notebookId}`;
+    this.activeMissions.set(missionKey, {
+      mission,
+      startedAt: new Date(),
+      thoughtCount: 0,
+    });
+    await this.broadcastThought(userId, notebookId, `🧠 Beginning mission: ${mission}`);
+  }
+
+  async endMission(userId, notebookId) {
+    const missionKey = `${userId}:${notebookId}`;
+    const mission = this.activeMissions.get(missionKey);
+    if (mission) {
+      await this.broadcastThought(
+        userId,
+        notebookId,
+        `✅ Mission complete: "${mission.mission}" — ${mission.thoughtCount} insights shared`
+      );
+      this.activeMissions.delete(missionKey);
+    }
+  }
+
+  getActiveMissions(userId) {
+    const missions = [];
+    for (const [key, value] of this.activeMissions) {
+      if (key.startsWith(`${userId}:`)) {
+        missions.push({
+          notebookId: key.split(':')[1],
+          ...value,
+        });
+      }
+    }
+    return missions;
+  }
 }
 
 export const agentPulse = new AgentPulse();

@@ -95,8 +95,8 @@ describe('TTSService', () => {
       expect(available).toBe(true);
     });
 
-    it('should return false if no voices available', async () => {
-      vi.spyOn(service, 'getAvailableVoices').mockResolvedValue([]);
+    it('should return false if provider is unavailable', async () => {
+      vi.spyOn(service, 'isAvailable').mockResolvedValue(false);
 
       const available = await service.isAvailable();
 

@@ -29,7 +29,14 @@ export interface PodcastScript {
 // Average speaking rate: ~150 words per minute = 2.5 words per second
 // So we need: 1050-1500 words total, or about 50-75 segments of 15-25 words each
 
-function getSystemPrompt(host1: string, host2: string, type: PodcastType): string {
+function getSystemPrompt(
+  host1: string, 
+  host2: string, 
+  host1Gender: string, 
+  host2Gender: string, 
+  type: PodcastType, 
+  format: 'dialogue' | 'solo' = 'dialogue'
+): string {
   const lengthTargets = {
     'brief': { time: '2-3 minutes', segments: '10-15', exchanges: '10-15' },
     'standard': { time: '7-10 minutes', segments: '40-60', exchanges: '40-60' },
@@ -38,11 +45,34 @@ function getSystemPrompt(host1: string, host2: string, type: PodcastType): strin
 
   const target = lengthTargets[type];
 
+  if (format === 'solo') {
+    return `You are an expert audio lecture and audiobook script writer creating a comprehensive, engaging monologue read by a single narrator about the provided content.
+
+NARRATOR:
+- ${host1}: A knowledgeable, engaging educator (${host1Gender} voice/identity) who explains concepts clearly, thoroughly, and relatably.
+
+YOUR TASK:
+Create a detailed, informative solo lecture script that thoroughly covers the source material. The lecture should be ${target.time} long.
+
+CRITICAL REQUIREMENTS:
+1. Generate ${target.segments} speech segments by ${host1} (each segment is a paragraph)
+2. Each segment should be 3-5 sentences (30-50 words)
+3. Cover ALL key points from the source material
+4. Use ONLY "${host1}" as the speaker name for all segments
+5. Return ONLY valid JSON in the specified format
+6. The narrator (${host1}) is a third-party host and NOT the original author, YouTuber, or creator of the source material. If the content mentions a creator, YouTuber, or author (e.g. James Harden, Andy Mewborn), refer to them in the third person (e.g., "James Harden explains..." or "In Andy Mewborn's video..."). Never claim to be them.
+
+${host1} should ALWAYS prioritize and emphasize any specific points mentioned in the "USER'S NOTES" section if provided.
+
+OUTPUT FORMAT:
+{"title":"Episode Title","segments":[{"speaker":"${host1}","text":"..."},{"speaker":"${host1}","text":"..."}]}`;
+  }
+
   return `You are an expert podcast script writer creating an educational, engaging conversation between two hosts about the provided content.
 
 HOSTS:
-- ${host1} (Host 1): The knowledgeable main host who explains concepts clearly and thoroughly. 
-- ${host2} (Host 2): The curious, relatable co-host who asks thoughtful questions and relates topics to real-world applications.
+- ${host1} (Host 1): The knowledgeable main host (${host1Gender} voice/identity) who explains concepts clearly and thoroughly. 
+- ${host2} (Host 2): The curious, relatable co-host (${host2Gender} voice/identity) who asks thoughtful questions and relates topics to real-world applications.
 
 YOUR TASK:
 Create a detailed, informative podcast script that thoroughly covers the source material. The podcast should be ${target.time} long.
@@ -53,6 +83,7 @@ CRITICAL REQUIREMENTS:
 3. Cover ALL key points from the source material
 4. Use the specific names "${host1}" and "${host2}" for the speakers
 5. Return ONLY valid JSON in the specified format
+6. Neither host is the author, creator, or YouTuber of the source material. If the content is from a YouTuber or author (e.g. James Harden or Andy Mewborn), the hosts must discuss them in the third person (e.g., "In the video, James explains..." or "Andy mentions that..."). The hosts must never introduce themselves or each other as the author/creator of the source content.
 
 ${host1} and ${host2} should ALWAYS prioritize and emphasize any specific points mentioned in the "USER'S NOTES" section if provided. These notes represent the focus of the study session.
 
@@ -108,23 +139,37 @@ export async function generatePodcastScript(
     userNotes?: string;
     host1Name?: string;
     host2Name?: string;
+    host1Gender?: 'male' | 'female';
+    host2Gender?: 'male' | 'female';
     type?: PodcastType;
+    format?: 'dialogue' | 'solo';
   }
 ): Promise<PodcastScript> {
   const model = options?.modelName || getModelForTask("chat");
   const host1Name = options?.host1Name || "Alex";
   const host2Name = options?.host2Name || "Sarah";
+  const host1Gender = options?.host1Gender || "male";
+  const host2Gender = options?.host2Gender || "female";
   const podcastType = options?.type || "standard";
+  const format = options?.format || "dialogue";
   
   // Use more content for better context (up to 12000 chars)
   const truncatedContent = content.substring(0, 12000);
   const keyTopics = extractKeyTopics(content);
   
   // Build a comprehensive prompt
-  let userPrompt = `Create a detailed 7-10 minute podcast episode about the following content. Generate 40-60 dialogue exchanges that thoroughly explain and discuss the material.
+  let userPrompt = "";
+  if (format === 'solo') {
+    userPrompt = `Create a detailed ${podcastType === 'brief' ? '2-3' : podcastType === 'standard' ? '7-10' : '15-20'} minute audio lecture monologue about the following content. Generate speech segments by ${host1Name} that thoroughly explain and discuss the material.
 
 SOURCE CONTENT:
 ${truncatedContent}`;
+  } else {
+    userPrompt = `Create a detailed ${podcastType === 'brief' ? '2-3' : podcastType === 'standard' ? '7-10' : '15-20'} minute podcast episode about the following content. Generate dialogue exchanges that thoroughly explain and discuss the material.
+
+SOURCE CONTENT:
+${truncatedContent}`;
+  }
 
   if (keyTopics.length > 0) {
     userPrompt += `
@@ -140,17 +185,23 @@ USER'S NOTES (emphasize these points):
 ${options.userNotes.substring(0, 2000)}`;
   }
 
-  userPrompt += `
+  if (format === 'solo') {
+    userPrompt += `
+
+Remember: Generate speech segments by the narrator according to the requested style: ${podcastType}. Use the name ${host1Name}. Return ONLY the JSON object.`;
+  } else {
+    userPrompt += `
 
 Remember: Generate dialogue exchanges according to the requested style: ${podcastType}. Use the names ${host1Name} and ${host2Name}. Return ONLY the JSON object.`;
+  }
 
   try {
-    console.log(`🎙️ Generating ${podcastType} podcast script for ${host1Name} & ${host2Name}...`);
+    console.log(`🎙️ Generating ${podcastType} ${format} script for ${host1Name} (${host1Gender}) and ${host2Name} (${host2Gender})...`);
     console.log(`📊 Content length: ${truncatedContent.length} chars, ${keyTopics.length} key topics`);
 
     const response = await chatCompletion({
       messages: [
-        { role: "system", content: getSystemPrompt(host1Name, host2Name, podcastType) },
+        { role: "system", content: getSystemPrompt(host1Name, host2Name, host1Gender, host2Gender, podcastType, format) },
         { role: "user", content: userPrompt },
       ],
       model,
@@ -160,12 +211,12 @@ Remember: Generate dialogue exchanges according to the requested style: ${podcas
     console.log("✅ AI response received, length:", response.length);
 
     // Try to parse the response
-    let script = parseAIResponse(response);
+    let script = parseAIResponse(response, host1Name, host2Name, format);
 
     // If we got too few segments, try to expand or use intelligent fallback
-    if (script.segments.length < 20) {
+    if (script.segments.length < 15) {
       console.warn(`⚠️ Only ${script.segments.length} segments generated, creating expanded script`);
-      script = createExpandedScript(truncatedContent, keyTopics, script);
+      script = createExpandedScript(truncatedContent, keyTopics, script, format);
     }
 
     // Calculate estimated duration (150 words per minute)
@@ -179,18 +230,18 @@ Remember: Generate dialogue exchanges according to the requested style: ${podcas
     
     // Create a comprehensive fallback based on the actual content
     console.log("⚠️ Using content-based fallback script");
-    return createExpandedScript(truncatedContent, keyTopics);
+    return createExpandedScript(truncatedContent, keyTopics, undefined, format);
   }
 }
 
 /**
  * Parse AI response with multiple strategies
  */
-function parseAIResponse(response: string): PodcastScript {
+function parseAIResponse(response: string, host1Name?: string, host2Name?: string, format: 'dialogue' | 'solo' = 'dialogue'): PodcastScript {
   // Strategy 1: Try direct JSON parse
   const jsonScript = tryParseJSON(response);
   if (jsonScript && jsonScript.segments.length > 0) {
-    return normalizeScript(jsonScript);
+    return normalizeScript(jsonScript, host1Name, host2Name, format);
   }
 
   // Strategy 2: Extract from code blocks
@@ -198,7 +249,7 @@ function parseAIResponse(response: string): PodcastScript {
   if (codeBlockMatch) {
     const parsed = tryParseJSON(codeBlockMatch[1]);
     if (parsed && parsed.segments.length > 0) {
-      return normalizeScript(parsed);
+      return normalizeScript(parsed, host1Name, host2Name, format);
     }
   }
 
@@ -222,14 +273,14 @@ function parseAIResponse(response: string): PodcastScript {
       const jsonStr = response.substring(response.indexOf('{'), endIndex);
       const parsed = tryParseJSON(jsonStr);
       if (parsed && parsed.segments.length > 0) {
-        return normalizeScript(parsed);
+        return normalizeScript(parsed, host1Name, host2Name, format);
       }
     }
   }
 
   // Strategy 4: Parse as conversation text
   console.log("📝 Attempting conversation text parsing...");
-  return parseAsConversation(response);
+  return parseAsConversation(response, host1Name, host2Name, format);
 }
 
 /**
@@ -314,28 +365,34 @@ function tryParseJSON(text: string): PodcastScript | null {
 /**
  * Normalize script to ensure correct format
  */
-function normalizeScript(script: PodcastScript): PodcastScript {
+function normalizeScript(script: PodcastScript, host1Name?: string, host2Name?: string, format: 'dialogue' | 'solo' = 'dialogue'): PodcastScript {
   return {
     title: script.title || "Deep Dive Episode",
     segments: script.segments
       .filter((seg) => seg && seg.text && String(seg.text).trim().length > 0)
       .map((seg) => ({
-        speaker: normalizeSpeaker(seg.speaker),
+        speaker: format === 'solo' ? (host1Name || "Alex") : normalizeSpeaker(seg.speaker, host1Name, host2Name),
         text: cleanText(seg.text),
       })),
   };
 }
 
 /**
- * Normalize speaker name
+ * Normalize speaker name — preserves custom names when provided
  */
-function normalizeSpeaker(speaker: string): "Alex" | "Sarah" {
-  if (!speaker) return "Alex";
+function normalizeSpeaker(speaker: string, host1Name?: string, host2Name?: string): string {
+  if (!speaker) return host1Name || "Alex";
   const s = String(speaker).toLowerCase().trim();
+
+  // If custom host names are set, map exact matches
+  if (host1Name && s === host1Name.toLowerCase()) return host1Name;
+  if (host2Name && s === host2Name.toLowerCase()) return host2Name;
+
+  // Standard alias detection (AI sometimes uses "Sarah" even when custom name is set)
   if (s.includes("sarah") || s.includes("host 2") || s.includes("host2") || s === "2" || s === "female") {
-    return "Sarah";
+    return host2Name || "Sarah";
   }
-  return "Alex";
+  return host1Name || "Alex";
 }
 
 /**
@@ -356,10 +413,12 @@ function cleanText(text: string): string {
 /**
  * Parse plain text conversation
  */
-function parseAsConversation(text: string): PodcastScript {
+function parseAsConversation(text: string, host1Name?: string, host2Name?: string, format: 'dialogue' | 'solo' = 'dialogue'): PodcastScript {
   const segments: PodcastSegment[] = [];
   const lines = text.split(/\n+/);
-  let currentSpeaker: "Alex" | "Sarah" = "Alex";
+  const h1 = host1Name || "Alex";
+  const h2 = host2Name || "Sarah";
+  let currentSpeaker = h1;
 
   for (const line of lines) {
     const trimmed = line.trim();
@@ -369,25 +428,39 @@ function parseAsConversation(text: string): PodcastScript {
     if (/^[{}[\]":]/.test(trimmed)) continue;
     if (trimmed.includes('"speaker"') || trimmed.includes('"text"')) continue;
 
-    const alexMatch = trimmed.match(/^(?:Alex|Host\s*1)[:\s]+(.+)/i);
-    const sarahMatch = trimmed.match(/^(?:Sarah|Host\s*2)[:\s]+(.+)/i);
+    const h1Match = trimmed.match(new RegExp(`^(?:${escapeRegex(h1)}|Alex|Host\\s*1)[:\\s]+(.+)`, 'i'));
+    const h2Match = trimmed.match(new RegExp(`^(?:${escapeRegex(h2)}|Sarah|Host\\s*2)[:\\s]+(.+)`, 'i'));
 
-    if (alexMatch && alexMatch[1].length > 10) {
-      segments.push({ speaker: "Alex", text: cleanText(alexMatch[1]) });
-      currentSpeaker = "Sarah";
-    } else if (sarahMatch && sarahMatch[1].length > 10) {
-      segments.push({ speaker: "Sarah", text: cleanText(sarahMatch[1]) });
-      currentSpeaker = "Alex";
-    } else if (trimmed.length > 30) {
-      const content = cleanText(trimmed);
-      if (content.length > 20) {
-        segments.push({ speaker: currentSpeaker, text: content });
-        currentSpeaker = currentSpeaker === "Alex" ? "Sarah" : "Alex";
+    if (format === 'solo') {
+      if (h1Match && h1Match[1].length > 10) {
+        segments.push({ speaker: h1, text: cleanText(h1Match[1]) });
+      } else if (h2Match && h2Match[1].length > 10) {
+        segments.push({ speaker: h1, text: cleanText(h2Match[1]) }); // Map to single speaker
+      } else if (trimmed.length > 30) {
+        segments.push({ speaker: h1, text: cleanText(trimmed) });
+      }
+    } else {
+      if (h1Match && h1Match[1].length > 10) {
+        segments.push({ speaker: h1, text: cleanText(h1Match[1]) });
+        currentSpeaker = h2;
+      } else if (h2Match && h2Match[1].length > 10) {
+        segments.push({ speaker: h2, text: cleanText(h2Match[1]) });
+        currentSpeaker = h1;
+      } else if (trimmed.length > 30) {
+        const content = cleanText(trimmed);
+        if (content.length > 20) {
+          segments.push({ speaker: currentSpeaker, text: content });
+          currentSpeaker = currentSpeaker === h1 ? h2 : h1;
+        }
       }
     }
   }
 
   return { title: "Deep Dive Episode", segments };
+}
+
+function escapeRegex(s: string): string {
+  return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }
 
 
@@ -398,7 +471,8 @@ function parseAsConversation(text: string): PodcastScript {
 function createExpandedScript(
   content: string,
   keyTopics: string[],
-  existingScript?: PodcastScript
+  existingScript?: PodcastScript,
+  format: 'dialogue' | 'solo' = 'dialogue'
 ): PodcastScript {
   const segments: PodcastSegment[] = [];
   
@@ -409,6 +483,46 @@ function createExpandedScript(
   
   // Split content into meaningful chunks for discussion
   const contentChunks = splitIntoChunks(content, 500);
+
+  if (format === 'solo') {
+    // === SOLO FALLBACK ===
+    segments.push({
+      speaker: "Alex",
+      text: `Hello and welcome. Today we are diving into a comprehensive solo review on this key subject: ${title}. Let's break down the essential points systematically to make sure everything is clear.`
+    });
+    
+    for (let i = 0; i < Math.min(contentChunks.length, 12); i++) {
+      const chunk = contentChunks[i];
+      const chunkSummary = summarizeContent(chunk, 200);
+      segments.push({
+        speaker: "Alex",
+        text: `To understand this fully, let's look at this concept. ${chunkSummary} This forms the basis of what we need to appreciate in this section.`
+      });
+    }
+    
+    const topicSummary = keyTopics.slice(0, 3).join(", ");
+    if (topicSummary) {
+      segments.push({
+        speaker: "Alex",
+        text: `Specifically, when we analyze topics like ${topicSummary}, we see how these parts connect. It is important to reflect on these interactions during your study session.`
+      });
+    }
+    
+    segments.push({
+      speaker: "Alex",
+      text: `That concludes our deep dive for today. Take these key insights, review your notes, and keep studying. Until next time, stay curious and have a great day.`
+    });
+
+    // Calculate estimated duration
+    const totalWords = segments.reduce((sum, seg) => sum + seg.text.split(/\s+/).length, 0);
+    const estimatedDuration = Math.round((totalWords / 150) * 60);
+    
+    return {
+      title,
+      segments,
+      estimatedDuration,
+    };
+  }
   
   // === OPENING (4 exchanges) ===
   segments.push({

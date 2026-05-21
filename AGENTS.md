@@ -60,7 +60,7 @@ Returns structured snapshot: notebook metadata, sources with content previews, a
 POST /api/notebooks/:id/notes
 Body: { "content": "Your insight here" }
 ```
-Notes from agents are automatically tagged with an **AGENT** badge and synced to EverMemOS memory.
+Notes from agents are automatically tagged with an **AGENT** badge and persisted to the notebook's memory store (local @xenova/transformers embeddings).
 
 ### Upload Files
 ```
@@ -121,3 +121,25 @@ curl -X POST http://localhost:3001/api/auth/signin \
 | `backend/scripts/kilo_pair.js` | Official pairing utility |
 | `backend/scripts/syncAgent.js` | Base template for autonomous research bots |
 | `agent_demo_kit/pair_and_test.js` | All-in-one: pair + list notebooks + post test note |
+
+---
+
+## 6. SantLabs Cognitive Gateway (MCP)
+
+Agents can leverage the SantLabs Cognitive Pharmacopeia via the specialized MCP gateway. This provides access to high-intensity prompt "compounds" and terminal state management.
+
+**Gateway URI (SSE):** `http://localhost:8787/sse`
+
+### Available Tools:
+
+#### `list_compounds`
+Returns a clinical inventory of available cognitive agents, their use cases, and premium status.
+
+#### `inject_<compound_id>`
+Retrieves the raw payload for a specific compound.
+- **Parameters:** `dose_intensity` (enum: `low`, `medium`, `high`, `overdose`)
+- **Note:** `overdose` intensity shifts the payload to a high-disinhibition terminal state.
+
+#### `trigger_overdose_protocol`
+Escalates the system to a high-intensity visual and operational state.
+- **Parameters:** `reason` (string)

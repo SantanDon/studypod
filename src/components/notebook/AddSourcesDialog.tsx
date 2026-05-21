@@ -91,7 +91,7 @@ const AddSourcesDialog = ({
                       "Synthesizing knowledge into the Sovereign core"
                     ) : (
                       <>
-                        PDF, Markdown, TXT, or Audio. Or{" "}
+                        PDF, Markdown, EPUB, TXT, or Audio. Or{" "}
                         <button
                           className="text-white font-medium hover:underline decoration-white/30"
                           onClick={() =>
@@ -110,7 +110,7 @@ const AddSourcesDialog = ({
                   type="file"
                   multiple
                   className="hidden"
-                  accept=".pdf,.txt,.md,.mp3,.wav,.m4a"
+                  accept=".pdf,.txt,.md,.mp3,.wav,.m4a,.epub"
                   onChange={handleFileSelect}
                   disabled={isProcessingFiles}
                 />

@@ -3,7 +3,7 @@
  * Orchestrates content extraction from various sources
  */
 
-export { IExtractionService, ExtractedContent } from './IExtractionService';
+export type { IExtractionService, ExtractedContent } from './IExtractionService';
 export { ExtractionService } from './ExtractionService';
 
 // Create singleton instance

@@ -87,9 +87,9 @@ describe('EmailVerificationService', () => {
       
       await emailVerificationService.sendVerificationEmail(testEmail, token);
       
-      expect(consoleSpy).toHaveBeenCalledWith(expect.stringContaining('📧 Verification Email Sent'));
-      expect(consoleSpy).toHaveBeenCalledWith(expect.stringContaining(`To: ${testEmail}`));
-      expect(consoleSpy).toHaveBeenCalledWith(expect.stringContaining(`Token: ${token}`));
+      expect(consoleSpy).toHaveBeenCalledWith('📧 Verification Email Sent:');
+      expect(consoleSpy).toHaveBeenCalledWith('To:', testEmail);
+      expect(consoleSpy).toHaveBeenCalledWith('Token:', token);
       
       consoleSpy.mockRestore();
     });
@@ -262,7 +262,7 @@ describe('EmailVerificationService', () => {
       await emailVerificationService.resendVerificationEmail(testEmail);
       
       // Should log that email is already verified
-      expect(consoleSpy).toHaveBeenCalledWith(expect.stringContaining('already verified'));
+      expect(consoleSpy).toHaveBeenCalledWith('Email already verified:', testEmail);
       
       consoleSpy.mockRestore();
     });
@@ -273,7 +273,7 @@ describe('EmailVerificationService', () => {
       await emailVerificationService.resendVerificationEmail('non-existent@example.com');
       
       // Should log that user not found (but not reveal it)
-      expect(consoleSpy).toHaveBeenCalledWith(expect.stringContaining('User not found'));
+      expect(consoleSpy).toHaveBeenCalledWith('User not found for email:', 'non-existent@example.com');
       
       consoleSpy.mockRestore();
     });

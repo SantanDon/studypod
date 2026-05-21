@@ -7,23 +7,23 @@
 
 import { v4 as uuidv4 } from 'uuid';
 import { dbHelpers } from '../db/database.js';
+import { logger } from '../utils/logger.js';
 
 let pipeline = null;
 
 // Lazy-load the embedding pipeline
 async function getPipeline() {
-  if (!pipeline) {
-    console.log('[MemoryEngine] Booting @xenova/transformers pipeline (Local)...');
+    if (!pipeline) {
+    logger.info('[MemoryEngine] Booting @xenova/transformers pipeline (Local)...');
     try {
       const { pipeline: transformersPipeline, env } = await import('@xenova/transformers');
-      // Use /tmp for serverless environments (Vercel is read-only elsewhere)
       env.cacheDir = process.env.VERCEL ? '/tmp/transformers' : './.cache/transformers';
       pipeline = await transformersPipeline('feature-extraction', 'Xenova/all-MiniLM-L6-v2', {
-        quantized: true // Use INT8 quantization for speed on VPS/Vercel
+        quantized: true
       });
-      console.log('[MemoryEngine] Pipeline booted successfully.');
+      logger.info('[MemoryEngine] Pipeline booted successfully.');
     } catch (err) {
-      console.error('[MemoryEngine] Failed to boot pipeline:', err);
+      logger.error('[MemoryEngine] Failed to boot pipeline:', err);
       throw err;
     }
   }
@@ -55,7 +55,7 @@ export const MemoryService = {
    * @param {Object} metadata - Optional context components
    */
   async storeMemory(userId, notebookId, content, metadata = {}) {
-    console.log(`[MemoryEngine] Embedding and storing memory for user ${userId}...`);
+    logger.info(`Embedding and storing memory for user ${userId}...`);
     
     if (!content || typeof content !== 'string') return null;
 
@@ -72,10 +72,10 @@ export const MemoryService = {
         timestamp: new Date().toISOString()
       });
 
-      console.log(`[MemoryEngine] Memory stored successfully: ${id}`);
+      logger.info(`Memory stored successfully: ${id}`);
       return { id, content, metadata };
     } catch (error) {
-      console.error('[MemoryEngine] Error storing memory:', error);
+      logger.error('Error storing memory:', error);
       return null;
     }
   },
@@ -89,24 +89,27 @@ export const MemoryService = {
    * @param {string} query - The search query
    * @param {number} topK - Number of results to return
    */
-  async searchMemories(userId, notebookId, query, topK = 5) {
+  async searchMemories(userId, notebookId, query, topK = 5, options = {}) {
     if (!query) return [];
-    console.log(`[MemoryEngine] Semantic search for user ${userId} in notebook ${notebookId}: "${query}"`);
+    logger.debug(`Semantic search in notebook ${notebookId}: "${query.substring(0, 100)}..."`);
 
     try {
-      // Embed the query
       const extractor = await getPipeline();
       const output = await extractor(query, { pooling: 'mean', normalize: true });
       const queryEmbedding = Array.from(output.data);
 
-      // Fetch all memories for the notebook
-      // In production with thousands of memories, this should move to native Turso Vector Search
-      // For concept proof with typical notebook sizes (<50k chunks), JS loop is <5ms
-      const memories = await dbHelpers.getMemoriesByNotebook(notebookId);
-      
+      let memories = await dbHelpers.getMemoriesByNotebook(notebookId);
       if (!memories || memories.length === 0) return [];
 
-      // Calculate similarities in-memory
+      if (options.metadataFilter && typeof options.metadataFilter === 'object') {
+        memories = memories.filter(m => {
+          try {
+            const meta = JSON.parse(m.metadata || '{}');
+            return Object.entries(options.metadataFilter).every(([k, v]) => meta[k] === v);
+          } catch { return true; }
+        });
+      }
+
       const scoredMemories = memories.map(memory => {
         const memEmbedding = JSON.parse(memory.embedding);
         const score = cosineSimilarity(queryEmbedding, memEmbedding);
@@ -114,28 +117,31 @@ export const MemoryService = {
           id: memory.id,
           content: memory.content,
           metadata: memory.metadata ? JSON.parse(memory.metadata) : {},
-          created_at: memory.created_at,
+          createdAt: memory.createdAt || memory.created_at,
           score
         };
       });
 
-      // Sort by score descending and take topK
       scoredMemories.sort((a, b) => b.score - a.score);
       const results = scoredMemories.slice(0, topK);
+      const totalCount = scoredMemories.length;
 
-      console.log(`[MemoryEngine] Found ${results.length} relevant memories (Max score: ${results[0]?.score?.toFixed(3) || 0})`);
+      logger.debug(`Found ${results.length} relevant memories (Max score: ${results[0]?.score?.toFixed(3) || 0})`);
       
-      // Don't return the raw DB schema upstream, return just the useful data
-      return results.map(r => ({
-        id: r.id,
-        content: r.content,
-        metadata: r.metadata,
-        score: r.score
-      }));
+      return {
+        results: results.map(r => ({
+          id: r.id,
+          content: r.content,
+          metadata: r.metadata,
+          score: r.score
+        })),
+        totalCount,
+        topK
+      };
       
     } catch (error) {
-      console.error('[MemoryEngine] Error searching memories:', error);
-      return [];
+      logger.error('Error searching memories:', error);
+      return { results: [], totalCount: 0, topK };
     }
   }
 };

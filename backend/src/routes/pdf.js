@@ -1,6 +1,7 @@
 import express from 'express';
 import multer from 'multer';
 import { AppError } from '../middleware/errorHandler.js';
+import { logger } from '../utils/logger.js';
 
 // STABILITY PATCH v7: pdf-parse PURGED. 
 // This library causes fatal "DOMMatrix is not defined" errors in Node/Vercel.
@@ -23,10 +24,10 @@ router.post('/process-pdf', upload.single('file'), async (req, res, next) => {
   try {
     if (!req.file) throw new AppError(400, 'NO_FILE', 'No file uploaded');
 
-    console.log(`[VaultVision] Processing PDF: ${req.file.originalname} (${req.file.size} bytes)`);
+    logger.info(`[VaultVision] Processing PDF: ${req.file.originalname} (${req.file.size} bytes)`);
 
     // ── Step 1: Multimodal Extraction via Gemini 1.5 Flash ───────────────────
-    console.log(`[VaultVision] Requesting Gemini Multimodal Extraction for ${req.file.originalname}`);
+    logger.info(`[VaultVision] Requesting Gemini Multimodal Extraction for ${req.file.originalname}`);
     
     const prompt = [
       {
@@ -45,7 +46,7 @@ router.post('/process-pdf', upload.single('file'), async (req, res, next) => {
         "You are a Sovereign Research Scribe. Your task is to transcribe documents with perfect fidelity into markdown format."
       );
 
-      console.log(`[VaultVision] Successfully extracted ${result.text?.length || 0} characters using Gemini.`);
+      logger.info(`[VaultVision] Successfully extracted ${result.text?.length || 0} characters using Gemini.`);
 
       res.json({
         success: true,
@@ -57,7 +58,7 @@ router.post('/process-pdf', upload.single('file'), async (req, res, next) => {
         }
       });
     } catch (geminiError) {
-      console.error('[VaultVision] Gemini Pool Failure:', geminiError.message);
+      logger.error('[VaultVision] Gemini Pool Failure:', geminiError.message);
       // Fallback: Return success false with a clear reason so the frontend can handle local extraction gracefully
       return res.status(200).json({
         success: false,
@@ -68,7 +69,7 @@ router.post('/process-pdf', upload.single('file'), async (req, res, next) => {
     }
 
   } catch (error) {
-    console.error('[VaultVision] PDF Extract Route Error:', error);
+    logger.error('[VaultVision] PDF Extract Route Error:', error);
     next(error instanceof AppError ? error : new AppError(500, 'PDF_EXTRACTION_FAILED', error.message));
   }
 });

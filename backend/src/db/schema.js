@@ -121,9 +121,88 @@ export const tasks = sqliteTable('tasks', {
   notebookId: text('notebook_id').notNull().references(() => notebooks.id, { onDelete: 'cascade' }),
   sourceId: text('source_id').references(() => sources.id, { onDelete: 'set null' }),
   content: text('content').notNull(),
+  assignee: text('assignee').default('human'),
+  result: text('result'),
   status: text('status', { enum: ['pending', 'completed'] }).default('pending'),
   priority: text('priority', { enum: ['low', 'medium', 'high'] }).default('medium'),
   dueDate: integer('due_date', { mode: 'timestamp' }),
+  completedAt: integer('completed_at', { mode: 'timestamp' }),
   createdAt: integer('created_at', { mode: 'timestamp' }).$defaultFn(() => new Date()),
   updatedAt: integer('updated_at', { mode: 'timestamp' }).$defaultFn(() => new Date()),
+});
+
+export const activityLog = sqliteTable('activity_log', {
+  id: text('id').primaryKey(),
+  notebookId: text('notebook_id').notNull().references(() => notebooks.id, { onDelete: 'cascade' }),
+  userId: text('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
+  actor: text('actor').notNull(), // 'human' or agent display name / id
+  actionType: text('action_type').notNull(),
+  contentPreview: text('content_preview'),
+  createdAt: integer('created_at', { mode: 'timestamp' }).$defaultFn(() => new Date()),
+});
+
+export const scratchpad = sqliteTable('scratchpad', {
+  id: text('id').primaryKey(),
+  notebookId: text('notebook_id').notNull().references(() => notebooks.id, { onDelete: 'cascade' }),
+  userId: text('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
+  content: text('content').notNull(),
+  ttlExpiresAt: integer('ttl_expires_at', { mode: 'timestamp' }),
+  createdAt: integer('created_at', { mode: 'timestamp' }).$defaultFn(() => new Date()),
+});
+
+export const webhooks = sqliteTable('webhooks', {
+  id: text('id').primaryKey(),
+  notebookId: text('notebook_id').notNull().references(() => notebooks.id, { onDelete: 'cascade' }),
+  userId: text('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
+  url: text('url').notNull(),
+  eventsJson: text('events_json').notNull(),
+  createdAt: integer('created_at', { mode: 'timestamp' }).$defaultFn(() => new Date()),
+});
+
+export const agentMissions = sqliteTable('agent_missions', {
+  id: text('id').primaryKey(),
+  userId: text('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
+  notebookId: text('notebook_id').notNull().references(() => notebooks.id, { onDelete: 'cascade' }),
+  goal: text('goal').notNull(),
+  cron: text('cron'),
+  maxNotes: integer('max_notes').default(5),
+  status: text('status', { enum: ['active', 'paused', 'completed', 'failed'] }).default('active'),
+  lastRunAt: integer('last_run_at', { mode: 'timestamp' }),
+  nextRunAt: integer('next_run_at', { mode: 'timestamp' }),
+  result: text('result'),
+  createdAt: integer('created_at', { mode: 'timestamp' }).$defaultFn(() => new Date()),
+  updatedAt: integer('updated_at', { mode: 'timestamp' }).$defaultFn(() => new Date()),
+});
+
+export const agentMessages = sqliteTable('agent_messages', {
+  id: text('id').primaryKey(),
+  notebookId: text('notebook_id').notNull().references(() => notebooks.id, { onDelete: 'cascade' }),
+  fromAgentId: text('from_agent_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
+  toAgentId: text('to_agent_id').references(() => users.id, { onDelete: 'set null' }),
+  messageType: text('message_type').default('thought'),
+  subject: text('subject'),
+  content: text('content').notNull(),
+  read: integer('read', { mode: 'boolean' }).default(false),
+  createdAt: integer('created_at', { mode: 'timestamp' }).$defaultFn(() => new Date()),
+});
+
+export const apiKeys = sqliteTable('api_keys', {
+  id: text('id').primaryKey(),
+  userId: text('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
+  keyHash: text('key_hash').notNull().unique(),
+  prefix: text('prefix').notNull(),
+  label: text('label').default('My Agent Key'),
+  scopes: text('scopes').default('["notebooks:read","notes:create","chat:all"]'),
+  notebookIds: text('notebook_ids'),
+  expiresAt: integer('expires_at', { mode: 'timestamp' }),
+  rateLimit: integer('rate_limit').default(0),
+  lastUsedAt: integer('last_used_at', { mode: 'timestamp' }),
+  createdAt: integer('created_at', { mode: 'timestamp' }).$defaultFn(() => new Date()),
+});
+
+export const pairingCodes = sqliteTable('pairing_codes', {
+  code: text('code').primaryKey(),
+  userId: text('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
+  expiresAt: integer('expires_at', { mode: 'timestamp' }).notNull(),
+  createdAt: integer('created_at', { mode: 'timestamp' }).$defaultFn(() => new Date()),
 });

@@ -1,4 +1,4 @@
-﻿/**
+/**
  * Enhanced PDF Processing Utilities
  *
  * Comprehensive solution to address persistent PDF extraction issues
@@ -129,7 +129,7 @@ async function tryExtractWithWorker(
       cMapPacked: true,
       verbosity,
       useSystemFont: true // Try to use system fonts for better text extraction
-    });
+    } as any);
 
     const pdf = await loadingTask.promise;
 
@@ -144,8 +144,8 @@ async function tryExtractWithWorker(
 
         if (textContent && textContent.items && textContent.items.length > 0) {
           const pageText = textContent.items
-            .filter((item: PDFTextItem) => item && "str" in item && typeof item.str === "string")
-            .map((item: { str: string }) => item.str)
+            .filter((item: any) => item && "str" in item && typeof item.str === "string")
+            .map((item: any) => item.str)
             .join(" ")
             .trim();
 
@@ -209,7 +209,7 @@ async function tryExtractWithoutWorker(
       cMapPacked: true,
       verbosity,
       disableWorker: true
-    });
+    } as any);
 
     const pdf = await loadingTask.promise;
 
@@ -224,8 +224,8 @@ async function tryExtractWithoutWorker(
 
         if (textContent && textContent.items && textContent.items.length > 0) {
           const pageText = textContent.items
-            .filter((item: PDFTextItem) => item && "str" in item && typeof item.str === "string")
-            .map((item: { str: string }) => item.str)
+            .filter((item: any) => item && "str" in item && typeof item.str === "string")
+            .map((item: any) => item.str)
             .join(" ")
             .trim();
 
@@ -285,7 +285,7 @@ async function tryExtractWithAlternativeParams(
       disableWorker: true,
       disableRange: true,
       disableStream: true
-    });
+    } as any);
 
     const pdf = await loadingTask.promise;
 
@@ -300,8 +300,8 @@ async function tryExtractWithAlternativeParams(
 
         if (textContent && textContent.items && textContent.items.length > 0) {
           const pageText = textContent.items
-            .filter((item: PDFTextItem) => item && "str" in item && typeof item.str === "string")
-            .map((item: { str: string }) => item.str)
+            .filter((item: any) => item && "str" in item && typeof item.str === "string")
+            .map((item: any) => item.str)
             .join(" ")
             .trim();
 
@@ -361,7 +361,7 @@ async function tryExtractWithPageRendering(
       cMapPacked: true,
       verbosity,
       disableWorker: true
-    });
+    } as any);
 
     const pdf = await loadingTask.promise;
 
@@ -373,12 +373,12 @@ async function tryExtractWithPageRendering(
       try {
         const page = await pdf.getPage(i);
         // Try to extract text content one more time with different approach
-        const textContent = await page.getTextContent({ normalizeWhitespace: true });
+        const textContent = await page.getTextContent({ normalizeWhitespace: true } as any);
 
         if (textContent && textContent.items && textContent.items.length > 0) {
           const pageText = textContent.items
-            .filter((item: PDFTextItem) => item && "str" in item && typeof item.str === "string")
-            .map((item: { str: string }) => item.str)
+            .filter((item: any) => item && "str" in item && typeof item.str === "string")
+            .map((item: any) => item.str)
             .join(" ")
             .trim();
 

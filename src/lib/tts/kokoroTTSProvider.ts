@@ -41,16 +41,17 @@ export const KOKORO_VOICES = {
 
 export type KokoroVoiceId = keyof typeof KOKORO_VOICES;
 
-// Default voices for podcast hosts (Alex = male, Sarah = female)
-export const DEFAULT_HOST1_VOICE: KokoroVoiceId = 'am_michael'; // Alex - warm, authoritative male voice
-export const DEFAULT_HOST2_VOICE: KokoroVoiceId = 'af_bella';   // Sarah - friendly, engaging female voice
+// Default voices for podcast hosts — tuned for natural conversational delivery
+export const DEFAULT_HOST1_VOICE: KokoroVoiceId = 'am_onyx'; // Warmer, more natural male voice
+export const DEFAULT_HOST2_VOICE: KokoroVoiceId = 'af_nova'; // Clearer, more natural female voice
 
-// Voice mapping for host names
-export const HOST_VOICE_MAP: Record<string, KokoroVoiceId> = {
-  'Alex': 'am_michael',
-  'Sarah': 'af_bella',
-  'Host 2': 'af_bella',
-};
+/**
+ * HOST_VOICE_MAP — only used as a LAST RESORT fallback.
+ * The streaming pipeline (streamingTTSGenerator) reads from the user's
+ * PodcastAudioConfig first via speakerVoiceMap.  This map exists solely
+ * for the legacy batch path (podcastAudioGenerator).
+ */
+export const HOST_VOICE_MAP: Record<string, KokoroVoiceId> = {};
 
 interface KokoroTtsInstance {
   generate(text: string, options: { voice: KokoroVoiceId; speed: number }): Promise<{

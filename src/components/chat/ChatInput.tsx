@@ -1,7 +1,8 @@
-import React from 'react';
+import React, { useRef } from 'react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Carousel, CarouselContent, CarouselItem, CarouselNext, CarouselPrevious } from '@/components/ui/carousel';
+import { useToast } from '@/hooks/use-toast';
 
 /**
  * ChatInput Component
@@ -46,9 +47,42 @@ const ChatInput: React.FC<ChatInputProps> = ({
   onExampleQuestionClick,
   placeholder = "Start typing...",
 }) => {
+  const { toast } = useToast();
+  const inputRef = useRef<HTMLInputElement>(null);
+
   const handleKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
     if (e.key === 'Enter' && !disabled && !isLoading && message.trim()) {
       onSend();
+    }
+  };
+
+  const handlePaste = (e: React.ClipboardEvent<HTMLInputElement>) => {
+    const items = e.clipboardData.items;
+    for (let i = 0; i < items.length; i++) {
+      if (items[i].type.startsWith('image/') || items[i].type.startsWith('video/') || items[i].type.startsWith('audio/')) {
+        e.preventDefault();
+        toast({
+          title: "Attachments not supported",
+          description: "This AI model processes text only. Images, video, and audio cannot be read.",
+          variant: "destructive",
+        });
+        return;
+      }
+    }
+  };
+
+  const handleDrop = (e: React.DragEvent<HTMLInputElement>) => {
+    const files = e.dataTransfer.files;
+    for (let i = 0; i < files.length; i++) {
+      if (files[i].type.startsWith('image/') || files[i].type.startsWith('video/') || files[i].type.startsWith('audio/')) {
+        e.preventDefault();
+        toast({
+          title: "Attachments not supported",
+          description: "This AI model processes text only. Images, video, and audio cannot be read.",
+          variant: "destructive",
+        });
+        return;
+      }
     }
   };
 
@@ -60,10 +94,14 @@ const ChatInput: React.FC<ChatInputProps> = ({
         <div className="flex space-x-4">
           <div className="flex-1 relative">
             <Input
+              ref={inputRef}
               placeholder={placeholder}
               value={message}
               onChange={(e) => onMessageChange(e.target.value)}
               onKeyDown={handleKeyDown}
+              onPaste={handlePaste}
+              onDrop={handleDrop}
+              onDragOver={(e) => e.preventDefault()}
               className="pr-12"
               disabled={disabled || isLoading}
             />

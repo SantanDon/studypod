@@ -24,9 +24,11 @@ import {
   CallToolRequestSchema,
   ListToolsRequestSchema,
 } from '@modelcontextprotocol/sdk/types.js';
-import { readFileSync } from 'fs';
+import { readFileSync, existsSync } from 'fs';
 import { join, dirname } from 'path';
 import { fileURLToPath } from 'url';
+import express from 'express';
+import http from 'http';
 
 // Load .env
 const __dir = dirname(fileURLToPath(import.meta.url));
@@ -244,6 +246,43 @@ const TOOLS = [
       },
       required: ['code']
     }
+  },
+  {
+    name: 'notebook_context',
+    description: 'Get the full AI-optimized context for a notebook (sources, notes, metadata). Agents should call this when first loading a notebook.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        notebook_id: { type: 'string' }
+      },
+      required: ['notebook_id']
+    }
+  },
+  {
+    name: 'chat',
+    description: 'Send a message to the notebook AI and get a grounded response based on notebook sources.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        notebook_id: { type: 'string' },
+        message: { type: 'string', description: 'Your question or message' },
+        save_as_note: { type: 'boolean', description: 'Save the Q&A as a persistent note (default: false)' }
+      },
+      required: ['notebook_id', 'message']
+    }
+  },
+  {
+    name: 'memory_search',
+    description: 'Search the notebook memory using semantic similarity. Finds relevant context from past research.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        notebook_id: { type: 'string' },
+        query: { type: 'string', description: 'The search query' },
+        limit: { type: 'number', description: 'Max results (default: 5)' }
+      },
+      required: ['notebook_id', 'query']
+    }
   }
 ];
 
@@ -256,100 +295,171 @@ const server = new Server(
 
 server.setRequestHandler(ListToolsRequestSchema, async () => ({ tools: TOOLS }));
 
-server.setRequestHandler(CallToolRequestSchema, async (req) => {
-  const { name, arguments: args } = req.params;
-
-  switch (name) {
-    case 'login': {
-      const res = await fetch(`${API_URL}/api/auth/signin`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ email: args.email, password: args.password })
-      });
-      const data = await res.json();
-      if (data.accessToken) {
-        sessionToken = data.accessToken;
-        refreshToken = data.refreshToken || '';
-        return { content: text({ success: true, user: data.user, message: 'Logged in. You can now use generate_api_key for permanent access.' }) };
+async function handleToolCall({ params: { name, arguments: args } }) {
+  try {
+    switch (name) {
+      case 'login': {
+        const res = await fetch(`${API_URL}/api/auth/signin`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ email: args.email, password: args.password })
+        });
+        const data = await res.json();
+        if (data.accessToken) {
+          sessionToken = data.accessToken;
+          refreshToken = data.refreshToken || '';
+          return { content: text({ success: true, user: data.user, message: 'Logged in. You can now use generate_api_key for permanent access.' }) };
+        }
+        return { content: text({ error: data.error || 'Login failed' }) };
       }
-      return { content: text({ error: data.error || 'Login failed' }) };
-    }
 
-    case 'whoami':
-      return { content: text(await api('/api/user/me')) };
+      case 'whoami':
+        return { content: text(await api('/api/user/me')) };
 
-    case 'generate_api_key': {
-      const res = await api('/api/auth/agent-key', {
-        method: 'POST',
-        body: { label: args.label || 'CLI Agent Key' }
-      });
-      if (res.key) {
-        sessionToken = res.key;
-        return { content: text({ ...res, tip: 'Add this to mcp-server/.env as STUDYPODLM_API_KEY to persist across sessions.' }) };
+      case 'generate_api_key': {
+        const res = await api('/api/auth/agent-key', {
+          method: 'POST',
+          body: { label: args.label || 'CLI Agent Key' }
+        });
+        if (res.key) {
+          sessionToken = res.key;
+          return { content: text({ ...res, tip: 'Add this to mcp-server/.env as STUDYPODLM_API_KEY to persist across sessions.' }) };
+        }
+        return { content: text(res) };
       }
-      return { content: text(res) };
-    }
 
-    case 'list_api_keys':
-      return { content: text(await api('/api/auth/agent-key')) };
+      case 'list_api_keys':
+        return { content: text(await api('/api/auth/agent-key')) };
 
-    case 'revoke_api_key':
-      return { content: text(await api(`/api/auth/agent-key/${args.key_id}`, { method: 'DELETE' })) };
+      case 'revoke_api_key':
+        return { content: text(await api(`/api/auth/agent-key/${args.key_id}`, { method: 'DELETE' })) };
 
-    case 'list_notebooks':
-      return { content: text(await api('/api/notebooks')) };
+      case 'list_notebooks':
+        return { content: text(await api('/api/notebooks')) };
 
-    case 'get_notebook':
-      return { content: text(await api(`/api/notebooks/${args.notebook_id}`)) };
+      case 'get_notebook':
+        return { content: text(await api(`/api/notebooks/${args.notebook_id}`)) };
 
-    case 'create_notebook':
-      return { content: text(await api('/api/notebooks', { method: 'POST', body: { title: args.title, description: args.description } })) };
+      case 'create_notebook':
+        return { content: text(await api('/api/notebooks', { method: 'POST', body: { title: args.title, description: args.description } })) };
 
-    case 'list_sources':
-      return { content: text(await api(`/api/notebooks/${args.notebook_id}/sources`)) };
+      case 'list_sources':
+        return { content: text(await api(`/api/notebooks/${args.notebook_id}/sources`)) };
 
-    case 'list_notes':
-      return { content: text(await api(`/api/notebooks/${args.notebook_id}/notes`)) };
+      case 'list_notes':
+        return { content: text(await api(`/api/notebooks/${args.notebook_id}/notes`)) };
 
-    case 'get_note':
-      return { content: text(await api(`/api/notebooks/${args.notebook_id}/notes/${args.note_id}`)) };
+      case 'get_note':
+        return { content: text(await api(`/api/notebooks/${args.notebook_id}/notes/${args.note_id}`)) };
 
-    case 'create_note':
-      return { content: text(await api(`/api/notebooks/${args.notebook_id}/notes`, { method: 'POST', body: { content: args.content } })) };
+      case 'create_note':
+        return { content: text(await api(`/api/notebooks/${args.notebook_id}/notes`, { method: 'POST', body: { content: args.content } })) };
 
-    case 'update_note':
-      return { content: text(await api(`/api/notebooks/${args.notebook_id}/notes/${args.note_id}`, { method: 'PUT', body: { content: args.content } })) };
+      case 'update_note':
+        return { content: text(await api(`/api/notebooks/${args.notebook_id}/notes/${args.note_id}`, { method: 'PUT', body: { content: args.content } })) };
 
-    case 'delete_note':
-      return { content: text(await api(`/api/notebooks/${args.notebook_id}/notes/${args.note_id}`, { method: 'DELETE' })) };
+      case 'delete_note':
+        return { content: text(await api(`/api/notebooks/${args.notebook_id}/notes/${args.note_id}`, { method: 'DELETE' })) };
 
-    case 'list_chat_history':
-      return { content: text(await api(`/api/notebooks/${args.notebook_id}/messages`)) };
+      case 'list_chat_history':
+        return { content: text(await api(`/api/notebooks/${args.notebook_id}/messages`)) };
 
-    case 'pair': {
-      const res = await fetch(`${API_URL}/api/auth/pair/complete`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ code: args.code, label: args.label || 'MCP Agent' })
-      });
-      const data = await res.json();
-      if (data.key) {
-        sessionToken = data.key;
-        return { 
-          content: text({ 
-            success: true, 
-            key: data.key, 
-            message: 'Pairing successful! This key has been set for the current session. To persist it, update your environment variables with STUDYPODLM_API_KEY.' 
-          }) 
-        };
+      case 'pair': {
+        const res = await fetch(`${API_URL}/api/auth/pair/complete`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ code: args.code, label: args.label || 'MCP Agent' })
+        });
+        const data = await res.json();
+        if (data.key) {
+          sessionToken = data.key;
+          return { 
+            content: text({ 
+              success: true, 
+              key: data.key, 
+              message: 'Pairing successful! This key has been set for the current session. To persist it, update your environment variables with STUDYPODLM_API_KEY.' 
+            }) 
+          };
+        }
+        return { content: text({ error: data.error || 'Pairing failed' }) };
       }
-      return { content: text({ error: data.error || 'Pairing failed' }) };
-    }
 
-    default:
-      return { content: [{ type: 'text', text: `Unknown tool: ${name}` }] };
+      case 'notebook_context':
+        return { content: text(await api(`/api/notebooks/${args.notebook_id}/context`)) };
+
+      case 'chat': {
+        const res = await api(`/api/notebooks/${args.notebook_id}/chat`, {
+          method: 'POST',
+          body: { message: args.message, saveAsNote: args.save_as_note || false }
+        });
+        return { content: text(res) };
+      }
+
+      case 'memory_search': {
+        const res = await api(`/api/notebooks/${args.notebook_id}/memory/search`, {
+          method: 'POST',
+          body: { query: args.query, limit: args.limit || 5 }
+        });
+        return { content: text(res) };
+      }
+
+      default:
+        return { content: [{ type: 'text', text: `Unknown tool: ${name}` }] };
+    }
+  } catch (err) {
+    return { content: [{ type: 'text', text: JSON.stringify({ error: `Tool execution failed: ${err.message}` }, null, 2) }] };
   }
+}
+
+server.setRequestHandler(CallToolRequestSchema, async (req) => {
+  return handleToolCall(req);
 });
 
-const transport = new StdioServerTransport();
-await server.connect(transport);
+// ─── SSE Transport + REST Server ──────────────────────────────
+
+const SSE_MODE = process.argv.includes('--sse') || process.env.MCP_SSE === '1';
+const SSE_PORT = parseInt(process.env.MCP_SSE_PORT || '8787', 10);
+
+if (SSE_MODE) {
+  const sseApp = express();
+  const sseServer = http.createServer(sseApp);
+  let sseResponse = null;
+
+  sseApp.get('/sse', (req, res) => {
+    res.writeHead(200, {
+      'Content-Type': 'text/event-stream',
+      'Cache-Control': 'no-cache',
+      'Connection': 'keep-alive',
+      'Access-Control-Allow-Origin': '*'
+    });
+    res.write(`data: ${JSON.stringify({ type: 'connected', server: 'studypodlm-mcp', version: '2.0.0' })}\n\n`);
+    sseResponse = res;
+
+    req.on('close', () => { sseResponse = null; });
+  });
+
+  sseApp.post('/rpc', express.json(), async (req, res) => {
+    try {
+      const { method, params } = req.body;
+      if (method === 'tools/list') {
+        return res.json({ tools: TOOLS });
+      }
+      if (method === 'tools/call') {
+        const fakeReq = { params: { name: params.name, arguments: params.arguments } };
+        const result = await handleToolCall(fakeReq);
+        return res.json(result);
+      }
+      res.status(400).json({ error: `Unknown method: ${method}` });
+    } catch (err) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  sseServer.listen(SSE_PORT, () => {
+    console.log(`[MCP SSE] Server listening on http://localhost:${SSE_PORT}/sse`);
+    console.log(`[MCP RPC]  POST http://localhost:${SSE_PORT}/rpc`);
+  });
+} else {
+  const transport = new StdioServerTransport();
+  await server.connect(transport);
+}

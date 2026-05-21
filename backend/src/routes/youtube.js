@@ -4,8 +4,24 @@ import { videoKeyPool } from '../services/videoKeyPool.js';
 import { getDatabase, dbHelpers } from '../db/database.js';
 import { users } from '../db/schema.js';
 import { eq, sql } from 'drizzle-orm';
+import { logger } from '../utils/logger.js';
 
 const router = express.Router();
+const YT_FETCH_TIMEOUT = 15000;
+
+function isPlaceholderKey(key) {
+  return !key || key.includes('Placeholder') || key.startsWith('AIzaSyA88_') || key.startsWith('AIzaSyB99_') || key.length < 20;
+}
+
+async function fetchWithTimeout(url, options, timeoutMs = YT_FETCH_TIMEOUT) {
+  const controller = new AbortController();
+  const id = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    return await fetch(url, { ...options, signal: controller.signal });
+  } finally {
+    clearTimeout(id);
+  }
+}
 
 // ─── HTML Entity Decoder ─────────────────────────────────────────────────────
 
@@ -28,40 +44,66 @@ function decodeHtmlEntities(text) {
 
 function parseXmlCaptions(xmlText) {
   const result = [];
-  const textMatches = xmlText.match(/<text[^>]*>[\s\S]*?<\/text>/g);
-  if (textMatches && textMatches.length > 0) {
-    for (let idx = 0; idx < textMatches.length; idx++) {
-      const match = textMatches[idx];
-      const text = decodeHtmlEntities(match.replace(/<[^>]+>/g, ''));
-      const startMatch = match.match(/start="([\d.]+)"/);
-      const durMatch = match.match(/dur="([\d.]+)"/);
-      if (text.length > 0) {
-        result.push({
-          text,
-          offset: startMatch ? parseFloat(startMatch[1]) * 1000 : idx * 3000,
-          duration: durMatch ? parseFloat(durMatch[1]) * 1000 : 3000,
-        });
-      }
+  if (!xmlText) return result;
+  
+  // Try <text> tags first (srv1/srv2/srv3 formats)
+  const textRegex = /<text\s+([^>]*?)>([\s\S]*?)<\/text>/gi;
+  let match;
+  while ((match = textRegex.exec(xmlText)) !== null) {
+    const attrs = match[1];
+    const content = match[2];
+    
+    // Strip nested tags, CDATA, decode entities
+    const text = decodeHtmlEntities(content.replace(/<!\[CDATA\[([\s\S]*?)\]\]>/g, '$1').replace(/<[^>]+>/g, '')).trim();
+    
+    const startMatch = attrs.match(/start="([\d.]+)"/);
+    const durMatch = attrs.match(/dur="([\d.]+)"/);
+    
+    if (text.length > 0) {
+      result.push({
+        text,
+        offset: startMatch ? parseFloat(startMatch[1]) * 1000 : result.length * 3000,
+        duration: durMatch ? parseFloat(durMatch[1]) * 1000 : 3000,
+      });
     }
-    return result;
+  }
+  
+  if (result.length > 0) return result;
+
+  // Try <p> tags next (timed text/srv3 formats)
+  const pRegex = /<p\s+([^>]*?)>([\s\S]*?)<\/p>/gi;
+  while ((match = pRegex.exec(xmlText)) !== null) {
+    const attrs = match[1];
+    const content = match[2];
+    
+    const text = decodeHtmlEntities(content.replace(/<!\[CDATA\[([\s\S]*?)\]\]>/g, '$1').replace(/<[^>]+>/g, '')).trim();
+    
+    const tMatch = attrs.match(/t="([\d.]+)"/);
+    const dMatch = attrs.match(/d="([\d.]+)"/);
+    
+    if (text.length > 0) {
+      result.push({
+        text,
+        offset: tMatch ? parseFloat(tMatch[1]) : result.length * 3000,
+        duration: dMatch ? parseFloat(dMatch[1]) : 3000,
+      });
+    }
   }
 
-  const pMatches = xmlText.match(/<p[^>]*>[\s\S]*?<\/p>/g);
-  if (pMatches && pMatches.length > 0) {
-    for (let idx = 0; idx < pMatches.length; idx++) {
-      const match = pMatches[idx];
-      const text = decodeHtmlEntities(match.replace(/<[^>]+>/g, ''));
-      const tMatch = match.match(/t="([\d.]+)"/);
-      const dMatch = match.match(/d="([\d.]+)"/);
-      if (text.length > 0) {
-        result.push({
-          text,
-          offset: tMatch ? parseFloat(tMatch[1]) : idx * 3000,
-          duration: dMatch ? parseFloat(dMatch[1]) : 3000,
-        });
-      }
+  if (result.length > 0) return result;
+  
+  // Last resort: simple regex match of anything inside tags if the formats above didn't match
+  const fallbackTextRegex = /<text[^>]*>([\s\S]*?)<\/text>/gi;
+  let fallbackMatch;
+  while ((fallbackMatch = fallbackTextRegex.exec(xmlText)) !== null) {
+    const text = decodeHtmlEntities(fallbackMatch[1].replace(/<[^>]+>/g, '')).trim();
+    if (text.length > 0) {
+      result.push({
+        text,
+        offset: result.length * 3000,
+        duration: 3000
+      });
     }
-    return result;
   }
 
   return result;
@@ -96,20 +138,50 @@ function formatTimestamp(seconds) {
   return `${m}:${String(s).padStart(2, '0')}`;
 }
 
+function extractPotentialSpeakers(title, author) {
+  const speakers = new Set();
+  
+  if (author) {
+    speakers.add(author.trim());
+  }
+
+  const titleClean = title || '';
+
+  // Extract from title patterns like "with Guest Name", "feat. Guest Name", "featuring Guest Name", "w/ Guest Name"
+  const interviewMatch = titleClean.match(/(?:interview\s+with|featuring|feat\.?|w\/)\s+([A-Z][a-zA-Z]+(?:\s+[A-Z][a-zA-Z]+)+)/i);
+  if (interviewMatch && interviewMatch[1]) {
+    speakers.add(interviewMatch[1].trim());
+  }
+
+  // Match "[Name] & [Name]" or "[Name] and [Name]"
+  const partnerMatch = titleClean.match(/([A-Z][a-zA-Z]+(?:\s+[A-Z][a-zA-Z]+)+)\s*(?:&|and)\s*([A-Z][a-zA-Z]+(?:\s+[A-Z][a-zA-Z]+)+)/i);
+  if (partnerMatch) {
+    if (partnerMatch[1]) speakers.add(partnerMatch[1].trim());
+    if (partnerMatch[2]) speakers.add(partnerMatch[2].trim());
+  }
+
+  return Array.from(speakers).filter(Boolean).join(', ');
+}
+
 function buildStructuredContent({ transcript, metadata, chapters }) {
   const { title, description, author, keywords } = metadata;
   const keywordStr = keywords?.length > 0 ? keywords.slice(0, 10).join(', ') : 'None';
   const descStr = description?.trim() 
-    ? description.split('\n').slice(0, 5).join(' ').slice(0, 300) + (description.length > 300 ? '…' : '')
+    ? (description.length > 5000 ? description.slice(0, 5000) + '…' : description)
     : 'No description available.';
 
+  const speakerStr = extractPotentialSpeakers(title, author) || author || 'Unknown Speaker';
+
   let header = `# ${title}
-**Channel:** ${author}
+**Channel/Author:** ${author}
+**Speakers:** ${speakerStr}
 **Keywords:** ${keywordStr}
-**Description:** ${descStr}
+
+## Description
+${descStr}
 `;
 
-  if (transcript.length === 0) return header + '\n> No transcript available. Content inferred from metadata only.';
+  if (transcript.length === 0) return header + '\n\n> No transcript available. Content inferred from metadata only.';
 
   const useChapters = chapters.length >= 2;
   if (useChapters) header += `\n**Chapters:** ${chapters.map(c => `${c.timestamp} ${c.title}`).join(' | ')}\n`;
@@ -122,8 +194,8 @@ function buildStructuredContent({ transcript, metadata, chapters }) {
       const items = transcript.filter(t => t.offset >= chapterStart && t.offset < chapterEnd);
       if (items.length > 0) {
         sections.push({
-          heading: `[${chapters[ci].timestamp}] ${chapters[ci].title}`,
-          text: items.map(t => t.text).join(' ').trim()
+          heading: `[${chapters[ci].timestamp}] ${chapters[ci].title} (Speaker: ${speakerStr})`,
+          text: `[Video: ${title} | Speaker: ${speakerStr}]\n` + items.map(t => t.text).join(' ').trim()
         });
       }
     }
@@ -137,7 +209,10 @@ function buildStructuredContent({ transcript, metadata, chapters }) {
       const items = transcript.filter(t => t.offset >= segStart && t.offset < segEnd);
       if (items.length > 0) {
         const ts = formatTimestamp(segStart / 1000);
-        sections.push({ heading: `[${ts}]`, text: items.map(t => t.text).join(' ').trim() });
+        sections.push({
+          heading: `[${ts}] (Speaker: ${speakerStr})`,
+          text: `[Video: ${title} | Speaker: ${speakerStr}]\n` + items.map(t => t.text).join(' ').trim()
+        });
       }
     }
   }
@@ -148,10 +223,269 @@ function buildStructuredContent({ transcript, metadata, chapters }) {
 
 // ─── Route ───────────────────────────────────────────────────────────────────
 
+async function fetchTranscriptLibrary(videoId) {
+  try {
+    const { YoutubeTranscript } = await import('@danielxceron/youtube-transcript');
+    const items = await YoutubeTranscript.fetchTranscript(videoId);
+    if (items && items.length > 0) {
+      return items.map(item => ({
+        text: item.text,
+        offset: item.offset || 0,
+        duration: item.duration || 3000
+      }));
+    }
+  } catch (e) {
+    logger.warn(`[YouTube] Library fallback failed: ${e.message}`);
+  }
+  return null;
+}
+
+async function extractWithRetry(videoId, maxAttempts = 3) {
+  let lastError = null;
+  const mobileUA = 'Mozilla/5.0 (iPhone; CPU iPhone OS 17_4 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.4 Mobile/15E148 Safari/604.1';
+  const url = `https://www.youtube.com/watch?v=${videoId}`;
+
+  // Strategy 1: Direct InnerTube MWEB Player API request (no watch page, zero 429 risk)
+  try {
+    logger.info(`[YouTube] Direct InnerTube MWEB player API fetch for video ${videoId}`);
+    const staticApiKey = 'AIzaSyAO_FJ2SlqU8Q4STEHLGCilw_Y9_11qcW8';
+    const staticClientVersion = '2.20260518.01.00';
+    
+    const playerResponse = await fetchWithTimeout(`https://www.youtube.com/youtubei/v1/player?key=${staticApiKey}&prettyPrint=false`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'User-Agent': mobileUA,
+      },
+      body: JSON.stringify({
+        context: {
+          client: {
+            clientName: 'MWEB',
+            clientVersion: staticClientVersion,
+            hl: 'en',
+            gl: 'US'
+          }
+        },
+        videoId,
+        playbackContext: { contentPlaybackContext: { signatureTimestamp: Math.floor(Date.now() / 1000) - 1000 } }
+      })
+    });
+
+    if (playerResponse.ok) {
+      const playerData = await playerResponse.json();
+      const playabilityStatus = playerData?.playabilityStatus || {};
+      
+      if (playabilityStatus.status !== 'UNPLAYABLE') {
+        const videoDetails = playerData?.videoDetails || {};
+        const captionTracks = playerData?.captions?.playerCaptionsTracklistRenderer?.captionTracks || [];
+        let transcript = [];
+
+        if (captionTracks.length > 0) {
+          try {
+            const track = captionTracks.find(t => t.languageCode === 'en' || t.languageCode?.startsWith('en')) || captionTracks[0];
+            const rawTrackUrl = track.baseUrl;
+            const captionUrl = (rawTrackUrl.startsWith('/') ? 'https://www.youtube.com' : '') + rawTrackUrl + '&fmt=srv3';
+            
+            logger.info(`[YouTube] Fetching direct MWEB captions from: ${captionUrl}`);
+            const captionResult = await fetchWithTimeout(captionUrl, {
+              headers: { 'User-Agent': mobileUA }
+            });
+
+            if (captionResult.ok) {
+              const captionText = await captionResult.text();
+              transcript = parseXmlCaptions(captionText);
+              logger.info(`[YouTube] Successfully parsed ${transcript.length} direct transcript lines`);
+            }
+          } catch (innerError) {
+            logger.warn(`[YouTube] Direct caption fetch failed: ${innerError.message}`);
+          }
+        }
+
+        const metadata = {
+          title: videoDetails?.title || `YouTube Video: ${videoId}`,
+          description: videoDetails?.shortDescription || '',
+          author: videoDetails?.author || 'Unknown Channel',
+          keywords: videoDetails?.keywords || [],
+          extractedBy: 'innertube_mweb_direct',
+          attempt: 1
+        };
+
+        const identity = {
+          name: 'MWEB_SOVEREIGN_DIRECT',
+          ua: mobileUA,
+          clientName: 'MWEB'
+        };
+
+        return { transcript, metadata, identity };
+      } else {
+        logger.warn(`[YouTube] Direct playability status is UNPLAYABLE: ${playabilityStatus.reason}`);
+      }
+    } else {
+      logger.warn(`[YouTube] Direct player response returned HTTP ${playerResponse.status}`);
+    }
+  } catch (directError) {
+    logger.warn(`[YouTube] Direct InnerTube player attempt failed: ${directError.message}`);
+  }
+
+  // Strategy 2: Fallback HTML scraping for key, clientVersion, visitorData, and cookies
+  for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+    try {
+      logger.info(`[YouTube] extractWithRetry scraping attempt ${attempt}/${maxAttempts} for video ${videoId}`);
+
+      // 1. Fetch watch page with mobile User-Agent
+      const pageResponse = await fetchWithTimeout(url, {
+        headers: {
+          'User-Agent': mobileUA,
+          'Accept-Language': 'en-US,en;q=0.9'
+        }
+      });
+
+      if (!pageResponse.ok) {
+        throw new Error(`Failed to fetch watch page: HTTP ${pageResponse.status}`);
+      }
+
+      const html = await pageResponse.text();
+
+      // Extract cookies
+      let setCookies = [];
+      if (typeof pageResponse.headers.getSetCookie === 'function') {
+        setCookies = pageResponse.headers.getSetCookie();
+      } else if (typeof pageResponse.headers.raw === 'function') {
+        const rawHeaders = pageResponse.headers.raw();
+        setCookies = rawHeaders['set-cookie'] || [];
+      } else {
+        const rawCookie = pageResponse.headers.get('set-cookie');
+        setCookies = rawCookie ? rawCookie.split(',') : [];
+      }
+      const sessionCookie = setCookies.map(c => c.split(';')[0]).join('; ');
+
+      // Extract INNERTUBE_API_KEY
+      const apiKeyMatch = html.match(/"INNERTUBE_API_KEY"\s*:\s*"([^"]+)"/) || html.match(/"innertubeApiKey"\s*:\s*"([^"]+)"/);
+      let apiKey = apiKeyMatch ? apiKeyMatch[1] : null;
+
+      if (!apiKey) {
+        // Fallback to key from videoKeyPool if available, or static key
+        const poolBundle = videoKeyPool.getStealthBundle();
+        apiKey = (poolBundle && poolBundle.key && !isPlaceholderKey(poolBundle.key))
+          ? poolBundle.key
+          : 'AIzaSyAO_FJ2SlqU8Q4STEHLGCilw_Y9_11qcW8';
+      }
+
+      // Extract clientVersion
+      const clientVersionMatch = html.match(/"INNERTUBE_CLIENT_VERSION"\s*:\s*"([^"]+)"/) || html.match(/"clientVersion"\s*:\s*"([^"]+)"/);
+      const clientVersion = clientVersionMatch ? clientVersionMatch[1] : '2.20240415.01.00';
+
+      // Extract visitorData
+      const visitorDataMatch = html.match(/"visitorData"\s*:\s*"([^"]+)"/) || html.match(/"visitor_data"\s*:\s*"([^"]+)"/);
+      const visitorData = visitorDataMatch ? visitorDataMatch[1] : undefined;
+
+      logger.info(`[YouTube] Extracted InnerTube params: key=${apiKey?.substring(0, 8)}..., version=${clientVersion}, visitorData=${visitorData ? 'present' : 'none'}`);
+
+      // 2. Call player API with MWEB client context
+      const playerResponse = await fetchWithTimeout(`https://www.youtube.com/youtubei/v1/player?key=${apiKey}&prettyPrint=false`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'User-Agent': mobileUA,
+          'Referer': url,
+          'Cookie': sessionCookie
+        },
+        body: JSON.stringify({
+          context: {
+            client: {
+              clientName: 'MWEB',
+              clientVersion: clientVersion,
+              originalUrl: url,
+              visitorData: visitorData,
+              hl: 'en',
+              gl: 'US'
+            }
+          },
+          videoId,
+          playbackContext: { contentPlaybackContext: { signatureTimestamp: Math.floor(Date.now() / 1000) - 1000 } }
+        })
+      });
+
+      if (!playerResponse.ok) {
+        throw new Error(`InnerTube player API returned HTTP ${playerResponse.status}`);
+      }
+
+      const playerData = await playerResponse.json();
+      const playabilityStatus = playerData?.playabilityStatus || {};
+      
+      if (playabilityStatus.status === 'UNPLAYABLE') {
+        throw new Error(`Video is unplayable via MWEB client: ${playabilityStatus.reason}`);
+      }
+
+      const videoDetails = playerData?.videoDetails || {};
+      const captionTracks = playerData?.captions?.playerCaptionsTracklistRenderer?.captionTracks || [];
+
+      let transcript = [];
+
+      if (captionTracks.length > 0) {
+        try {
+          const track = captionTracks.find(t => t.languageCode === 'en' || t.languageCode?.startsWith('en')) || captionTracks[0];
+          const rawTrackUrl = track.baseUrl;
+          const captionUrl = (rawTrackUrl.startsWith('/') ? 'https://www.youtube.com' : '') + rawTrackUrl + '&fmt=srv3';
+          
+          logger.info(`[YouTube] Fetching captions from: ${captionUrl}`);
+          const captionResult = await fetchWithTimeout(captionUrl, {
+            headers: {
+              'User-Agent': mobileUA,
+              'Referer': url,
+              'Cookie': sessionCookie
+            }
+          });
+
+          if (!captionResult.ok) {
+            throw new Error(`HTTP ${captionResult.status} fetching caption tracks`);
+          }
+
+          const captionText = await captionResult.text();
+          transcript = parseXmlCaptions(captionText);
+          logger.info(`[YouTube] Successfully parsed ${transcript.length} transcript lines`);
+        } catch (innerError) {
+          logger.warn(`[YouTube] Caption fetch failed: ${innerError.message}`);
+        }
+      } else {
+        logger.warn(`[YouTube] No caption tracks returned in InnerTube player response.`);
+      }
+
+      const metadata = {
+        title: videoDetails?.title || `YouTube Video: ${videoId}`,
+        description: videoDetails?.shortDescription || '',
+        author: videoDetails?.author || 'Unknown Channel',
+        keywords: videoDetails?.keywords || [],
+        extractedBy: 'innertube_mweb',
+        attempt
+      };
+
+      const identity = {
+        name: 'MWEB_SOVEREIGN',
+        ua: mobileUA,
+        clientName: 'MWEB'
+      };
+
+      return { transcript, metadata, identity };
+    } catch (err) {
+      logger.error(`[YouTube] extractWithRetry attempt ${attempt} failed: ${err.message}`);
+      if (apiKey) {
+        videoKeyPool.reportFailure(apiKey, err.message);
+      }
+      lastError = err;
+      if (attempt < maxAttempts) {
+        await new Promise(r => setTimeout(r, 1000));
+      }
+    }
+  }
+
+  return { transcript: null, metadata: null, identity: null, error: lastError };
+}
+
 router.get('/youtube-transcript', async (req, res) => {
   try {
     const { url } = req.query;
-    const userType = req.user?.accountType || 'human'; // Default to human if auth is loose
+    const userType = req.user?.accountType || 'human';
 
     if (!url) throw new AppError(400, 'MISSING_URL', 'Missing url parameter');
 
@@ -159,140 +493,87 @@ router.get('/youtube-transcript', async (req, res) => {
     if (!idMatch) throw new AppError(400, 'INVALID_URL', 'Invalid YouTube URL');
     const videoId = idMatch[1];
 
-    console.log(`[YouTube] Sovereign Extraction: ${videoId} (User: ${userType})`);
+    logger.info(`[YouTube] Extraction: ${videoId}`);
 
-    // ── Tier 0: Fair Use Check (DB Backed) ───────────────────
+    // ── Fair Use Check ──────────────────────────
     const db = await getDatabase();
-    const userId = req.user?.id;
-    
+    const userId = req.user?.userId || req.user?.id;
+
     if (userId) {
       const user = await dbHelpers.getUserById(userId);
-      
       if (user) {
         const now = new Date();
         const lastReset = user.lastExtractionReset ? new Date(user.lastExtractionReset) : new Date(0);
         const isNewDay = now.toDateString() !== lastReset.toDateString();
-        
         let currentUsage = isNewDay ? 0 : (user.youtubeExtractionsToday || 0);
         const limit = user.accountType === 'agent' ? 50 : 10;
-        
         if (currentUsage >= limit) {
-          throw new AppError(429, 'USAGE_LIMIT_REACHED', `You have reached your daily extraction limit of ${limit} videos.`);
+          throw new AppError(429, 'USAGE_LIMIT_REACHED', `Daily extraction limit of ${limit} reached.`);
         }
-
-        // If it's a new day, update the reset timestamp immediately
         if (isNewDay) {
-          await db.update(users).set({ 
-            youtubeExtractionsToday: 0, 
-            lastExtractionReset: now 
-          }).where(eq(users.id, userId));
+          await db.update(users).set({ youtubeExtractionsToday: 0, lastExtractionReset: now }).where(eq(users.id, userId));
         }
       }
     }
 
-    // ── Step 1: Initialize Stealth Bundle ──────────────────
-    const { key: apiKey, identity } = videoKeyPool.getStealthBundle();
-    
-    // ── Step 2: Fetch Page metadata + Initial Response ─────
-    const pageResponse = await fetch(`https://www.youtube.com/watch?v=${videoId}`, {
-      headers: {
-        'User-Agent': identity.ua,
-        'Accept-Language': 'en-US,en;q=0.9'
-      }
-    });
-    
-    const setCookies = pageResponse.headers.get('set-cookie');
-    const sessionCookie = setCookies ? setCookies.split(',').map(c => c.split(';')[0]).join('; ') : '';
-    const html = await pageResponse.text();
+    // ── Strategy 1: InnerTube with retry ─────────
+    let { transcript, metadata, identity, error } = await extractWithRetry(videoId);
 
-    let playerData = null;
-    
-    // Attempt InnerTube Extraction with Bundle
-    try {
-      const playerResponse = await fetch(`https://www.youtube.com/youtubei/v1/player?key=${apiKey}&prettyPrint=false`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'User-Agent': identity.ua,
-          'X-Goog-Api-Key': apiKey,
-          'X-YouTube-Client-Name': identity.clientName,
-          'X-YouTube-Client-Version': '2.20240415.01.00'
-        },
-        body: JSON.stringify({
-          context: {
-            client: { clientName: identity.identity === 'TV_STABLE' ? 'TVHTML5' : 'ANDROID', clientVersion: '19.10.35', hl: 'en', gl: 'US' }
-          },
-          videoId,
-          playbackContext: { contentPlaybackContext: { signatureTimestamp: Math.floor(Date.now() / 1000) - 1000 } }
-        })
-      });
-      
-      playerData = await playerResponse.json();
-    } catch (err) {
-      console.warn(`[YouTube] Carousel identity ${identity.name} failed. Falling back to local extract.`);
-      videoKeyPool.reportFailure(apiKey, err.message);
+    // ── Strategy 2: Library fallback ─────────────
+    if (!transcript || transcript.length === 0) {
+      logger.info(`[YouTube] InnerTube failed, trying library fallback...`);
+      const libItems = await fetchTranscriptLibrary(videoId);
+      if (libItems && libItems.length > 0) {
+        transcript = libItems;
+        metadata = metadata || {
+          title: `YouTube Video: ${videoId}`,
+          description: '',
+          author: 'Unknown Channel',
+          keywords: [],
+          extractedBy: 'library'
+        };
+        metadata.extractedBy = 'library';
+      }
     }
 
-    const videoDetails = playerData?.videoDetails || {};
-    const captionTracks = playerData?.captions?.playerCaptionsTracklistRenderer?.captionTracks || [];
-
-    const metadata = {
-      title: videoDetails?.title || `YouTube Video: ${videoId}`,
-      description: videoDetails?.shortDescription || '',
-      author: videoDetails?.author || 'Unknown Channel',
-      keywords: videoDetails?.keywords || []
-    };
-
-    // ── Step 3: High-Accuracy Caption Piercing ──────────────
-    let transcript = [];
-    if (captionTracks.length > 0) {
-      try {
-        const track = captionTracks.find(t => t.languageCode === 'en' || t.languageCode?.startsWith('en')) || captionTracks[0];
-        const captionUrl = track.baseUrl.replace(/\\u0026/g, '&') + '&fmt=srv3'; 
-        
-        const captionResult = await fetch(captionUrl, {
-          headers: {
-            'User-Agent': identity.ua,
-            'Referer': `https://www.youtube.com/watch?v=${videoId}`,
-            'X-Goog-Api-Key': apiKey,
-            'Cookie': sessionCookie
-          }
-        });
-        
-        const captionText = await captionResult.text();
-        transcript = parseXmlCaptions(captionText);
-        console.log(`[YouTube] Success. Extracted ${transcript.length} captions.`);
-      } catch (innerError) {
-        console.warn('[YouTube] Caption piercing failed.', innerError.message);
-      }
+    // ── Final metadata assembly ─────────────────
+    if (!metadata) {
+      metadata = {
+        title: `YouTube Video: ${videoId}`,
+        description: '',
+        author: 'Unknown Channel',
+        keywords: [],
+        extractedBy: 'none'
+      };
     }
 
     const chapters = parseChaptersFromDescription(metadata.description);
-    const structuredContent = buildStructuredContent({ transcript, metadata, chapters });
+    const structuredContent = buildStructuredContent({ transcript: transcript || [], metadata, chapters });
 
-    // ── Tier 4: Persist Usage ──────────────────────────────
-    if (userId && structuredContent.length > 50) {
+    // ── Persist Usage ─────────────────────────
+    if (userId && structuredContent.length > 50 && !error) {
       await db.update(users)
         .set({ youtubeExtractionsToday: sql`${users.youtubeExtractionsToday} + 1` })
         .where(eq(users.id, userId));
-      console.log(`[YouTube] Usage incremented for user ${userId}`);
     }
 
-    return res.status(200).json({ 
-      transcript, 
+    const extractionSuccess = transcript && transcript.length > 0;
+    res.status(extractionSuccess ? 200 : 206).json({
+      transcript: transcript || [],
       metadata: {
         ...metadata,
         sovereign_signal: {
-          identity: identity.name,
-          farm_health: 'nominal',
+          identity: identity?.name || 'library',
+          farm_health: extractionSuccess ? 'nominal' : 'fallback',
           timestamp: new Date().toISOString()
         }
-      }, 
-      structuredContent 
+      },
+      structuredContent,
+      extractionWarning: extractionSuccess ? undefined : 'Could not extract captions. Content based on metadata only.'
     });
 
   } catch (error) {
-    console.error('[YouTube] Error:', error);
+    logger.error('[YouTube] Error:', error);
     throw new AppError(500, 'YOUTUBE_EXTRACTION_FAILED', error.message);
   }
 });

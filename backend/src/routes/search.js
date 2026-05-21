@@ -1,6 +1,7 @@
 import express from 'express';
 import { dbHelpers } from '../db/database.js';
 import { authenticateToken } from '../middleware/auth.js';
+import { logger } from '../utils/logger.js';
 
 const router = express.Router();
 
@@ -10,7 +11,7 @@ const router = express.Router();
  */
 router.get('/', authenticateToken, async (req, res) => {
   const { q } = req.query;
-  const userId = req.user.id;
+  const userId = req.user.userId || req.user.id;
 
   if (!q) {
     return res.status(400).json({ error: 'Search query "q" is required' });
@@ -20,7 +21,7 @@ router.get('/', authenticateToken, async (req, res) => {
     const results = await dbHelpers.globalSearch(userId, q);
     res.json(results);
   } catch (error) {
-    console.error('Search failure:', error);
+    logger.error('Search failure:', error);
     res.status(500).json({ error: 'Internal search error' });
   }
 });

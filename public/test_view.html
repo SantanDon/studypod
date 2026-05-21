@@ -1,0 +1,303 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>StudyPodLM - Single Host voice Integration Map</title>
+    <!-- Google Fonts -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=Outfit:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    <style>
+        :root {
+            --bg-dark: #090d16;
+            --panel-dark: #0f172a;
+            --panel-light: #1e293b;
+            --border-color: #1e293b;
+            --border-hover: #334155;
+            --text-primary: #f8fafc;
+            --text-secondary: #94a3b8;
+            --accent-purple: #a855f7;
+            --accent-indigo: #6366f1;
+            --accent-pink: #f43f5e;
+            --glass-bg: rgba(15, 23, 42, 0.6);
+            --glass-border: rgba(99, 102, 241, 0.15);
+        }
+
+        body {
+            margin: 0;
+            padding: 40px 20px;
+            background-color: var(--bg-dark);
+            color: var(--text-primary);
+            font-family: 'Outfit', sans-serif;
+            min-height: 100vh;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            background-image: 
+                radial-gradient(circle at 10% 20%, rgba(168, 85, 247, 0.08) 0%, transparent 40%),
+                radial-gradient(circle at 90% 80%, rgba(99, 102, 241, 0.08) 0%, transparent 40%);
+        }
+
+        .container {
+            width: 100%;
+            max-width: 850px;
+            background-color: var(--glass-bg);
+            border: 1px solid var(--glass-border);
+            border-radius: 16px;
+            padding: 32px;
+            box-shadow: 0 20px 40px -10px rgba(0, 0, 0, 0.5);
+            backdrop-filter: blur(12px);
+            -webkit-backdrop-filter: blur(12px);
+            animation: fadeIn 0.8s cubic-bezier(0.16, 1, 0.3, 1);
+        }
+
+        @keyframes fadeIn {
+            from { opacity: 0; transform: translateY(10px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+
+        header {
+            border-bottom: 1px solid var(--border-color);
+            padding-bottom: 24px;
+            margin-bottom: 28px;
+            display: flex;
+            align-items: center;
+            gap: 16px;
+        }
+
+        .logo-bar {
+            background: linear-gradient(135deg, var(--accent-purple), var(--accent-indigo));
+            width: 12px;
+            height: 32px;
+            border-radius: 6px;
+            box-shadow: 0 0 15px rgba(99, 102, 241, 0.4);
+        }
+
+        h1 {
+            font-family: 'Space Grotesk', sans-serif;
+            margin: 0;
+            font-size: 1.8rem;
+            font-weight: 650;
+            letter-spacing: -0.03em;
+            background: linear-gradient(to right, #ffffff, #cbd5e1);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+        }
+
+        .grid {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 24px;
+            margin-bottom: 28px;
+        }
+
+        .card {
+            background-color: rgba(30, 41, 59, 0.4);
+            border: 1px solid var(--border-color);
+            border-radius: 12px;
+            padding: 24px;
+            transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+            position: relative;
+            overflow: hidden;
+        }
+
+        .card::before {
+            content: '';
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: linear-gradient(135deg, transparent, rgba(255, 255, 255, 0.02));
+            pointer-events: none;
+        }
+
+        .card:hover {
+            transform: translateY(-2px);
+            border-color: var(--border-hover);
+            box-shadow: 0 10px 20px -5px rgba(0, 0, 0, 0.2);
+        }
+
+        .card.purple:hover {
+            border-color: rgba(168, 85, 247, 0.3);
+        }
+
+        .card.indigo:hover {
+            border-color: rgba(99, 102, 241, 0.3);
+        }
+
+        h2 {
+            font-family: 'Space Grotesk', sans-serif;
+            margin-top: 0;
+            margin-bottom: 16px;
+            font-size: 1.2rem;
+            font-weight: 600;
+            letter-spacing: -0.01em;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .purple h2 { color: var(--accent-purple); }
+        .indigo h2 { color: var(--accent-indigo); }
+
+        ul {
+            padding-left: 20px;
+            margin: 0;
+            font-size: 0.95rem;
+            line-height: 1.6;
+            color: var(--text-secondary);
+        }
+
+        li {
+            margin-bottom: 12px;
+        }
+
+        li:last-child {
+            margin-bottom: 0;
+        }
+
+        strong {
+            color: #e2e8f0;
+            font-weight: 500;
+        }
+
+        .badge-current {
+            background-color: rgba(168, 85, 247, 0.1);
+            color: var(--accent-purple);
+            border: 1px solid rgba(168, 85, 247, 0.2);
+            padding: 2px 8px;
+            border-radius: 4px;
+            font-size: 0.75rem;
+            font-weight: 600;
+            letter-spacing: 0.05em;
+            text-transform: uppercase;
+        }
+
+        .badge-proposed {
+            background-color: rgba(99, 102, 241, 0.1);
+            color: var(--accent-indigo);
+            border: 1px solid rgba(99, 102, 241, 0.2);
+            padding: 2px 8px;
+            border-radius: 4px;
+            font-size: 0.75rem;
+            font-weight: 600;
+            letter-spacing: 0.05em;
+            text-transform: uppercase;
+        }
+
+        .rationale {
+            background: linear-gradient(to right, rgba(99, 102, 241, 0.04), rgba(168, 85, 247, 0.04));
+            border: 1px solid rgba(99, 102, 241, 0.15);
+            border-radius: 12px;
+            padding: 24px;
+            margin-bottom: 28px;
+        }
+
+        .rationale h2 {
+            color: #cbd5e1;
+            margin-bottom: 10px;
+        }
+
+        .rationale p {
+            margin: 0;
+            font-size: 0.95rem;
+            line-height: 1.6;
+            color: var(--text-secondary);
+        }
+
+        .plan {
+            border-top: 1px solid var(--border-color);
+            padding-top: 24px;
+        }
+
+        .plan h2 {
+            color: #cbd5e1;
+            margin-bottom: 16px;
+        }
+
+        ol {
+            padding-left: 20px;
+            margin: 0;
+            font-size: 0.95rem;
+            line-height: 1.7;
+            color: var(--text-secondary);
+        }
+
+        ol li {
+            margin-bottom: 12px;
+            padding-left: 4px;
+        }
+
+        code {
+            font-family: 'Space Grotesk', monospace;
+            color: var(--accent-pink);
+            background-color: rgba(244, 63, 94, 0.08);
+            padding: 2px 6px;
+            border-radius: 4px;
+            font-size: 0.85rem;
+            border: 1px solid rgba(244, 63, 94, 0.15);
+        }
+
+        .highlight {
+            color: #e2e8f0;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <header>
+            <div class="logo-bar"></div>
+            <h1>StudyPodLM: Single Host Voice Integration Map</h1>
+        </header>
+
+        <div class="grid">
+            <!-- Current System Card -->
+            <div class="card purple">
+                <h2>
+                    <span>🎙️</span> Current Architecture
+                    <span style="margin-left: auto;" class="badge-current">Active</span>
+                </h2>
+                <ul>
+                    <li><strong>Script Engine:</strong> Generates two-host dialogues using alternating presets (<span class="highlight">Alex & Sarah</span>).</li>
+                    <li><strong>TTS Synthesis:</strong> Stitches individual audio blobs segment-by-segment with static pauses.</li>
+                    <li><strong>UI Panel:</strong> Fixed dual host voice parameters inside the Studio sidebar controls.</li>
+                </ul>
+            </div>
+
+            <!-- Proposed Addition Card -->
+            <div class="card indigo">
+                <h2>
+                    <span>⚡</span> Single Speaker Variety
+                    <span style="margin-left: auto;" class="badge-proposed">Proposed</span>
+                </h2>
+                <ul>
+                    <li><strong>Script Engine:</strong> Updates prompt to generate single-voice lectures or audiobook formats.</li>
+                    <li><strong>TTS Synthesis:</strong> Feeds the entire script continuously to a single selected host voice.</li>
+                    <li><strong>UI Panel:</strong> Adds a toggle switch between <span class="highlight">Conversational Podcast</span> and <span class="highlight">Solo Audiobook</span>.</li>
+                </ul>
+            </div>
+        </div>
+
+        <!-- Rationale -->
+        <div class="rationale">
+            <h2>💡 Rationale & Benefits</h2>
+            <p>
+                Switching to a single speaker halves TTS processing latency by eliminating multi-voice context switches, reduces audio stitching artifacts, and provides academic variety for users who prefer structured solo lectures over conversational back-and-forth.
+            </p>
+        </div>
+
+        <!-- Plan -->
+        <div class="plan">
+            <h2>🛠️ Implementation Steps</h2>
+            <ol>
+                <li><strong>Modify Prompt Generation:</strong> Update <code>podcastGenerator.ts</code> to accept a <code>format</code> configuration parameter.</li>
+                <li><strong>Build Sidebar Toggle:</strong> Add custom Solo/Dialogue format state and dropdown select into <code>StudioSidebar.tsx</code>.</li>
+                <li><strong>Adapt TTS Pipeline:</strong> Modify <code>podcastAudioGenerator.ts</code> to handle single-speaker direct compilation.</li>
+                <li><strong>Agent Verification:</strong> Run a test script using the paired agent API to compile and verify continuous wav output.</li>
+            </ol>
+        </div>
+    </div>
+</body>
+</html>

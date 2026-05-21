@@ -9,7 +9,6 @@ import { PodcastScript } from '../podcastGenerator';
 import { TTSProvider, getTTSConfig, saveTTSConfig } from './ttsService';
 import { UltimateTTSProvider } from './ultimateTTSProvider';
 import { WebSpeechProvider } from './webSpeechProvider';
-import { DEFAULT_HOST1_VOICE, DEFAULT_HOST2_VOICE, HOST_VOICE_MAP } from './kokoroTTSProvider';
 import { TTSWorkerManager, getTTSWorkerManager } from './ttsWorker';
 
 export interface PodcastAudioConfig {
@@ -17,6 +16,7 @@ export interface PodcastAudioConfig {
   host2Voice: string;
   speed: number;
   pauseBetweenSegments: number; // milliseconds
+  enableStudioEQ?: boolean;
 }
 
 export interface PodcastAudioResult {
@@ -42,10 +42,11 @@ export interface GenerationProgress {
 }
 
 const DEFAULT_AUDIO_CONFIG: PodcastAudioConfig = {
-  host1Voice: DEFAULT_HOST1_VOICE,
-  host2Voice: DEFAULT_HOST2_VOICE,
-  speed: 1.0,
-  pauseBetweenSegments: 500,
+  host1Voice: 'am_onyx',
+  host2Voice: 'af_nova',
+  speed: 0.95,
+  pauseBetweenSegments: 600,
+  enableStudioEQ: true,
 };
 
 const AUDIO_CONFIG_KEY = 'podcast_audio_config';
@@ -199,14 +200,9 @@ export class PodcastAudioGenerator {
       const segment = script.segments[i];
       
       const speakerName = segment.speaker as string;
-      let voice: string;
-      if (HOST_VOICE_MAP[speakerName]) {
-        voice = HOST_VOICE_MAP[speakerName];
-      } else if (speakerName === 'Alex') {
-        voice = audioConfig.host1Voice;
-      } else {
-        voice = audioConfig.host2Voice;
-      }
+      const scriptMeta = script.metadata;
+      const host1Name = scriptMeta?.host1Name || 'Alex';
+      const voice = speakerName === host1Name ? audioConfig.host1Voice : audioConfig.host2Voice;
 
       onProgress?.({
         currentSegment: i + 1,

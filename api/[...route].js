@@ -4,8 +4,26 @@ import { fileURLToPath } from 'url';
 import fs from 'fs';
 
 // Force Vercel to bundle backend dependencies
+import 'express';
+import 'cors';
+import 'cookie-parser';
+import 'helmet';
+import 'express-rate-limit';
 import 'bcryptjs';
 import 'jsonwebtoken';
+import 'uuid';
+import 'otplib';
+import 'qrcode';
+import 'epub';
+import 'mammoth';
+import 'pdf-parse';
+import 'youtube-transcript';
+import '@danielxceron/youtube-transcript';
+import 'cheerio';
+import 'multer';
+import 'kokoro-js';
+import '@hocuspocus/server';
+import '@xenova/transformers';
 import 'drizzle-orm';
 import '@libsql/client';
 

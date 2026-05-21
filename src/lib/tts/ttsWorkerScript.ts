@@ -69,18 +69,20 @@ async function initializeKokoro(): Promise<void> {
       percentage: 30,
     });
 
-    // Use q8 for faster loading and better memory efficiency on typical hardware
-    // wasm device is the most reliable fallback
-    const options: { dtype: 'fp32' | 'fp16' | 'q8' | 'q4' | 'q4f16'; device: 'wasm' | 'webgpu' | 'cpu' } = {
-      dtype: 'q8', // Quantized for speed and reliability
-      device: 'wasm', 
-    };
+    // For stability and to prevent silent/garbled audio issues in WebGPU workers, we use WASM fp32 by default.
+    const device = 'wasm';
+    const dtype = 'fp32';
 
     postResponse({
       type: 'progress',
-      message: 'Loading model with WASM backend...',
+      message: `Loading Kokoro TTS model (WASM fp32)...`,
       percentage: 40,
     });
+
+    const options: { dtype: 'fp32' | 'fp16' | 'q8' | 'q4' | 'q4f16'; device: 'wasm' | 'webgpu' | 'cpu' } = {
+      dtype,
+      device,
+    };
 
     kokoroInstance = await KokoroTTS.from_pretrained('onnx-community/Kokoro-82M-v1.0-ONNX', options);
     

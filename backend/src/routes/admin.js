@@ -1,6 +1,7 @@
 import express from 'express';
 import { sql } from 'drizzle-orm';
 import { getDatabase, schema } from '../db/database.js';
+import { logger } from '../utils/logger.js';
 
 const router = express.Router();
 
@@ -8,7 +9,7 @@ const router = express.Router();
 router.get('/migrate', async (req, res) => {
   try {
     const db = await getDatabase();
-    console.log('🚀 Starting Runtime Schema Synchronization...');
+    logger.info('Starting Runtime Schema Synchronization...');
     
     // We can't run drizzle-kit push easily in a serverless env, 
     // but we can ensure the core table exists manually if needed, 
@@ -18,7 +19,7 @@ router.get('/migrate', async (req, res) => {
     const tableCheck = await db.run(sql`SELECT name FROM sqlite_master WHERE type='table' AND name='users'`);
     
     if (tableCheck.rows.length === 0) {
-      console.log('⚠️ users table missing. Manual initialization required.');
+      logger.warn('users table missing. Manual initialization required.');
       // Since we're using Drizzle, the tables SHOULD be there if we ran push.
       // If not, we can try to run a raw CREATE TABLE as a fallback.
       await db.run(sql`
@@ -71,11 +72,10 @@ router.get('/migrate', async (req, res) => {
       details: tableCheck.rows 
     });
   } catch (error) {
-    console.error('Migration Error:', error);
+    logger.error('Migration Error:', error);
     return res.status(500).json({ 
       error: 'Migration Failed', 
       message: error.message,
-      stack: error.stack
     });
   }
 });

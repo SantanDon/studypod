@@ -93,7 +93,8 @@ export const useYoutubeProcessing = () => {
         await processDocumentAsync({
           sourceId: savedSource.id,
           filePath: result.url,
-          sourceType: "youtube"
+          sourceType: "youtube",
+          notebookId
         });
         
         if (session?.access_token) {

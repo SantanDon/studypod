@@ -2,6 +2,7 @@ import express from 'express';
 import { URL } from 'url';
 import { AppError } from '../middleware/errorHandler.js';
 import extractionService from '../services/extractionService.js';
+import { logger } from '../utils/logger.js';
 
 const router = express.Router();
 
@@ -16,7 +17,7 @@ router.get('/extract-web', async (req, res) => {
     if (!url) throw new AppError(400, 'MISSING_URL', 'URL parameter is required');
 
     const decodedUrl = decodeURIComponent(url);
-    console.log(`[Smart Proxy] Extracting: ${decodedUrl}`);
+    logger.info(`[Smart Proxy] Extracting: ${decodedUrl}`);
 
     try { new URL(decodedUrl); } catch (e) {
       throw new AppError(400, 'INVALID_URL', 'Invalid URL provided');
@@ -39,7 +40,7 @@ router.get('/extract-web', async (req, res) => {
 
   } catch (error) {
     if (error instanceof AppError) throw error;
-    console.error('[Smart Proxy] Error:', error);
+    logger.error('[Smart Proxy] Error:', error);
     res.status(500).json({ error: 'Failed to extract web content' });
   }
 });
@@ -57,7 +58,7 @@ router.get('/proxy', async (req, res) => {
     }
 
     const decodedUrl = decodeURIComponent(url);
-    console.log(`[Proxy] Fetching: ${decodedUrl}`);
+    logger.info(`[Proxy] Fetching: ${decodedUrl}`);
 
     try { new URL(decodedUrl); } catch (e) {
       throw new AppError(400, 'INVALID_URL', 'Invalid URL provided');
@@ -88,7 +89,7 @@ router.get('/proxy', async (req, res) => {
 
   } catch (error) {
     if (error instanceof AppError) throw error;
-    console.error('[Proxy] Error:', error);
+    logger.error('[Proxy] Error:', error);
     throw new AppError(500, 'PROXY_FAILED', error.message || 'Failed to proxy request');
   }
 });

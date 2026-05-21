@@ -6,6 +6,7 @@
  */
 
 import { dispatchToTitan } from './titanProvider.js';
+import { logger } from '../utils/logger.js';
 
 /**
  * Generate a collection of Sovereign Hooks for a given source.
@@ -62,7 +63,7 @@ Source Title: ${sourceTitle}`;
 
     return hooks;
   } catch (error) {
-    console.error('Sovereign Signal generation failed:', error);
+    logger.error('Sovereign Signal generation failed:', error);
     throw new Error(`Signal Generation Failed: ${error.message}`);
   }
 }

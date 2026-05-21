@@ -149,9 +149,17 @@ export const useChatMessages = (notebookId?: string) => {
     },
     onError: (error) => {
       console.error("❌ Chat message error:", error);
+      const msg = error instanceof Error ? error.message : "Failed to send message";
+      // Show a helpful message based on the error type
+      const isOffline = msg.includes('503') || msg.includes('unavailable') || msg.includes('offline');
+      const isImageBlock = msg.includes('image') || msg.includes('attachment');
       toast({
-        title: "Error",
-        description: "Failed to send message. Please try again.",
+        title: isOffline ? "AI Temporarily Unavailable" : isImageBlock ? "Attachment Not Supported" : "Error",
+        description: isOffline
+          ? "AI providers are currently unreachable. Your message is saved and you can try again later."
+          : isImageBlock
+            ? "This AI model processes text only. Images and files cannot be read."
+            : msg,
         variant: "destructive",
       });
     },

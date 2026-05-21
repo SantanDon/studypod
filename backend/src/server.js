@@ -19,13 +19,16 @@ import syncRoutes from './routes/sync.js';
 import adminRoutes from './routes/admin.js';
 import notebookRoutes from './routes/notebooks.js';
 import agentRoutes from './routes/agent.js';
+import agentMissionRoutes from './routes/agentMissions.js';
 import proxyRoutes from './routes/proxy.js';
 import docxRouter from './routes/docx.js';
 import searchRouter from './routes/search.js';
 import signalRouter from './routes/signal.js';
+import audiobookRoutes from './routes/audiobook.js';
 // Middleware / DB Imports
 import { initializeDatabase } from './db/database.js';
 import { errorHandler } from './middleware/errorHandler.js';
+import { logger, requestLogger } from './utils/logger.js';
 
 // ENI: Services re-enabled after unification stability check
 import { hocuspocusServer } from './services/syncRelay.js';
@@ -41,14 +44,15 @@ const REQUIRED_ENVS = ['TURSO_DATABASE_URL', 'TURSO_AUTH_TOKEN', 'VITE_GROQ_API_
 const missingEnvs = REQUIRED_ENVS.filter(env => !process.env[env]);
 
 if (missingEnvs.length > 0 && process.env.NODE_ENV === 'production') {
-  console.error(`⚠️ WARNING: Missing required environment variables: ${missingEnvs.join(', ')}`);
-  // process.exit(1); // Muted by ENI: Serverless functions shouldn't hard-exit on import.
+  logger.warn(`Missing required environment variables: ${missingEnvs.join(', ')}`);
 }
 
 const app = express();
 const PORT = process.env.PORT || 3001;
 
-// Global Security Hardening
+// Global Security Hardening — dynamic CSP allows both 127.0.0.1 and localhost
+const selfUrl = `http://127.0.0.1:${PORT}`;
+const selfLocalhost = `http://localhost:${PORT}`;
 app.use(helmet({
   crossOriginResourcePolicy: { policy: "cross-origin" },
   crossOriginOpenerPolicy: { policy: "same-origin" },
@@ -56,14 +60,21 @@ app.use(helmet({
     directives: {
       defaultSrc: ["'self'"],
       scriptSrc: ["'self'", "'unsafe-inline'", "'unsafe-eval'", "https://apis.google.com"],
-      connectSrc: ["'self'", "http://localhost:3001", "https://*.supabase.co", "wss://*.supabase.co", "https://api.groq.com"],
+      connectSrc: ["'self'", selfUrl, selfLocalhost, "https://*.supabase.co", "wss://*.supabase.co", "https://api.groq.com"],
       imgSrc: ["'self'", "data:", "blob:", "https://*.unsplash.com", "https://*.google.com"],
-      styleSrc: ["'self'", "'unsafe-inline'", "https://fonts.googleapis.com"],
-      fontSrc: ["'self'", "https://fonts.gstatic.com"],
+      styleSrc: ["'self'", "'unsafe-inline'", "https://fonts.googleapis.com", "https://cdn-uicons.flaticon.com"],
+      fontSrc: ["'self'", "https://fonts.gstatic.com", "https://cdn-uicons.flaticon.com"],
       frameSrc: ["'self'", "https://www.youtube.com"],
     },
   },
 }));
+
+// Unlocking SharedArrayBuffer for high-quality, human-like neural Kokoro TTS in production
+app.use((req, res, next) => {
+  res.setHeader('Cross-Origin-Opener-Policy', 'same-origin');
+  res.setHeader('Cross-Origin-Embedder-Policy', 'credentialless');
+  next();
+});
 
 // API Rate Limiting
 const apiLimiter = rateLimit({
@@ -111,8 +122,8 @@ app.use(cors({
     if (isLocal) {
       callback(null, true);
     } else {
-      console.warn(`[CORS] Rejected origin: ${origin}`);
-      callback(null, false); // Don't throw error, just reject origin
+      logger.warn(`[CORS] Rejected origin: ${origin}`);
+      callback(null, false);
     }
   },
   credentials: true
@@ -121,9 +132,10 @@ app.use(cors({
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 app.use(cookieParser());
+app.use(requestLogger);
 
 // API Routes
-app.use('/api/auth', authLimiter, authRoutes);
+app.use('/api/auth', authRoutes);
 app.use('/api/sync', syncRoutes);
 app.use('/api/admin', adminRoutes);
 app.use('/api/user', apiLimiter, userRoutes);
@@ -132,13 +144,25 @@ app.use('/api/pdf', apiLimiter, pdfRoutes);
 app.use('/api/youtube', apiLimiter, youtubeRouter);
 app.use('/api/tasks', apiLimiter, tasksRouter);
 app.use('/api/agent', apiLimiter, agentRoutes);
+app.use('/api/agent', apiLimiter, agentMissionRoutes);
 app.use('/api/proxy', apiLimiter, proxyRoutes);
 app.use('/api/search', apiLimiter, searchRouter);
 app.use('/api/signal', apiLimiter, signalRouter);
 app.use('/api/docx', apiLimiter, docxRouter);
+app.use('/api/audiobook', apiLimiter, audiobookRoutes);
 
 // Health check
 app.get('/health', (req, res) => res.json({ status: 'ok', timestamp: new Date().toISOString() }));
+
+// Provider availability
+app.get('/api/health/provider', async (req, res) => {
+  try {
+    const { getAvailableProviders } = await import('./services/titanProvider.js');
+    res.json({ status: 'ok', providers: getAvailableProviders() });
+  } catch (err) {
+    res.status(500).json({ status: 'error', message: err.message });
+  }
+});
 
 // Sovereign Vault Check (Diagnostic Only)
 app.get('/api/health/vault-check', (req, res) => {
@@ -223,26 +247,26 @@ const startServer = async (retries = 5) => {
     
     server.on('error', (e) => {
       if (e.code === 'EADDRINUSE') {
-        console.log(`⚠️ Port ${PORT} busy, retrying (${retries} left)...`);
+        logger.warn(`Port ${PORT} busy, retrying (${retries} left)...`);
         setTimeout(() => {
           if (retries > 0) {
             server.close();
             startServer(retries - 1);
           } else {
-            console.error('❌ Failed to bind to port after multiple retries.');
+            logger.error('Failed to bind to port after multiple retries.');
             process.exit(1);
           }
         }, 1000);
       } else {
-        console.error('Server error:', e);
+        logger.error('Server error:', e);
       }
     });
 
-    server.listen(PORT, () => {
-      console.log(`🚀 StudyPod Phoenix running on http://localhost:${PORT}`);
+    server.listen(PORT, '127.0.0.1', () => {
+      logger.info(`StudyPod Phoenix running on http://127.0.0.1:${PORT}`);
     });
   } catch (error) {
-    console.error('Failed to start server:', error);
+    logger.error('Failed to start server:', error);
     process.exit(1);
   }
 };

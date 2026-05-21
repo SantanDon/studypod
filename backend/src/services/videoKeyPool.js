@@ -1,3 +1,5 @@
+import { logger } from '../utils/logger.js';
+
 /**
  * videoKeyPool — SOVEREIGN STEALTH CAROUSEL v1.2.0
  * Unified identity and key management for YouTube extraction.
@@ -34,7 +36,7 @@ class VideoKeyPool {
       type: this.geminiKeys.includes(key) ? 'gemini' : 'groq'
     }));
 
-    console.log(`[VideoStealth] Carousel initialized with ${this.allKeys.length} identifiers.`);
+    logger.info(`[VideoStealth] Carousel initialized with ${this.allKeys.length} identifiers.`);
 
     for (const item of this.allKeys) {
       this.keyHealth.set(item.key, { failures: 0, lastUsed: 0, isExhausted: false, type: item.type });
@@ -57,7 +59,7 @@ class VideoKeyPool {
         }
       }
       if (oldest && now - oldest.lastUsed > 600000) {
-         console.log(`[VideoStealth] Attempting recovery for identifier: ${oldest.key.substring(0, 8)}`);
+         logger.info(`[VideoStealth] Attempting recovery for identifier: ${oldest.key.substring(0, 8)}`);
          this.keyHealth.get(oldest.key).isExhausted = false;
          return { key: oldest.key, identity: this.identities[0] };
       }
@@ -78,7 +80,7 @@ class VideoKeyPool {
     stats.failures++;
     if (error?.includes('429') || error?.includes('quota')) {
       stats.isExhausted = true;
-      console.warn(`[VideoStealth] Identifier exhausted: ${key.substring(0, 8)}`);
+      logger.warn(`[VideoStealth] Identifier exhausted: ${key.substring(0, 8)}`);
     }
   }
 }
