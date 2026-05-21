@@ -1,55 +1,13 @@
-// API BRIDGE v1.0.2 - TS: 1309
-import path from 'path';
-import { fileURLToPath } from 'url';
-import fs from 'fs';
+// API BRIDGE v1.0.4
+import app from '../backend/src/server.js';
 
-// Force Vercel to bundle backend dependencies
-import 'express';
-import 'cors';
-import 'cookie-parser';
-import 'helmet';
-import 'express-rate-limit';
-import 'bcryptjs';
-import 'jsonwebtoken';
-import 'uuid';
-import 'otplib';
-import 'qrcode';
-import 'epub';
-import 'mammoth';
-import 'pdf-parse';
-import 'youtube-transcript';
+// Force Vercel to bundle dynamic/optional dependencies
 import '@danielxceron/youtube-transcript';
-import 'cheerio';
-import 'multer';
-import 'kokoro-js';
-import '@hocuspocus/server';
 import '@xenova/transformers';
-import 'drizzle-orm';
-import '@libsql/client';
-
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
 
 export default async (req, res) => {
   try {
-    const rootDir = process.cwd();
-    const serverPath = path.resolve(rootDir, 'backend/src/server.js');
-    
-    if (!fs.existsSync(serverPath)) {
-      return res.status(500).json({
-        error: 'Backend initialization failed',
-        message: 'server.js not found at ' + serverPath,
-        cwd: rootDir,
-        apiDir: __dirname,
-        rootContents: fs.readdirSync(rootDir)
-      });
-    }
-
-    // Dynamic import of the Express app
-    const module = await import(serverPath);
-    const app = module.default || module;
-    
-    // Bridge the Vercel request/response to the Express app
+    // Bridge the Vercel request/response directly to the statically imported Express app
     return app(req, res);
   } catch (error) {
     console.error('Fatal API Bridge Error:', error);
