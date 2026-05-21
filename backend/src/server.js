@@ -30,8 +30,20 @@ import { initializeDatabase } from './db/database.js';
 import { errorHandler } from './middleware/errorHandler.js';
 import { logger, requestLogger } from './utils/logger.js';
 
-// ENI: Services re-enabled after unification stability check
-import { hocuspocusServer } from './services/syncRelay.js';
+// ENI: Services only loaded outside Vercel — Hocuspocus + @xenova/transformers are
+// incompatible with serverless (no persistent WebSocket + WASM > 250 MB limit).
+// String() wrapping prevents Vercel's Node File Tracer (nft) from statically
+// resolving this path and including the heavy deps in the serverless bundle.
+let hocuspocusServer = null;
+if (!process.env.VERCEL) {
+  try {
+    const relayPath = String('./services/syncRelay.js');
+    const { hocuspocusServer: hs } = await import(relayPath);
+    hocuspocusServer = hs;
+  } catch (e) {
+    logger.warn('[SyncRelay] Failed to load, WebSocket sync unavailable:', e?.message);
+  }
+}
 
 
 const __filename = fileURLToPath(import.meta.url);
@@ -49,6 +61,10 @@ if (missingEnvs.length > 0 && process.env.NODE_ENV === 'production') {
 
 const app = express();
 const PORT = process.env.PORT || 3001;
+
+// Trust Vercel's (and any reverse proxy's) X-Forwarded-For headers
+// Required for express-rate-limit to correctly identify client IPs behind the load balancer
+app.set('trust proxy', 1);
 
 // Global Security Hardening — dynamic CSP allows both 127.0.0.1 and localhost
 const selfUrl = `http://127.0.0.1:${PORT}`;
@@ -200,7 +216,8 @@ app.get('/api/health/stability-audit', async (req, res) => {
   try {
     // Basic DB check
     const { users } = await import('./db/schema.js');
-    const { db } = await import('./db/database.js');
+    const { getDatabase } = await import('./db/database.js');
+    const db = await getDatabase();
     await db.select().from(users).limit(1);
     audit.components.database = 'healthy';
   } catch (err) {
@@ -224,22 +241,21 @@ app.use(errorHandler);
 
 const server = http.createServer(app);
 
-// Handle WebSocket upgrades for Hocuspocus Sync Relay
-server.on('upgrade', async (request, socket, head) => {
-  const pathname = new URL(request.url, `http://${request.headers.host}`).pathname;
-  if (pathname === '/api/sync-relay') {
-    const pkg = '@xenova/transformers';
-    const { pipeline: transformersPipeline, env } = await import(pkg);
-    // ENI: Use /tmp for serverless environments (Vercel is read-only elsewhere)
-    env.cacheDir = process.env.VERCEL ? '/tmp/transformers' : './.cache/transformers';
-    let pipeline = await transformersPipeline('feature-extraction', 'Xenova/all-MiniLM-L6-v2', {
-      quantized: true // Use INT8 quantization for speed on VPS/Vercel
-    });
-    hocuspocusServer.handleUpgrade(request, socket, head);
-  } else {
-    socket.destroy();
-  }
-});
+// WebSocket upgrade — only active when running as a long-lived process (not Vercel)
+if (!process.env.VERCEL) {
+  server.on('upgrade', async (request, socket, head) => {
+    const pathname = new URL(request.url, `http://${request.headers.host}`).pathname;
+    if (pathname === '/api/sync-relay' && hocuspocusServer) {
+      const pkg = '@xenova/transformers';
+      const { pipeline: transformersPipeline, env } = await import(pkg);
+      env.cacheDir = './.cache/transformers';
+      await transformersPipeline('feature-extraction', 'Xenova/all-MiniLM-L6-v2', { quantized: true });
+      hocuspocusServer.handleUpgrade(request, socket, head);
+    } else {
+      socket.destroy();
+    }
+  });
+}
 
 // Start server
 const startServer = async (retries = 5) => {

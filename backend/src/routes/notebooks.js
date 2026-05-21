@@ -19,6 +19,11 @@ async function getNotebookOrRecover(id, userId, description = "Auto-provisioned"
   if (deletedNotebooks.has(id)) {
     return null;
   }
+  const explicitlyDeleted = await dbHelpers.isNotebookExplicitlyDeleted(id, userId);
+  if (explicitlyDeleted) {
+    deletedNotebooks.add(id); // Cache locally
+    return null;
+  }
   let notebook = await dbHelpers.getNotebookById(id, userId);
   if (!notebook) {
     logger.info(`🛠️ JIT Recovery: Notebook ${id} missing. Attempting auto-provision...`);

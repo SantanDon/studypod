@@ -20,15 +20,22 @@
   ],
   "rewrites": [
     {
+      "source": "/api/youtube-edge",
+      "destination": "/api/youtube-edge"
+    },
+    {
       "source": "/api/(.*)",
       "destination": "/api/[...route].js"
     }
   ],
   "functions": {
+    "api/youtube-edge.js": {
+      "maxDuration": 25
+    },
     "api/**/*.js": {
-      "includeFiles": "backend/**"
+      "includeFiles": "backend/src/{routes,middleware,db,utils}/**",
+      "excludeFiles": "{node_modules/@hocuspocus,node_modules/@xenova,node_modules/better-sqlite3,node_modules/fluent-ffmpeg,node_modules/@ffmpeg,node_modules/onnxruntime-node,node_modules/sharp,node_modules/canvas}/**"
     }
   },
-  "outputDirectory": "dist",
-  "installCommand": "npm install"
+  "outputDirectory": "dist"
 }

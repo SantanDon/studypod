@@ -1,34 +1,34 @@
 /**
  * Cloud storage client for encrypted sync
- * 
+ *
  * Handles communication with cloud storage backend.
  * All data is encrypted before upload, server only stores encrypted blobs.
  */
 
-import { EncryptedData } from '../encryption/types';
-import { generateChecksum } from '../encryption/integrity';
+import type { EncryptedData } from '../encryption/types';
 
 export interface EncryptedEntity {
   id: string;
   userId: string;
   type: 'notebook' | 'source' | 'note' | 'chat' | 'flashcard' | 'quiz' | 'podcast';
-  encryptedData: string;      // Base64 encoded encrypted blob
-  salt: string;               // Base64 encoded salt
-  checksum: string;           // SHA-256 hash of plaintext
-  version: number;            // Optimistic locking
-  createdAt: string;          // ISO date
-  updatedAt: string;          // ISO date
+  encryptedData: string; // JSON-stringified EncryptedData blob
+  salt: string;          // Base64 salt
+  checksum: string;      // SHA-256 of plaintext
+  version: number;
+  createdAt: string;     // ISO date
+  updatedAt: string;     // ISO date
   syncStatus: 'synced' | 'pending' | 'conflict';
 }
 
 export interface CloudClientConfig {
   baseUrl: string;
-  apiKey?: string;
+  apiKey?: string; // Optional Bearer token / API key
 }
 
 /**
- * Cloud storage client
- * Communicates with backend API for sync operations
+ * Cloud storage client — all requests use credentials: 'include' so that
+ * HttpOnly auth cookies are forwarded automatically, and path aliases now
+ * match the backend router exactly.
  */
 export class CloudClient {
   private config: CloudClientConfig;
@@ -37,61 +37,63 @@ export class CloudClient {
     this.config = config;
   }
 
-  /**
-   * Make HTTP request to API
-   */
+  // ─── Private helpers ──────────────────────────────────────────────────────
+
   private async request<T>(
     endpoint: string,
     options: RequestInit = {}
   ): Promise<T> {
     const url = `${this.config.baseUrl}${endpoint}`;
-    
-    const headers: HeadersInit = {
+
+    const headers: Record<string, string> = {
       'Content-Type': 'application/json',
-      ...options.headers,
+      ...(options.headers as Record<string, string>),
     };
-    
+
+    // Support API-key auth for agent callers
     if (this.config.apiKey) {
-      headers['X-API-Key'] = this.config.apiKey;
+      headers['Authorization'] = `Bearer ${this.config.apiKey}`;
     }
-    
+
     const response = await fetch(url, {
       ...options,
       headers,
+      credentials: 'include', // Always transmit HttpOnly cookies
     });
 
     if (!response.ok) {
-      const error = await response.text();
-      throw new Error(`API error (${response.status}): ${error}`);
+      const body = await response.text().catch(() => '');
+      throw new Error(`API error (${response.status}): ${body}`);
     }
 
-    return response.json();
+    return response.json() as Promise<T>;
   }
 
+  // ─── Public API ───────────────────────────────────────────────────────────
+
   /**
-   * Upload encrypted entity to cloud
-   * 
-   * @param entity - Encrypted entity to upload
-   * @returns Uploaded entity with server metadata
+   * Upload encrypted entity — POST /api/sync/upload
    */
-  async upload(entity: EncryptedEntity): Promise<EncryptedEntity> {
-    return this.request<EncryptedEntity>('/api/sync', {
+  async upload(entity: EncryptedEntity): Promise<{ success: boolean; id: string; version: number }> {
+    return this.request('/api/sync/upload', {
       method: 'POST',
-      body: JSON.stringify(entity),
+      body: JSON.stringify({
+        id: entity.id,
+        type: entity.type,
+        encryptedData: entity.encryptedData,
+        checksum: entity.checksum,
+        version: entity.version,
+      }),
     });
   }
 
   /**
-   * Download encrypted entity from cloud
-   * 
-   * @param entityId - Entity ID to download
-   * @returns Encrypted entity or null if not found
+   * Download encrypted entity — GET /api/sync/download/:id
    */
   async download(entityId: string): Promise<EncryptedEntity | null> {
     try {
-      return await this.request<EncryptedEntity>(`/api/sync/${entityId}`);
+      return await this.request<EncryptedEntity>(`/api/sync/download/${entityId}`);
     } catch (error) {
-      // Return null if not found
       if (error instanceof Error && error.message.includes('404')) {
         return null;
       }
@@ -100,74 +102,52 @@ export class CloudClient {
   }
 
   /**
-   * List all entities for current user
-   * 
-   * @param userId - User ID
-   * @returns Array of encrypted entities
+   * List all synced entities — GET /api/sync/list
    */
-  async list(userId: string): Promise<EncryptedEntity[]> {
-    return this.request<EncryptedEntity[]>(`/api/sync?userId=${userId}`);
+  async list(type?: string): Promise<EncryptedEntity[]> {
+    const qs = type ? `?type=${encodeURIComponent(type)}` : '';
+    const result = await this.request<{ items: EncryptedEntity[] }>(`/api/sync/list${qs}`);
+    return result.items ?? [];
   }
 
   /**
-   * Delete entity from cloud
-   * 
-   * @param entityId - Entity ID to delete
+   * Delete entity — DELETE /api/sync/delete/:id
    */
   async delete(entityId: string): Promise<void> {
-    await this.request<void>(`/api/sync/${entityId}`, {
+    await this.request<void>(`/api/sync/delete/${entityId}`, {
       method: 'DELETE',
     });
   }
 
   /**
-   * Get sync status from server
-   * 
-   * @param userId - User ID
-   * @returns Sync status information
+   * Sync status — GET /api/sync/status
    */
-  async getStatus(userId: string): Promise<{
-    lastSync: number;
-    pendingUploads: number;
-    pendingDownloads: number;
-  }> {
-    return this.request(`/api/sync/status?userId=${userId}`);
+  async getStatus(): Promise<{ totalItems: number; totalSize: number; lastSync: string | null }> {
+    return this.request('/api/sync/status');
   }
 
   /**
-   * Batch upload multiple entities
-   * 
-   * @param entities - Array of entities to upload
-   * @returns Array of uploaded entities
+   * Batch upload — POST /api/sync/batch-upload
    */
-  async batchUpload(entities: EncryptedEntity[]): Promise<EncryptedEntity[]> {
-    return this.request<EncryptedEntity[]>('/api/sync/batch', {
-      method: 'POST',
-      body: JSON.stringify({ entities }),
-    });
+  async batchUpload(
+    items: Array<{ id: string; type: string; encryptedData: string; checksum: string; version?: number }>
+  ): Promise<Array<{ id: string; success: boolean; version?: number; error?: string }>> {
+    const result = await this.request<{ results: Array<{ id: string; success: boolean; version?: number; error?: string }> }>(
+      '/api/sync/batch-upload',
+      {
+        method: 'POST',
+        body: JSON.stringify({ items }),
+      }
+    );
+    return result.results ?? [];
   }
 
   /**
-   * Batch download multiple entities
-   * 
-   * @param entityIds - Array of entity IDs to download
-   * @returns Array of encrypted entities
-   */
-  async batchDownload(entityIds: string[]): Promise<EncryptedEntity[]> {
-    return this.request<EncryptedEntity[]>('/api/sync/batch', {
-      method: 'POST',
-      body: JSON.stringify({ entityIds }),
-    });
-  }
-
-  /**
-   * Check if server is reachable
-   * 
-   * @returns True if server is online
+   * Check reachability
    */
   async ping(): Promise<boolean> {
     try {
-      await this.request('/api/ping');
+      await this.request('/health');
       return true;
     } catch {
       return false;
@@ -175,18 +155,8 @@ export class CloudClient {
   }
 }
 
-/**
- * Create encrypted entity from data
- * 
- * @param id - Entity ID
- * @param userId - User ID
- * @param type - Entity type
- * @param encryptedData - Encrypted data object
- * @param salt - Salt used for encryption
- * @param plaintextChecksum - Checksum of plaintext data
- * @param version - Version number
- * @returns EncryptedEntity object
- */
+// ─── Helpers ─────────────────────────────────────────────────────────────────
+
 export function createEncryptedEntity(
   id: string,
   userId: string,
@@ -194,11 +164,9 @@ export function createEncryptedEntity(
   encryptedData: EncryptedData,
   salt: string,
   plaintextChecksum: string,
-  version: number = 1
+  version = 1
 ): EncryptedEntity {
-  // Combine encrypted data into single blob
   const blob = JSON.stringify(encryptedData);
-  
   return {
     id,
     userId,
@@ -213,34 +181,18 @@ export function createEncryptedEntity(
   };
 }
 
-/**
- * Parse encrypted entity back to encrypted data
- * 
- * @param entity - Encrypted entity
- * @returns EncryptedData object
- */
 export function parseEncryptedEntity(entity: EncryptedEntity): EncryptedData {
   return JSON.parse(entity.encryptedData) as EncryptedData;
 }
 
-// Default cloud client instance (will be configured at runtime)
+// ─── Singleton ────────────────────────────────────────────────────────────────
+
 let defaultClient: CloudClient | null = null;
 
-/**
- * Initialize default cloud client
- * 
- * @param config - Client configuration
- */
 export function initializeCloudClient(config: CloudClientConfig): void {
   defaultClient = new CloudClient(config);
 }
 
-/**
- * Get default cloud client instance
- * 
- * @returns CloudClient instance
- * @throws Error if not initialized
- */
 export function getCloudClient(): CloudClient {
   if (!defaultClient) {
     throw new Error('Cloud client not initialized. Call initializeCloudClient() first.');

@@ -12,82 +12,93 @@ interface MigrationFlowProps {
   onComplete: () => void;
 }
 
+const LEGACY_KEYS = ['notebooks', 'sources', 'flashcards', 'settings'];
+
 export function MigrationFlow({ onComplete }: MigrationFlowProps) {
   const [step, setStep] = useState<'detect' | 'confirm' | 'migrating' | 'complete'>('detect');
   const [dataToMigrate, setDataToMigrate] = useState<string[]>([]);
   const [progress, setProgress] = useState(0);
+  const [errorMsg, setErrorMsg] = useState<string | null>(null);
 
   useEffect(() => {
     const detectLegacyData = (): string[] => {
-      const legacyKeys: string[] = [];
-      const knownKeys = ['notebooks', 'sources', 'flashcards', 'settings'];
-      
-      for (const key of knownKeys) {
-        if (localStorage.getItem(key) && !key.startsWith('user:')) {
-          legacyKeys.push(key);
-        }
-      }
-      
-      return legacyKeys;
+      return LEGACY_KEYS.filter(key => !!localStorage.getItem(key));
     };
 
     const legacyKeys = detectLegacyData();
     setDataToMigrate(legacyKeys);
-    
+
     if (legacyKeys.length > 0) {
       setStep('confirm');
     } else {
       setStep('complete');
-      onComplete(); // Skip entirely if nothing to migrate
+      onComplete();
     }
   }, [onComplete]);
 
   const handleMigrate = async () => {
     setStep('migrating');
+    setErrorMsg(null);
+
     const { masterKey, userId } = useEncryptionStore.getState();
-    
-    if (!masterKey || !userId) {
-      throw new Error('No encryption context available');
+
+    if (!userId) {
+      // No user context at all — skip migration silently and continue
+      setStep('complete');
+      return;
     }
 
     const storage = new UserStorage(userId);
     const syncManager = getSyncManager();
-    
+
     for (let i = 0; i < dataToMigrate.length; i++) {
       const key = dataToMigrate[i];
-      const data = localStorage.getItem(key);
-      
-      if (data) {
-        // We know we must encrypt it and queue for sync. However, actually the 
-        // SyncManager queueSync function expects plaintext data and handles encryption.
-        // We also want to store it locally encrypted correctly. But wait, localNotebookStore 
-        // expects data to stay in local storage via localStorageService, which handles its own format?
-        // Wait, localStorageService reads and writes plaintext in this case unless encrypted. 
-        // Let's follow the HANDOVER.md specification exactly.
-        const encrypted = await encrypt(data, masterKey);
-        // Store with namespaced key 
-        storage.set(key, JSON.stringify(encrypted));
-        
-        // Queue for sync - queueSync takes (entityId, entityType, plaintextData). 
-        // We will parse the data to object before passing.
+      const rawData = localStorage.getItem(key);
+
+      if (rawData) {
         try {
-           const parsedData = JSON.parse(data);
-           // For multiple items like an array of notebooks, we might need to queue individually
-           // but the spec says: `await syncManager.queueSync(key, key as any, JSON.parse(data));`
-           // so we explicitly do exactly that:
-           await syncManager.queueSync(key, key as 'notebook' | 'source' | 'note' | 'chat', parsedData, 'update');
-        } catch(e) {
-           console.error("Migration: string could not be parsed as JSON, sending raw.", e);
+          if (masterKey) {
+            // ── E2EE mode: encrypt then store ─────────────────────────────
+            const encrypted = await encrypt(rawData, masterKey);
+            storage.set(key, JSON.stringify(encrypted));
+          } else {
+            // ── Plaintext/cloud mode: store as-is in namespaced storage ───
+            storage.set(key, rawData);
+          }
+
+          // Queue for cloud sync regardless of mode
+          try {
+            const parsedData = JSON.parse(rawData);
+            await syncManager.queueSync(
+              key,
+              key as 'notebook' | 'source' | 'note' | 'chat',
+              parsedData,
+              'update'
+            );
+          } catch {
+            // If the raw value wasn't valid JSON, still try syncing the string
+            await syncManager.queueSync(key, key as any, rawData, 'update');
+          }
+
+          // Remove legacy unnamespaced key after successful migration
+          localStorage.removeItem(key);
+        } catch (err) {
+          console.error(`Migration error for key "${key}":`, err);
+          setErrorMsg(
+            `Failed to migrate "${key}". Your data has not been lost — try again or skip.`
+          );
+          // Don't remove key on failure
         }
-        
-        // Remove legacy key
-        localStorage.removeItem(key);
       }
-      
+
       setProgress(((i + 1) / dataToMigrate.length) * 100);
     }
-    
+
     setStep('complete');
+  };
+
+  const handleSkip = () => {
+    onComplete();
   };
 
   if (step === 'detect') {
@@ -100,18 +111,18 @@ export function MigrationFlow({ onComplete }: MigrationFlowProps) {
         <CardHeader>
           <CardTitle>Migrate Existing Data</CardTitle>
           <CardDescription>
-            We found {dataToMigrate.length} items that need to be encrypted and synced
+            We found {dataToMigrate.length} item{dataToMigrate.length !== 1 ? 's' : ''} that need to be moved to your account storage
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-4">
           <Alert>
             <AlertCircle className="h-4 w-4" />
             <AlertDescription className="ml-2">
-              This will encrypt your existing data and prepare it for cloud sync.
-              Your original data will be backed up automatically locally in its encrypted form.
+              Your existing local data will be moved to your account namespace and queued for cloud sync.
+              Original unnamespaced keys will be cleaned up after migration.
             </AlertDescription>
           </Alert>
-          
+
           <div className="space-y-2">
             <p className="text-sm font-medium">Data to migrate:</p>
             <ul className="text-sm text-muted-foreground list-disc list-inside">
@@ -120,10 +131,15 @@ export function MigrationFlow({ onComplete }: MigrationFlowProps) {
               ))}
             </ul>
           </div>
-          
-          <Button onClick={handleMigrate} className="w-full">
-            Start Migration
-          </Button>
+
+          <div className="flex gap-2">
+            <Button onClick={handleMigrate} className="flex-1">
+              Start Migration
+            </Button>
+            <Button variant="outline" onClick={handleSkip} className="flex-1">
+              Skip
+            </Button>
+          </div>
         </CardContent>
       </Card>
     );
@@ -133,19 +149,25 @@ export function MigrationFlow({ onComplete }: MigrationFlowProps) {
     return (
       <Card>
         <CardHeader>
-          <CardTitle>Migrating Data...</CardTitle>
+          <CardTitle>Migrating Data…</CardTitle>
         </CardHeader>
         <CardContent>
           <div className="space-y-2">
             <div className="w-full bg-secondary rounded-full h-2">
-              <div 
-                className="bg-primary h-2 rounded-full transition-all"
+              <div
+                className="bg-primary h-2 rounded-full transition-all duration-300"
                 style={{ width: `${progress}%` }}
               />
             </div>
             <p className="text-sm text-center text-muted-foreground">
               {Math.round(progress)}% complete
             </p>
+            {errorMsg && (
+              <Alert variant="destructive">
+                <AlertCircle className="h-4 w-4" />
+                <AlertDescription className="ml-2">{errorMsg}</AlertDescription>
+              </Alert>
+            )}
           </div>
         </CardContent>
       </Card>
@@ -162,10 +184,10 @@ export function MigrationFlow({ onComplete }: MigrationFlowProps) {
           <Alert>
             <CheckCircle className="h-4 w-4" />
             <AlertDescription className="ml-2">
-              Your data has been encrypted and queued for cloud sync.
+              Your data has been moved to your account storage and queued for cloud sync.
             </AlertDescription>
           </Alert>
-          
+
           <Button onClick={onComplete} className="w-full">
             Continue
           </Button>

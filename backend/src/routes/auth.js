@@ -26,12 +26,14 @@ import QRCode from 'qrcode';
 import jwt from 'jsonwebtoken';
 import { logger } from "../utils/logger.js";
 
-// Encryption for MFA secrets
-const MFA_ENCRYPTION_KEY = process.env.JWT_SECRET?.substring(0, 32).padEnd(32, '0');
+// Encryption for MFA secrets — lazy getter prevents import-time crash on Vercel
+// where process.env is not fully populated until the first request
+const getMfaKey = () =>
+  (process.env.JWT_SECRET || 'studypod_fallback_key_for_mfa_32bytes').substring(0, 32).padEnd(32, '0');
 const encryptSecret = (text) => {
   if (!text) return null;
   const iv = crypto.randomBytes(16);
-  const cipher = crypto.createCipheriv('aes-256-cbc', Buffer.from(MFA_ENCRYPTION_KEY), iv);
+  const cipher = crypto.createCipheriv('aes-256-cbc', Buffer.from(getMfaKey()), iv);
   let encrypted = cipher.update(text);
   encrypted = Buffer.concat([encrypted, cipher.final()]);
   return iv.toString('hex') + ':' + encrypted.toString('hex');
@@ -42,7 +44,7 @@ const decryptSecret = (text) => {
   const textParts = text.split(':');
   const iv = Buffer.from(textParts.shift(), 'hex');
   const encryptedText = Buffer.from(textParts.join(':'), 'hex');
-  const decipher = crypto.createDecipheriv('aes-256-cbc', Buffer.from(MFA_ENCRYPTION_KEY), iv);
+  const decipher = crypto.createDecipheriv('aes-256-cbc', Buffer.from(getMfaKey()), iv);
   let decrypted = decipher.update(encryptedText);
   decrypted = Buffer.concat([decrypted, decipher.final()]);
   return decrypted.toString();

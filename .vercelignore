@@ -1,0 +1,17 @@
+node_modules
+backend/node_modules
+uploads
+dist
+.git
+.vercel
+.cache
+.opencode
+.kiro
+.continue
+.claude
+*.db
+*.db-shm
+*.db-wal
+*.sqlite
+.env*
+!.env.example

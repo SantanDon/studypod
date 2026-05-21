@@ -37,6 +37,104 @@ function extractVideoId(url: string): string | null {
 }
 
 
+function parseChaptersFromDescription(description: string): any[] {
+  if (!description) return [];
+  const chapterRegex = /^(\d{1,2}:\d{2}(?::\d{2})?)\s+(.+)$/gm;
+  const chapters: any[] = [];
+  let match;
+  while ((match = chapterRegex.exec(description)) !== null) {
+    const [, timestamp, title] = match;
+    const parts = timestamp.split(':').map(Number);
+    let seconds = 0;
+    if (parts.length === 3) seconds = parts[0] * 3600 + parts[1] * 60 + parts[2];
+    else if (parts.length === 2) seconds = parts[0] * 60 + parts[1];
+    chapters.push({ timestamp, title: title.trim(), startSeconds: seconds });
+  }
+  const isValid = chapters.length >= 2 && chapters.every((c, i) => i === 0 || c.startSeconds > chapters[i - 1].startSeconds);
+  return isValid ? chapters : [];
+}
+
+function extractPotentialSpeakers(title: string, author: string): string {
+  const speakers = new Set<string>();
+  if (author) speakers.add(author.trim());
+  const titleClean = title || '';
+  const interviewMatch = titleClean.match(/(?:interview\s+with|featuring|feat\.?|w\/)\s+([A-Z][a-zA-Z]+(?:\s+[A-Z][a-zA-Z]+)+)/i);
+  if (interviewMatch && interviewMatch[1]) speakers.add(interviewMatch[1].trim());
+  const partnerMatch = titleClean.match(/([A-Z][a-zA-Z]+(?:\s+[A-Z][a-zA-Z]+)+)\s*(?:&|and)\s*([A-Z][a-zA-Z]+(?:\s+[A-Z][a-zA-Z]+)+)/i);
+  if (partnerMatch) {
+    if (partnerMatch[1]) speakers.add(partnerMatch[1].trim());
+    if (partnerMatch[2]) speakers.add(partnerMatch[2].trim());
+  }
+  return Array.from(speakers).filter(Boolean).join(', ');
+}
+
+function formatTimestamp(seconds: number): string {
+  const h = Math.floor(seconds / 3600);
+  const m = Math.floor((seconds % 3600) / 60);
+  const s = Math.floor(seconds % 60);
+  if (h > 0) return `${h}:${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`;
+  return `${m}:${String(s).padStart(2, '0')}`;
+}
+
+function buildStructuredContent(transcript: any[], metadata: any): string {
+  const { title, description, author, keywords } = metadata;
+  const keywordStr = keywords?.length > 0 ? keywords.slice(0, 10).join(', ') : 'None';
+  const descStr = description?.trim() 
+    ? (description.length > 5000 ? description.slice(0, 5000) + '…' : description)
+    : 'No description available.';
+
+  const speakerStr = extractPotentialSpeakers(title, author) || author || 'Unknown Speaker';
+
+  let header = `# ${title}
+**Channel/Author:** ${author}
+**Speakers:** ${speakerStr}
+**Keywords:** ${keywordStr}
+
+## Description
+${descStr}
+`;
+
+  if (transcript.length === 0) return header + '\n\n> No transcript available. Content inferred from metadata only.';
+
+  const chapters = parseChaptersFromDescription(description);
+  const useChapters = chapters.length >= 2;
+  if (useChapters) header += `\n**Chapters:** ${chapters.map(c => `${c.timestamp} ${c.title}`).join(' | ')}\n`;
+
+  const sections: { heading: string; text: string }[] = [];
+  if (useChapters) {
+    for (let ci = 0; ci < chapters.length; ci++) {
+      const chapterStart = chapters[ci].startSeconds * 1000;
+      const chapterEnd = ci + 1 < chapters.length ? chapters[ci + 1].startSeconds * 1000 : Infinity;
+      const items = transcript.filter((t: any) => t.offset >= chapterStart && t.offset < chapterEnd);
+      if (items.length > 0) {
+        sections.push({
+          heading: `[${chapters[ci].timestamp}] ${chapters[ci].title} (Speaker: ${speakerStr})`,
+          text: `[Video: ${title} | Speaker: ${speakerStr}]\n` + items.map((t: any) => t.text).join(' ').trim()
+        });
+      }
+    }
+  } else {
+    const SEGMENT_MS = 120_000;
+    const totalDuration = transcript[transcript.length - 1].offset + transcript[transcript.length - 1].duration;
+    const numSegments = Math.ceil(totalDuration / SEGMENT_MS);
+    for (let seg = 0; seg < numSegments; seg++) {
+      const segStart = seg * SEGMENT_MS;
+      const segEnd = segStart + SEGMENT_MS;
+      const items = transcript.filter((t: any) => t.offset >= segStart && t.offset < segEnd);
+      if (items.length > 0) {
+        const ts = formatTimestamp(segStart / 1000);
+        sections.push({
+          heading: `[${ts}] (Speaker: ${speakerStr})`,
+          text: `[Video: ${title} | Speaker: ${speakerStr}]\n` + items.map((t: any) => t.text).join(' ').trim()
+        });
+      }
+    }
+  }
+
+  const body = sections.map(s => `## ${s.heading}\n${s.text}`).join('\n\n');
+  return `${header}\n---\n\n${body}`;
+}
+
 export async function extractYoutubeTranscript(url: string): Promise<YoutubeTranscriptResult> {
   console.log('🎬 Starting YouTube transcript extraction for:', url);
 
@@ -76,9 +174,42 @@ export async function extractYoutubeTranscript(url: string): Promise<YoutubeTran
 
     const payload = await transcriptResponse.json();
     
-    const transcriptData = payload.transcript || (Array.isArray(payload) ? payload : []);
-    const metadata = payload.metadata || {};
-    
+    let transcriptData = payload.transcript || (Array.isArray(payload) ? payload : []);
+    let metadata = payload.metadata || {};
+
+    // ── Edge Function Fallback ─────────────────────────────────────────────────
+    // If the server returned no transcript, it likely hit YouTube's datacenter
+    // IP block on Vercel's AWS us-east-1. Try the Edge Function (/api/youtube-edge)
+    // which runs on Cloudflare's network — YouTube doesn't block Cloudflare IPs.
+    if ((!transcriptData || transcriptData.length === 0) && videoId) {
+      console.log('⚡ Server returned no transcript — trying Edge Function (Cloudflare network)...');
+      try {
+        const edgeRes = await fetch(`/api/youtube-edge?videoId=${encodeURIComponent(videoId)}`);
+        if (edgeRes.ok) {
+          const edgeData = await edgeRes.json();
+          if (edgeData.transcript && edgeData.transcript.length > 0) {
+            console.log(`✅ Edge Function extracted ${edgeData.transcript.length} transcript lines`);
+            transcriptData = edgeData.transcript;
+            metadata = {
+              title: edgeData.title || metadata.title,
+              description: edgeData.description || metadata.description,
+              author: edgeData.author || metadata.author,
+              keywords: edgeData.keywords || metadata.keywords,
+              extractedBy: edgeData.extractedBy || 'edge_fallback',
+              sovereign_signal: { identity: 'EDGE_CLOUDFLARE', farm_health: 'healthy', timestamp: new Date().toISOString() },
+            };
+          } else {
+            console.warn('⚠️ Edge Function also returned no transcript:', edgeData.error || 'unknown');
+          }
+        } else {
+          console.warn('⚠️ Edge Function HTTP error:', edgeRes.status);
+        }
+      } catch (edgeErr) {
+        console.warn('⚠️ Edge Function call failed:', edgeErr);
+      }
+    }
+    // ─────────────────────────────────────────────────────────────────────────
+
     // Extract metadata
     const title = metadata.title || `YouTube Video: ${videoId}`;
     const description = metadata.description || "";
@@ -99,16 +230,17 @@ export async function extractYoutubeTranscript(url: string): Promise<YoutubeTran
     // Prefer the backend's pre-built structured content (AI-optimized, chapter-aware)
     // Fall back to building locally if backend doesn't provide it
     let content: string;
-    if (payload.structuredContent) {
+    const usedEdgeFallback = (!payload.transcript || payload.transcript.length === 0) && (transcriptData && transcriptData.length > 0);
+
+    if (payload.structuredContent && !usedEdgeFallback) {
       content = payload.structuredContent;
       console.log(`✅ Using backend structured content (${content.length} chars)`);
     } else if (!Array.isArray(transcriptData) || transcriptData.length === 0) {
       console.warn(`[YouTube Extractor] No transcript available. Falling back to metadata only.`);
       content = `# ${title}\n**Channel:** ${author}\n**Keywords:** ${keywords.join(', ') || 'None'}\n\n**Description:** ${description || 'No description available.'}\n\n> No transcript available for this video.`;
     } else {
-      // Legacy fallback: build the old metadata header
-      const rawTranscript = transcriptData.map((t: {text: string}) => t.text).join(' ');
-      content = `# ${title}\n**Channel:** ${author}\n**Keywords:** ${keywords.join(', ') || 'None'}\n\n${description ? `**Description:** ${description}\n\n` : ''}## Transcript\n${rawTranscript.trim()}`;
+      console.log(`⚡ Building structured content locally due to Edge fallback (${transcriptData.length} lines)...`);
+      content = buildStructuredContent(transcriptData, metadata);
     }
 
     console.log(`✅ Successfully extracted: ${content.length} characters, ${Math.round(duration)}s duration`);

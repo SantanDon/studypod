@@ -11,7 +11,7 @@ import { Authentication } from './Authentication';
 import { RecoveryAccess } from './RecoveryAccess';
 import { RecoverySetup } from './RecoverySetup';
 import { AccountSelector } from './AccountSelector';
-import { MigrationFlow } from './MigrationFlow';
+
 import { RecoveryView } from '../auth/RecoveryView';
 import { useEncryptionStore } from '@/stores/encryptionStore';
 import { Button } from '@/components/ui/button';
@@ -19,7 +19,7 @@ import { useLocation, useNavigate } from 'react-router-dom';
 import { listAllUserIds, getCurrentUserId } from '@/lib/encryption/userStorage';
 import { CloudLogin } from '../auth/CloudLogin';
 
-type FlowState = 'loading' | 'select-account' | 'create-account' | 'authenticate' | 'recovery-setup' | 'recovery-access' | 'recover-account' | 'migrate' | 'unlocked' | 'cloud-login' | 'cloud-signup';
+type FlowState = 'loading' | 'select-account' | 'create-account' | 'authenticate' | 'recovery-setup' | 'recovery-access' | 'recover-account' | 'unlocked' | 'cloud-login' | 'cloud-signup';
 
 interface EncryptionFlowProps {
   onUnlocked?: () => void;
@@ -90,17 +90,8 @@ export function EncryptionFlow({ onUnlocked, allowGuest = true }: EncryptionFlow
   };
 
   const handleAccountCreated = () => {
-    // After account creation, check for legacy data
-    const hasLegacyData = ['notebooks', 'sources', 'flashcards', 'settings'].some(
-      key => localStorage.getItem(key) && !key.startsWith('user:')
-    );
-    
-    if (hasLegacyData) {
-      setFlowState('migrate');
-    } else {
-      setFlowState('unlocked');
-      onUnlocked?.();
-    }
+    setFlowState('unlocked');
+    onUnlocked?.();
   };
 
   const handleRecoverySetupComplete = () => {
@@ -110,22 +101,11 @@ export function EncryptionFlow({ onUnlocked, allowGuest = true }: EncryptionFlow
   };
 
   const handleAuthenticationSuccess = () => {
-    const hasLegacyData = ['notebooks', 'sources', 'flashcards', 'settings'].some(
-      key => localStorage.getItem(key) && !key.startsWith('user:')
-    );
-    
-    if (hasLegacyData) {
-      setFlowState('migrate');
-    } else {
-      setFlowState('unlocked');
-      onUnlocked?.();
-    }
-  };
-
-  const handleMigrationComplete = () => {
     setFlowState('unlocked');
     onUnlocked?.();
   };
+
+
 
   const handleShowRecovery = () => {
     setFlowState('recover-account');
@@ -217,9 +197,7 @@ export function EncryptionFlow({ onUnlocked, allowGuest = true }: EncryptionFlow
           />
         )}
 
-        {flowState === 'migrate' && (
-          <MigrationFlow onComplete={handleMigrationComplete} />
-        )}
+
 
         {allowGuest && (flowState === 'select-account' || flowState === 'create-account' || flowState === 'authenticate') && (
           <div className="text-center">

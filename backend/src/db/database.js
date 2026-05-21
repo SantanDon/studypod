@@ -1,5 +1,5 @@
-import { createClient } from '@libsql/client';
-import { drizzle } from 'drizzle-orm/libsql';
+import { createClient as createWebClient } from '@libsql/client/web';
+import { construct as drizzle } from 'drizzle-orm/libsql/driver-core';
 import * as schema from './schema.js';
 import dotenv from 'dotenv';
 import { fileURLToPath } from 'url';
@@ -36,11 +36,23 @@ if (isVercel) {
 let client;
 let dbInstance;
 
+let schemaInitialized = false;
+
 export async function getDatabase() {
   if (!dbInstance) {
     try {
       logger.info(`Connecting to database at: ${url}`);
-      client = createClient({
+      let createClientFn;
+      if (url && (url.startsWith('libsql://') || url.startsWith('http://') || url.startsWith('https://'))) {
+        logger.info('Using Web client (@libsql/client/web) for HTTP/libsql protocol');
+        createClientFn = createWebClient;
+      } else {
+        logger.info('Using standard client (@libsql/client) for local file protocol');
+        const stdClientPath = String('@libsql/client');
+        const { createClient } = await import(stdClientPath);
+        createClientFn = createClient;
+      }
+      client = createClientFn({
         url: url,
         authToken: authToken
       });
@@ -51,6 +63,19 @@ export async function getDatabase() {
       throw error;
     }
   }
+
+  // Lazily initialize schema once per cold start so Vercel serverless
+  // functions don't crash even when startServer() is skipped
+  if (!schemaInitialized) {
+    schemaInitialized = true;
+    try {
+      await initializeDatabase();
+    } catch (err) {
+      // Schema already exists or non-fatal — log and continue
+      logger.warn('Lazy schema init warning (non-fatal):', err?.message);
+    }
+  }
+
   return dbInstance;
 }
 
@@ -106,6 +131,21 @@ export async function initializeDatabase() {
       "content" text NOT NULL,
       "read" integer DEFAULT 0,
       "created_at" integer DEFAULT (strftime('%s', 'now'))
+    )`);
+    await db.run(sql`CREATE TABLE IF NOT EXISTS "sync_data" (
+      "id" text PRIMARY KEY NOT NULL,
+      "user_id" text NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      "type" text NOT NULL,
+      "encrypted_data" text NOT NULL,
+      "checksum" text NOT NULL,
+      "version" integer DEFAULT 1,
+      "created_at" integer DEFAULT (strftime('%s', 'now')),
+      "updated_at" integer DEFAULT (strftime('%s', 'now'))
+    )`);
+    await db.run(sql`CREATE TABLE IF NOT EXISTS "deleted_notebooks" (
+      "id" text PRIMARY KEY NOT NULL,
+      "user_id" text NOT NULL,
+      "deleted_at" integer DEFAULT (strftime('%s', 'now'))
     )`);
     logger.info('Schema tables verified.');
   } catch (err) {
@@ -409,6 +449,17 @@ export const dbHelpers = {
       ));
   },
 
+  async isNotebookExplicitlyDeleted(id, userId) {
+    const db = await getDatabase();
+    const result = await db.select().from(schema.deletedNotebooks)
+      .where(and(
+        eq(schema.deletedNotebooks.id, id),
+        eq(schema.deletedNotebooks.userId, userId)
+      ))
+      .limit(1);
+    return result.length > 0;
+  },
+
   async deleteNotebook(id, userId) {
     const db = await getDatabase();
     
@@ -420,6 +471,11 @@ export const dbHelpers = {
     if (notebook) {
       // User is the owner -> Full deletion (cascades handle the rest)
       const result = await db.delete(schema.notebooks).where(eq(schema.notebooks.id, id));
+      try {
+        await db.insert(schema.deletedNotebooks).values({ id, userId });
+      } catch (err) {
+        logger.debug(`deletedNotebooks record insertion fail/ignore: ${err.message}`);
+      }
       return { changes: result.rowsAffected, action: 'deleted' };
     }
 
@@ -441,6 +497,16 @@ export const dbHelpers = {
         inArray(schema.notebooks.id, ids),
         eq(schema.notebooks.userId, userId)
       ));
+    
+    if (result.rowsAffected > 0) {
+      for (const id of ids) {
+        try {
+          await db.insert(schema.deletedNotebooks).values({ id, userId });
+        } catch (err) {
+          logger.debug(`deletedNotebooks batch insertion fail/ignore: ${err.message}`);
+        }
+      }
+    }
     return { changes: result.rowsAffected };
   },
 

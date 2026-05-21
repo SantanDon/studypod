@@ -206,3 +206,9 @@ export const pairingCodes = sqliteTable('pairing_codes', {
   expiresAt: integer('expires_at', { mode: 'timestamp' }).notNull(),
   createdAt: integer('created_at', { mode: 'timestamp' }).$defaultFn(() => new Date()),
 });
+
+export const deletedNotebooks = sqliteTable('deleted_notebooks', {
+  id: text('id').primaryKey(),
+  userId: text('user_id').notNull(),
+  deletedAt: integer('deleted_at', { mode: 'timestamp' }).$defaultFn(() => new Date()),
+});

@@ -2,7 +2,6 @@
 import app from '../backend/src/server.js';
 
 // Force Vercel to bundle dynamic/optional and backend dependencies
-import '@danielxceron/youtube-transcript';
 import 'cookie-parser';
 import 'cors';
 import 'helmet';
@@ -11,7 +10,7 @@ import 'dotenv';
 import 'express';
 import 'jsonwebtoken';
 import 'bcryptjs';
-import '@libsql/client';
+import '@libsql/client/web';
 import 'drizzle-orm';
 import 'uuid';
 import 'qrcode';
@@ -19,7 +18,6 @@ import 'otplib';
 import 'cheerio';
 import 'epub';
 import '@google/genai';
-import '@hocuspocus/server';
 import 'node-fetch';
 import 'mammoth';
 import 'multer';

@@ -10,14 +10,19 @@ const router = express.Router();
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
-const UPLOADS_DIR = path.join(__dirname, '../../../uploads');
+const isVercel = process.env.VERCEL === '1' || !!process.env.VERCEL;
+const UPLOADS_DIR = isVercel ? '/tmp/uploads' : path.join(__dirname, '../../../uploads');
 const AUDIO_CACHE_DIR = path.join(UPLOADS_DIR, 'audio_cache');
 
-if (!fs.existsSync(UPLOADS_DIR)) {
-  fs.mkdirSync(UPLOADS_DIR, { recursive: true });
-}
-if (!fs.existsSync(AUDIO_CACHE_DIR)) {
-  fs.mkdirSync(AUDIO_CACHE_DIR, { recursive: true });
+try {
+  if (!fs.existsSync(UPLOADS_DIR)) {
+    fs.mkdirSync(UPLOADS_DIR, { recursive: true });
+  }
+  if (!fs.existsSync(AUDIO_CACHE_DIR)) {
+    fs.mkdirSync(AUDIO_CACHE_DIR, { recursive: true });
+  }
+} catch (err) {
+  logger.warn(`Could not create uploads directory (expected in read-only environments): ${err.message}`);
 }
 
 const upload = multer({ dest: path.join(UPLOADS_DIR, 'temp/') });
