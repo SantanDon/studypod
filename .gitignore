@@ -48,6 +48,9 @@ dist-ssr
 !.env.example
 .vercel
 
+# Scratch directory
+scratch/
+
 # SQLite and Local state
 *.db
 *.db-shm

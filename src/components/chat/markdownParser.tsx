@@ -205,7 +205,7 @@ export const processMarkdownWithCitations = (
             const Tag = `h${level}` as keyof JSX.IntrinsicElements;
             const hClass = level === 3 
               ? "text-sm font-semibold text-slate-700 dark:text-slate-200 mt-4 mb-2 tracking-wide"
-              : "text-xs font-semibold text-slate-600 dark:text-slate-350 mt-3 mb-1.5 uppercase tracking-wider";
+              : "text-xs font-semibold text-slate-600 dark:text-slate-200 mt-3 mb-1.5 uppercase tracking-wider";
             elements.push(
               <Tag key={`${segmentIndex}-${blockIndex}-${i}`} className={hClass}>
                 {processedContent}
@@ -250,7 +250,7 @@ export const processMarkdownWithCitations = (
             const isItemLastLine = blockIndex === blocks.length - 1 && i === lines.length - 1;
             
             listItems.push(
-              <li key={`li-${segmentIndex}-${blockIndex}-${i}`} className="mb-1.5 text-slate-700 dark:text-slate-350 leading-relaxed text-sm">
+              <li key={`li-${segmentIndex}-${blockIndex}-${i}`} className="mb-1.5 text-slate-700 dark:text-slate-100 leading-relaxed text-sm">
                 {processedItemContent}
                 {isItemLastLine && citation && onCitationClick && (
                   <CitationButton
@@ -285,7 +285,7 @@ export const processMarkdownWithCitations = (
           );
           
           elements.push(
-            <p key={`${segmentIndex}-${blockIndex}-${i}`} className="mb-2.5 leading-relaxed text-slate-700 dark:text-slate-350 text-sm">
+            <p key={`${segmentIndex}-${blockIndex}-${i}`} className="mb-2.5 leading-relaxed text-slate-700 dark:text-slate-100 text-sm">
               {processedContent}
               {isLastLine && citation && onCitationClick && (
                 <CitationButton

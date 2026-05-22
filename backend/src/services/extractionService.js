@@ -170,7 +170,179 @@ async function extractWithFirecrawl(url) {
   };
 }
 
+/**
+ * Deep recursive extraction for GitHub repositories
+ */
+async function extractGitHubRepo(url) {
+  const urlObj = new URL(url);
+  const pathParts = urlObj.pathname.split('/').filter(Boolean);
+  if (pathParts.length < 2) {
+    throw new Error('Invalid GitHub repository URL.');
+  }
+  const owner = pathParts[0];
+  const repo = pathParts[1].replace(/\.git$/, '');
+
+  logger.info(`[GitHub Extractor] owner: ${owner}, repo: ${repo}`);
+
+  let branch = 'main';
+  if (pathParts[2] === 'tree' && pathParts[3]) {
+    branch = pathParts.slice(3).join('/');
+  } else {
+    try {
+      const apiResponse = await fetch(`https://api.github.com/repos/${owner}/${repo}`, {
+        headers: { 'User-Agent': 'StudyPodLM-Agent' },
+        timeout: 5000
+      });
+      if (apiResponse.ok) {
+        const repoData = await apiResponse.json();
+        if (repoData.default_branch) {
+          branch = repoData.default_branch;
+        }
+      }
+    } catch (e) {
+      logger.warn(`[GitHub Extractor] Failed to fetch default branch for ${owner}/${repo}: ${e.message}`);
+    }
+  }
+
+  logger.info(`[GitHub Extractor] Using branch: ${branch}`);
+
+  let treeData;
+  try {
+    const treeResponse = await fetch(`https://api.github.com/repos/${owner}/${repo}/git/trees/${branch}?recursive=1`, {
+      headers: { 'User-Agent': 'StudyPodLM-Agent' },
+      timeout: 10000
+    });
+    if (!treeResponse.ok) {
+      if (branch === 'main' && !urlObj.pathname.includes('/tree/')) {
+        logger.info(`[GitHub Extractor] Failed with branch 'main', trying 'master'...`);
+        const altTreeResponse = await fetch(`https://api.github.com/repos/${owner}/${repo}/git/trees/master?recursive=1`, {
+          headers: { 'User-Agent': 'StudyPodLM-Agent' },
+          timeout: 10000
+        });
+        if (altTreeResponse.ok) {
+          branch = 'master';
+          treeData = await altTreeResponse.json();
+        }
+      }
+      if (!treeData) {
+        throw new Error(`Failed to fetch tree from GitHub API: status ${treeResponse.status}`);
+      }
+    } else {
+      treeData = await treeResponse.json();
+    }
+  } catch (e) {
+    logger.warn(`[GitHub Extractor] API tree fetch failed: ${e.message}. Using fallback direct files.`);
+    treeData = {
+      tree: [
+        { path: 'README.md', type: 'blob' },
+        { path: 'package.json', type: 'blob' }
+      ]
+    };
+  }
+
+  const excludedDirs = ['node_modules', 'dist', 'build', '.git', '.github', '.vercel', '.next', 'bin', 'obj', 'out'];
+  const excludedFiles = ['package-lock.json', 'yarn.lock', 'pnpm-lock.yaml', 'bun.lockb'];
+  const allowedExtensions = [
+    '.js', '.ts', '.tsx', '.jsx', '.json', '.md', '.txt',
+    '.py', '.go', '.java', '.cpp', '.c', '.h', '.cs', '.rs',
+    '.css', '.html', '.yaml', '.yml', '.toml', '.sh'
+  ];
+
+  const filesToFetch = [];
+  if (treeData && treeData.tree) {
+    for (const item of treeData.tree) {
+      if (item.type !== 'blob') continue;
+      
+      const pathLower = item.path.toLowerCase();
+      if (excludedDirs.some(dir => item.path.split('/').includes(dir))) continue;
+      if (excludedFiles.some(file => pathLower.endsWith(file))) continue;
+      
+      const ext = item.path.substring(item.path.lastIndexOf('.'));
+      if (!allowedExtensions.includes(ext.toLowerCase()) && !pathLower.endsWith('readme')) {
+        continue;
+      }
+
+      if (item.size && item.size > 200000) {
+        continue;
+      }
+
+      filesToFetch.push(item.path);
+    }
+  }
+
+  filesToFetch.sort((a, b) => {
+    const aLower = a.toLowerCase();
+    const bLower = b.toLowerCase();
+    if (aLower.includes('readme')) return -1;
+    if (bLower.includes('readme')) return 1;
+    if (aLower.includes('package.json')) return -1;
+    if (bLower.includes('package.json')) return 1;
+    if (aLower.startsWith('src/') && !bLower.startsWith('src/')) return -1;
+    if (bLower.startsWith('src/') && !aLower.startsWith('src/')) return 1;
+    return a.localeCompare(b);
+  });
+
+  const selectedFiles = filesToFetch.slice(0, 40);
+  
+  if (selectedFiles.length === 0) {
+    throw new Error('No readable text files found in the repository.');
+  }
+
+  logger.info(`[GitHub Extractor] Fetching contents of ${selectedFiles.length} files...`);
+
+  let consolidatedContent = `# GitHub Repository: ${owner}/${repo}\n`;
+  consolidatedContent += `Branch: ${branch}\n`;
+  consolidatedContent += `Total Files Extracted: ${selectedFiles.length}\n\n`;
+
+  const fetchPromises = selectedFiles.map(async (filePath) => {
+    const rawUrl = `https://raw.githubusercontent.com/${owner}/${repo}/${branch}/${filePath}`;
+    try {
+      const fileRes = await fetch(rawUrl, { timeout: 8000 });
+      if (fileRes.ok) {
+        const text = await fileRes.text();
+        const extension = filePath.substring(filePath.lastIndexOf('.') + 1);
+        let codeBlockType = extension;
+        if (['ts', 'tsx', 'js', 'jsx'].includes(extension)) codeBlockType = 'typescript';
+        else if (extension === 'md') codeBlockType = 'markdown';
+        
+        return `\n## File: ${filePath}\n\n\`\`\`${codeBlockType}\n${text}\n\`\`\`\n`;
+      } else {
+        return `\n## File: ${filePath} (Failed to fetch, status: ${fileRes.status})\n`;
+      }
+    } catch (err) {
+      return `\n## File: ${filePath} (Error: ${err.message})\n`;
+    }
+  });
+
+  const fileContents = await Promise.all(fetchPromises);
+  consolidatedContent += fileContents.join('\n');
+
+  return {
+    content: consolidatedContent,
+    title: `${owner}/${repo}`,
+    metadata: {
+      method: 'github-repo-extractor',
+      author: owner,
+      description: `Extracted repository: ${owner}/${repo} containing ${selectedFiles.length} files.`,
+      branch
+    }
+  };
+}
+
 export async function extractWebSource(url) {
+  const isGitHubRepo = url.includes('github.com') && 
+                       !url.includes('/raw/') && 
+                       !url.includes('/blob/') && 
+                       !url.includes('/releases/');
+  if (isGitHubRepo) {
+    logger.info(`[Extraction] GitHub repository URL detected: ${url}. Initiating deep extraction...`);
+    try {
+      return await extractGitHubRepo(url);
+    } catch (err) {
+      logger.error(`[Extraction] GitHub deep extraction failed: ${err.message}. Falling back to standard extraction.`);
+    }
+  }
+
   try {
     return await extractWithCheerio(url);
   } catch (err) {
