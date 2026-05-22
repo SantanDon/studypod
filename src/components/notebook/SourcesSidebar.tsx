@@ -24,6 +24,7 @@ import RenameSourceDialog from "./RenameSourceDialog";
 import SourceContentViewer from "@/components/chat/SourceContentViewer";
 import { useSources } from "@/hooks/useSources";
 import { useSourceDelete } from "@/hooks/useSourceDelete";
+import { useWebsiteProcessing } from "@/hooks/useWebsiteProcessing";
 import { Citation } from "@/types/message";
 import { LocalSource } from "@/services/localStorageService";
 
@@ -54,6 +55,53 @@ const SourcesSidebar = ({
   const { sources, isLoading } = useSources(notebookId);
 
   const { deleteSource, isDeleting } = useSourceDelete();
+
+  const [importingUrls, setImportingUrls] = useState<Record<string, boolean>>({});
+  const { addWebsitesAsSources, isProcessing: isAddingSuggested } = useWebsiteProcessing();
+
+  const handleAddSuggestedSource = async (url: string) => {
+    setImportingUrls((prev) => ({ ...prev, [url]: true }));
+    try {
+      await addWebsitesAsSources([url], notebookId || "");
+    } catch (e) {
+      console.error("Failed to add suggested source:", e);
+    } finally {
+      setImportingUrls((prev) => ({ ...prev, [url]: false }));
+    }
+  };
+
+  const suggestedSources = React.useMemo(() => {
+    if (!sources) return [];
+    const map = new Map<string, { id: string; title: string; url: string }>();
+    
+    sources.forEach((source) => {
+      let metadataObj: any = {};
+      if (typeof source.metadata === 'string') {
+        try {
+          metadataObj = JSON.parse(source.metadata);
+        } catch (e) {
+          metadataObj = {};
+        }
+      } else if (source.metadata) {
+        metadataObj = source.metadata;
+      }
+      
+      const list = metadataObj.suggestedSources || [];
+      list.forEach((item: any) => {
+        if (item && item.url) {
+          map.set(item.url, { id: item.id, title: item.title, url: item.url });
+        }
+      });
+    });
+
+    const existingUrls = new Set(
+      sources.map((s) => s.url).filter(Boolean).map((url) => url!.trim().toLowerCase())
+    );
+
+    return Array.from(map.values()).filter(
+      (item) => !existingUrls.has(item.url.trim().toLowerCase())
+    );
+  }, [sources]);
 
   // Get the source content for the selected citation
   const getSourceContent = (citation: Citation) => {
@@ -315,6 +363,54 @@ const SourcesSidebar = ({
                   </ContextMenuContent>
                 </ContextMenu>
               ))}
+
+              {suggestedSources.length > 0 && (
+                <div className="pt-4 border-t border-gray-200 dark:border-border mt-6">
+                  <h3 className="text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider mb-3">
+                    Suggested Additional Sources
+                  </h3>
+                  <div className="space-y-2">
+                    {suggestedSources.map((item) => (
+                      <Card
+                        key={item.id}
+                        className="p-3 border border-dashed border-gray-200 dark:border-border bg-gray-50/50 dark:bg-muted/10"
+                      >
+                        <div className="flex flex-col space-y-2">
+                          <div className="flex items-start space-x-2">
+                            <span className="text-xs text-blue-500 dark:text-blue-400 mt-0.5">🔗</span>
+                            <div className="flex-1 min-w-0">
+                              <span className="text-xs font-medium text-gray-900 dark:text-foreground block truncate" title={item.title}>
+                                {item.title}
+                              </span>
+                              <span className="text-[10px] text-gray-500 dark:text-gray-400 block truncate" title={item.url}>
+                                {item.url}
+                              </span>
+                            </div>
+                          </div>
+                          <div className="flex justify-end">
+                            <Button
+                              size="sm"
+                              variant="outline"
+                              className="text-[10px] h-7 px-2 py-0"
+                              disabled={importingUrls[item.url] || isAddingSuggested}
+                              onClick={() => handleAddSuggestedSource(item.url)}
+                            >
+                              {importingUrls[item.url] ? (
+                                <>
+                                  <i className="fi fi-rr-spinner h-3 w-3 animate-spin mr-1"></i>
+                                  Adding...
+                                </>
+                              ) : (
+                                "Add Source"
+                              )}
+                            </Button>
+                          </div>
+                        </div>
+                      </Card>
+                    ))}
+                  </div>
+                </div>
+              )}
             </div>
           ) : (
             <div className="text-center py-8">

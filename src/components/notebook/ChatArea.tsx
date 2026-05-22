@@ -42,6 +42,7 @@ const ChatArea = ({
   const [clickedQuestions, setClickedQuestions] = useState<Set<string>>(new Set());
   const [showAddSourcesDialog, setShowAddSourcesDialog] = useState(false);
   const [chatMode, setChatMode] = useState<'study' | 'agent'>('study');
+  const [responseStyle, setResponseStyle] = useState<'dense' | 'conversational'>('dense');
   
   const { isGuest, incrementUsage, showAuthPrompt } = useGuest();
   const { canSendMessage, messagesRemaining } = useNotebookLimits(notebookId);
@@ -130,7 +131,8 @@ const ChatArea = ({
         await sendMessageAsync({
           notebookId: notebookId,
           role: 'user',
-          content: textToSend
+          content: textToSend,
+          responseStyle: responseStyle
         });
 
         // Track guest usage
@@ -253,10 +255,32 @@ const ChatArea = ({
                 </div>
               </div>
               
-              {shouldShowRefreshButton && <Button variant="ghost" size="sm" onClick={handleRefreshChat} disabled={isDeletingChatHistory || isChatDisabled} className="hidden sm:flex items-center space-x-2">
-                  <i className={`fi fi-rr-refresh h-4 w-4 ${isDeletingChatHistory ? 'animate-spin' : ''}`}></i>
-                  <span>{isDeletingChatHistory ? 'Clearing...' : 'Clear Chat'}</span>
-                </Button>}
+              <div className="flex items-center space-x-4">
+                {/* Response Style Toggle */}
+                <div className="flex bg-muted p-1 rounded-md">
+                  <button
+                    onClick={() => setResponseStyle('dense')}
+                    className={`px-3 py-1 text-sm rounded-sm transition-colors flex items-center space-x-1.5 ${responseStyle === 'dense' ? 'bg-background shadow-sm font-medium text-foreground' : 'text-muted-foreground hover:text-foreground'}`}
+                    title="Detailed, structured responses with headings and tables"
+                  >
+                    <i className="fi fi-rr-list text-xs"></i>
+                    <span className="hidden sm:inline">Detailed</span>
+                  </button>
+                  <button
+                    onClick={() => setResponseStyle('conversational')}
+                    className={`px-3 py-1 text-sm rounded-sm transition-colors flex items-center space-x-1.5 ${responseStyle === 'conversational' ? 'bg-background shadow-sm font-medium text-foreground' : 'text-muted-foreground hover:text-foreground'}`}
+                    title="Fluid, conversational summaries in plain paragraphs"
+                  >
+                    <i className="fi fi-rr-comment-alt text-xs"></i>
+                    <span className="hidden sm:inline">Conversational</span>
+                  </button>
+                </div>
+
+                {shouldShowRefreshButton && <Button variant="ghost" size="sm" onClick={handleRefreshChat} disabled={isDeletingChatHistory || isChatDisabled} className="hidden sm:flex items-center space-x-2">
+                    <i className={`fi fi-rr-refresh h-4 w-4 ${isDeletingChatHistory ? 'animate-spin' : ''}`}></i>
+                    <span>{isDeletingChatHistory ? 'Clearing...' : 'Clear Chat'}</span>
+                  </Button>}
+              </div>
             </div>
           </div>
 

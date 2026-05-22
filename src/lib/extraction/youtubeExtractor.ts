@@ -135,7 +135,7 @@ ${descStr}
   return `${header}\n---\n\n${body}`;
 }
 
-export async function extractYoutubeTranscript(url: string): Promise<YoutubeTranscriptResult> {
+export async function extractYoutubeTranscript(url: string, token?: string): Promise<YoutubeTranscriptResult> {
   console.log('🎬 Starting YouTube transcript extraction for:', url);
 
   // Validate URL
@@ -156,7 +156,11 @@ export async function extractYoutubeTranscript(url: string): Promise<YoutubeTran
   try {
     console.log('📡 Fetching transcript and metadata via server API...');
     const apiUrl = `/api/youtube/youtube-transcript?url=${encodeURIComponent(normalizedUrl)}`;
-    const transcriptResponse = await fetch(apiUrl);
+    const headers: Record<string, string> = {};
+    if (token) {
+      headers['Authorization'] = `Bearer ${token}`;
+    }
+    const transcriptResponse = await fetch(apiUrl, { headers });
 
     if (!transcriptResponse.ok) {
       const errorText = await transcriptResponse.text();
@@ -184,7 +188,11 @@ export async function extractYoutubeTranscript(url: string): Promise<YoutubeTran
     if ((!transcriptData || transcriptData.length === 0) && videoId) {
       console.log('⚡ Server returned no transcript — trying Edge Function (Cloudflare network)...');
       try {
-        const edgeRes = await fetch(`/api/youtube-edge?videoId=${encodeURIComponent(videoId)}`);
+        const edgeHeaders: Record<string, string> = {};
+        if (token) {
+          edgeHeaders['Authorization'] = `Bearer ${token}`;
+        }
+        const edgeRes = await fetch(`/api/youtube-edge?videoId=${encodeURIComponent(videoId)}`, { headers: edgeHeaders });
         if (edgeRes.ok) {
           const edgeData = await edgeRes.json();
           if (edgeData.transcript && edgeData.transcript.length > 0) {

@@ -83,18 +83,12 @@ router.get('/pending-uploads', authenticateToken, async (req, res) => {
     const db = await getDatabase();
     const userId = req.user.userId || req.user.id;
     
-    let queryText = `SELECT * FROM agent_uploads WHERE user_id = ? AND status = 'pending'`;
-    const params = [userId];
-
+    let result;
     if (notebookId) {
-      queryText += ` AND notebook_id = ?`;
-      params.push(notebookId);
+      result = await db.run(sql`SELECT * FROM agent_uploads WHERE user_id = ${userId} AND notebook_id = ${notebookId} AND status = 'pending' ORDER BY created_at ASC`);
+    } else {
+      result = await db.run(sql`SELECT * FROM agent_uploads WHERE user_id = ${userId} AND status = 'pending' ORDER BY created_at ASC`);
     }
-    
-    queryText += ` ORDER BY created_at ASC`;
-
-    // Using raw SQL via drizzle's sql helper
-    const result = await db.run(sql.raw(queryText), params);
     
     res.json({ success: true, pendingUploads: result.rows });
   } catch (error) {

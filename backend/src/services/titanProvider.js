@@ -175,7 +175,7 @@ export async function dispatchToTitan({ messages, priority = 'context', temperat
         model: primary.model,
         messages,
         temperature,
-        max_tokens: usedPriority === 'context' ? 32000 : 4000,
+        max_tokens: primary.provider === 'groq' ? 1500 : (usedPriority === 'context' ? 32000 : 4000),
         stream: false
       }),
       signal: controller.signal
@@ -197,7 +197,7 @@ export async function dispatchToTitan({ messages, priority = 'context', temperat
               model: 'llama-3.1-8b-instant',
               messages,
               temperature,
-              max_tokens: 4000,
+              max_tokens: 1500,
               stream: false
             }),
             signal: controller.signal

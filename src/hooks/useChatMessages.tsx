@@ -93,6 +93,7 @@ export const useChatMessages = (notebookId?: string) => {
       role: "user" | "assistant";
       content: string;
       saveAsNote?: boolean;
+      responseStyle?: 'dense' | 'conversational';
     }) => {
       if (!effectiveUserId) throw new Error("User not authenticated");
 
@@ -100,7 +101,11 @@ export const useChatMessages = (notebookId?: string) => {
         // Cloud account - send via backend generic API
         const result = await ApiService.sendChatMessage(
           messageData.notebookId, 
-          { message: messageData.content, saveAsNote: messageData.saveAsNote }, 
+          { 
+            message: messageData.content, 
+            saveAsNote: messageData.saveAsNote,
+            responseStyle: messageData.responseStyle
+          }, 
           session.access_token
         );
         return { response: result.answer, notebookId: messageData.notebookId };

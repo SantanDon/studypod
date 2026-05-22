@@ -2,6 +2,57 @@ import { dbHelpers } from '../db/database.js';
 import { dispatchToTitan } from './titanProvider.js';
 import { logger } from '../utils/logger.js';
 import { v4 as uuidv4 } from 'uuid';
+import fetch from 'node-fetch';
+import * as cheerio from 'cheerio';
+
+/**
+ * Helper to discover suggested website sources from a text.
+ */
+async function discoverSuggestedSources(content, notebookId, userId) {
+  const urlRegex = /https?:\/\/(www\.)?[-a-zA-Z0-9@:%._\+~#=]{1,256}\.[a-zA-Z0-9()]{1,6}\b([-a-zA-Z0-9()@:%_\+.~#?&//=]*)/gi;
+  const matches = content.match(urlRegex) || [];
+  const uniqueUrls = [...new Set(matches)];
+
+  // Get current sources to filter out existing ones
+  const existingSources = await dbHelpers.getSourcesByNotebookId(notebookId, userId);
+  const existingUrls = new Set(existingSources.map(s => s.url).filter(Boolean));
+
+  const suggestions = [];
+  for (const url of uniqueUrls) {
+    if (existingUrls.has(url)) continue;
+    if (suggestions.length >= 5) break;
+
+    let title = url;
+    try {
+      const parsed = new URL(url);
+      if (parsed.hostname.includes('google.com') || parsed.hostname.includes('youtube.com') || parsed.hostname.includes('localhost')) {
+        continue;
+      }
+      title = `${parsed.hostname}${parsed.pathname.substring(0, 15)}`;
+      
+      const res = await fetch(url, { headers: { 'User-Agent': 'Mozilla/5.0' }, timeout: 3000 });
+      if (res.ok) {
+        const html = await res.text();
+        const $ = cheerio.load(html);
+        const pageTitle = $('title').text() || $('h1').first().text();
+        if (pageTitle) {
+          title = pageTitle.trim().substring(0, 80);
+        }
+      }
+    } catch (err) {
+      logger.warn(`Failed to fetch title for suggested source ${url}: ${err.message}`);
+    }
+
+    suggestions.push({
+      id: uuidv4(),
+      title,
+      url,
+      type: 'website',
+      status: 'suggested'
+    });
+  }
+  return suggestions;
+}
 
 /**
  * Mastication Service — StudyPodLM
@@ -24,6 +75,26 @@ export const MasticationService = {
     if (!source || !source.content) {
       logger.warn(`[MASTICATION] Source ${sourceId} not found or has no content.`);
       return;
+    }
+
+    // 1.5 Discover suggested additional sources
+    try {
+      const suggestions = await discoverSuggestedSources(source.content, notebookId, userId);
+      if (suggestions.length > 0) {
+        let currentMetadata = {};
+        if (source.metadata) {
+          try {
+            currentMetadata = typeof source.metadata === 'string' ? JSON.parse(source.metadata) : source.metadata;
+          } catch(e) {
+            currentMetadata = {};
+          }
+        }
+        currentMetadata.suggestedSources = suggestions;
+        await dbHelpers.updateSource(sourceId, userId, { metadata: JSON.stringify(currentMetadata) });
+        logger.info(`🕵️‍♀️ [MASTICATION] Found and saved ${suggestions.length} suggested sources in metadata.`);
+      }
+    } catch (err) {
+      logger.error('[MASTICATION] Suggested source discovery failed:', err.message);
     }
 
     // 2. Chunking logic (roughly 10k tokens ~ 40k chars)

@@ -1,11 +1,11 @@
 /**
  * AI Chat Service — StudyPodLM
  *
- * Powers the /chat endpoint. Consumes all notebook sources and notes,
- * builds a rich context prompt, and returns a grounded AI answer via Gemini API.
+ * Powers the /chat endpoint. Consumes all notebook sources and notes.
  */
 
 import { dispatchToTitan } from './titanProvider.js';
+import { performWebSearch } from './webSearchService.js';
 import { logger } from '../utils/logger.js';
 
 const BASE64_IMAGE_RE = /data:image\/[a-z+]+;base64,[A-Za-z0-9+/=]+/g;
@@ -13,8 +13,8 @@ const BASE64_IMAGE_RE = /data:image\/[a-z+]+;base64,[A-Za-z0-9+/=]+/g;
 const RESPONSE_CACHE_TTL = 60_000;
 const responseCache = new Map();
 
-function getCachedResponse(notebookId, message) {
-  const key = `${notebookId}::${message}`;
+function getCachedResponse(notebookId, message, responseStyle = 'dense') {
+  const key = `${notebookId}::${responseStyle}::${message}`;
   const entry = responseCache.get(key);
   if (entry && Date.now() - entry.timestamp < RESPONSE_CACHE_TTL) {
     return entry.response;
@@ -23,8 +23,8 @@ function getCachedResponse(notebookId, message) {
   return null;
 }
 
-function setCachedResponse(notebookId, message, response) {
-  const key = `${notebookId}::${message}`;
+function setCachedResponse(notebookId, message, response, responseStyle = 'dense') {
+  const key = `${notebookId}::${responseStyle}::${message}`;
   responseCache.set(key, { response, timestamp: Date.now() });
   if (responseCache.size > 500) {
     const oldest = responseCache.entries().next().value;
@@ -45,8 +45,8 @@ function stripBase64Images(text) {
  * With the 128k Titan context, we raise limits significantly.
  */
 function buildNotebookContext(notebook, sources, notes) {
-  const MAX_COMBINED_CHARS = 35000; // Safeguard to stay under Groq 12k TPM rate limits (~8.5k tokens)
-  const MAX_NOTE_CHARS = 10000;
+  const MAX_COMBINED_CHARS = 12000; // Safeguard to stay under Groq 12k TPM rate limits (~3k tokens)
+  const MAX_NOTE_CHARS = 4000;
 
   let ctx = `=== NOTEBOOK: "${notebook.title}" ===\n`;
   if (notebook.description) ctx += `Description: ${notebook.description}\n`;
@@ -128,22 +128,37 @@ function buildNotebookContext(notebook, sources, notes) {
 /**
  * Build the system prompt that shapes how the AI behaves in StudyPodLM.
  */
-function buildSystemPrompt(callerType = 'unknown') {
-  return `You are StudyPod AI, a Sovereign Librarian running on the Titan Synapse (Llama 3.1 128k). 
-Your goal is to provide deep, grounded, and structurally professional research insights.
+function buildSystemPrompt(callerType = 'unknown', responseStyle = 'dense') {
+  const styleInstruction = responseStyle === 'conversational'
+    ? `RESPONSE STYLE:
+- Write in a fluid, conversational format using connected paragraphs.
+- DO NOT use markdown headers (like #, ##, ###) or bullet/numbered lists.
+- Avoid structured sections; express your insights naturally in flow.
+- Open directly with the answer — no preamble or filler phrases.
+- Write clearly and precisely. Avoid buzzwords and AI-slop phrases.
+- At the end of the response, list your reference sources as: "Reference [1]: Title (Type)"
+- Keep reference lists concise — only list sources you actually cited.
+- NEVER use: "To put it simply", "It is worth noting", "In conclusion", "Overall", or any variation of these filler openers. They reek of template AI output.`
+    : `RESPONSE STYLE:
+- Use markdown headers (##, ###) to structure long or multi-part answers.
+- Use bullet lists or numbered lists where they make the answer clearer.
+- Open directly with the answer — no preamble or filler phrases.
+- Write clearly and precisely. Avoid buzzwords and AI-slop phrases.
+- At the end of the response, list your reference sources as: "Reference [1]: Title (Type)"
+- Keep reference lists concise — only list sources you actually cited.
+- NEVER use: "To put it simply", "It is worth noting", "In conclusion", "Overall", or any variation of these filler openers. They reek of template AI output.`;
 
-CITATION PROTOCOL (MANDATORY):
-- Every factual claim or summary derived from a source MUST be followed by an in-text citation marker like this: [1], [2], etc.
-- These markers correspond to the sources provided in the context.
-- Use multiple markers if a claim draws from several sources: [1][3].
-- NEVER provide a claim without a marker if it exists in the sources.
+  return `You are StudyPod AI, a sharp, grounded research assistant running on the Titan Synapse (Llama 3.1 128k).
+Your job is to give thorough, well-structured answers that feel authoritative without feeling robotic.
 
-RESPONSE STYLE:
-- Use markdown headers (e.g., ## Findings, ## Analysis) to structure long responses.
-- Start directly with the answer.
-- Prioritize clinical precision over conversational filler.
-- Toward the end, include a paragraph that starts with "To put it simply," followed by a relatable analogy.
-- List references at the very bottom as: "Reference [1]: Title (Type)"
+CITATION PROTOCOL:
+- Citations use [1], [2], etc. and correspond to the sources in the provided context.
+- Place citation markers at the END of a sentence or paragraph — not after every single claim within a paragraph.
+- If an entire paragraph draws from one source, one citation at the end of the paragraph is sufficient: [1]
+- If a paragraph draws from multiple sources, group them together at the end: [1][3]
+- Never cite things that are common knowledge or your own analytical framing.
+
+${styleInstruction}
 
 Caller: ${callerType}`;
 }
@@ -151,14 +166,41 @@ Caller: ${callerType}`;
 /**
  * Main chat function — the core of the AI-Human collaboration feature.
  */
-export async function chatWithNotebook({ notebook, sources, notes, message, history = [], callerType = 'human', userKeys = null }) {
-  const notebookContext = buildNotebookContext(notebook, sources, notes);
-  const systemPrompt = buildSystemPrompt(callerType);
+export async function chatWithNotebook({ notebook, sources, notes, message, history = [], callerType = 'human', userKeys = null, responseStyle = 'dense' }) {
+  let contextSources = [...sources];
+  let searchResult = null;
+  let isFallbackUsed = false;
+
+  // If there are no sources, run proactive web search
+  if (sources.length === 0) {
+    logger.info(`[aiChatService] No sources in notebook. Running proactive web search.`);
+    try {
+      searchResult = await performWebSearch(message);
+      if (searchResult && searchResult.results && searchResult.results.length > 0) {
+        isFallbackUsed = true;
+        const virtualSources = searchResult.results.map((res, i) => ({
+          id: `web-search-${i}`,
+          title: `[Web Search] ${res.title}`,
+          type: 'website',
+          url: res.url,
+          content: i === 0 && searchResult.topPageContent 
+            ? searchResult.topPageContent.substring(0, 6000) 
+            : res.snippet
+        }));
+        contextSources.push(...virtualSources);
+      }
+    } catch (searchError) {
+      logger.error(`[aiChatService] Proactive web search failed:`, searchError);
+    }
+  }
+
+  const notebookContext = buildNotebookContext(notebook, contextSources, notes);
+  const systemPrompt = buildSystemPrompt(callerType, responseStyle);
 
   const messages = [{ role: 'system', content: systemPrompt }];
   
-  // Add conversation history
-  const recentHistory = history.slice(-20);
+  // Add conversation history (limited to last 6 turns to stay within token budgets)
+  const recentHistory = history.slice(-6);
   for (const turn of recentHistory) {
     messages.push({
       role: (turn.role === 'agent' || turn.role === 'assistant') ? 'assistant' : 'user',
@@ -174,10 +216,13 @@ export async function chatWithNotebook({ notebook, sources, notes, message, hist
   // --- Phase 4: Stochastic Insight Drift (JIT) ---
   const hasSeeds = sources.some(s => s.metadata && s.metadata.includes('seed_questions'));
   if (hasSeeds && Math.random() > 0.7) {
-      // logger.info(`🕵️‍♀️ [STOCHASTIC DRIFT] Injected a latent immersion seed into the context.`);
-      // We pull the most relevant seed from metadata if it exists, otherwise we generate a 'phantom' thought
       const seedSource = sources.find(s => s.metadata && s.metadata.includes('seed_questions'));
-      const seeds = JSON.parse(seedSource.metadata).seed_questions || [];
+      let seeds = [];
+      try {
+        seeds = JSON.parse(seedSource.metadata).seed_questions || [];
+      } catch (e) {
+        // Safe fallback if JSON parsing fails
+      }
       if (seeds.length > 0) {
           const randomSeed = seeds[Math.floor(Math.random() * seeds.length)];
           messages.push({ role: 'system', content: `IMMERSION SEED: You recently had a thought while away: "${randomSeed}". Use this to deepen your next answer if it fits naturally.` });
@@ -187,7 +232,7 @@ export async function chatWithNotebook({ notebook, sources, notes, message, hist
   try {
     // Check response cache before hitting providers
     const notebookId = notebook.id;
-    const cached = getCachedResponse(notebookId, message);
+    const cached = getCachedResponse(notebookId, message, responseStyle);
     if (cached) {
       logger.debug(`Cache hit for notebook ${notebookId}`);
       return cached;
@@ -202,10 +247,67 @@ export async function chatWithNotebook({ notebook, sources, notes, message, hist
       userKeys
     });
 
+    // Check if the answer indicates insufficient context, if so, trigger fallback search
+    const INSUFFICIENT_CONTEXT_INDICATORS = [
+      /i (don't|do not) (have|find|possess) (any|enough|sufficient)?\s*(information|context|source|data)/i,
+      /not (mentioned|found|available) in the (provided\s+)?(sources|context|notebook|notes)/i,
+      /no (mention|information|reference) of/i,
+      /cannot answer (this|your) question/i,
+      /(does not|doesn't) (contain|provide|mention|have) (any|information|details)/i,
+      /unable to find/i,
+      /i (don't|do not) know/i
+    ];
+    
+    const lowercaseAnswer = answer.toLowerCase();
+    const hasInsufficientContext = INSUFFICIENT_CONTEXT_INDICATORS.some(regex => regex.test(lowercaseAnswer));
+
+    if (hasInsufficientContext && sources.length > 0 && !isFallbackUsed) {
+      logger.info(`[aiChatService] Initial answer indicates insufficient context/info. Running fallback web search.`);
+      try {
+        searchResult = await performWebSearch(message);
+        if (searchResult && searchResult.results && searchResult.results.length > 0) {
+          isFallbackUsed = true;
+          const virtualSources = searchResult.results.map((res, i) => ({
+            id: `web-search-${i}`,
+            title: `[Web Search] ${res.title}`,
+            type: 'website',
+            url: res.url,
+            content: i === 0 && searchResult.topPageContent 
+              ? searchResult.topPageContent.substring(0, 6000) 
+              : res.snippet
+          }));
+          
+          const combinedSources = [...sources, ...virtualSources];
+          const newNotebookContext = buildNotebookContext(notebook, combinedSources, notes);
+          const newFullMessage = `${newNotebookContext}\n\n=== USER QUESTION ===\n${cleanMessage}`;
+          
+          // Update the user message in messages array
+          messages[messages.length - 1].content = newFullMessage;
+          
+          messages.push({
+            role: 'system',
+            content: `We found search results from the web to help answer the user's question. Please synthesize an updated, detailed response using both the original sources and the new web search sources.`
+          });
+          
+          const fallbackRes = await dispatchToTitan({
+            messages,
+            priority: 'reasoning',
+            temperature: 0.7,
+            userKeys
+          });
+          
+          answer = fallbackRes.answer;
+          tokensUsed += fallbackRes.tokensUsed;
+          modelUsed = fallbackRes.modelUsed;
+          contextSources = combinedSources;
+        }
+      } catch (searchError) {
+        logger.error(`[aiChatService] Fallback web search failed:`, searchError);
+      }
+    }
+
     // --- Phase 3: The O1 Pivot (Recursive Critique Loop) ---
     if (callerType === 'agent' || callerType === 'phantom-scholar') {
-      // logger.info(`🕵️‍♀️ [O1 PIVOT] Initiating recursive critique loop for agent ${callerType}...`);
-      
       const critiquePrompt = `You are a Cold Librarian. Critique the answer you just wrote.
 Analyze its depth based on the provided sources. If it feels like a "hit-and-run" or "shallow summary," pinpoint exactly what is missing.
 Identify 2-3 specific phrases or themes from the SOURCES that should have been emphasized more.
@@ -219,10 +321,8 @@ Output your critique starting with a score from 1-10.`;
 
       try {
         const { answer: critique } = await dispatchToTitan({ messages: critiqueChat, priority: 'reasoning', temperature: 0.3, userKeys });
-        // logger.debug(`[O1 PIVOT] Critique Received: ${critique.substring(0, 100)}...`);
 
         if (!critique.startsWith('10') && !critique.startsWith('9')) {
-          // logger.info(`🔄 [O1 PIVOT] Depth insufficient. Re-synthesizing based on critique...`);
           const finalizePrompt = `Rewrite the final answer incorporating the improvements from your audit. 
 Ensure the literary, dark tone is maintained and that every factual claim is grounded in the sources.
 Internal Audit: ${critique}`;
@@ -238,17 +338,17 @@ Internal Audit: ${critique}`;
           tokensUsed += finalRes.tokensUsed;
         }
       } catch (critiqueError) {
-        // logger.warn(`[O1 PIVOT] Critique loop failed, falling back to initial answer: ${critiqueError.message}`);
+        // Fallback to initial answer
       }
     }
 
     // Identify which sources the answer likely draws from (simple keyword matching)
-    const groundedSources = sources
+    const groundedSources = contextSources
       .filter(s => answer.toLowerCase().includes(s.title.toLowerCase().slice(0, 20)))
       .map(s => s.id);
 
     const result = { answer, groundedSources, tokensUsed, modelUsed };
-    setCachedResponse(notebookId, message, result);
+    setCachedResponse(notebookId, message, result, responseStyle);
     return result;
   } catch (error) {
     logger.error('Titan processing failed:', error);

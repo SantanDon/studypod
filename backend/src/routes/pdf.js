@@ -2,6 +2,7 @@ import express from 'express';
 import multer from 'multer';
 import { AppError } from '../middleware/errorHandler.js';
 import { logger } from '../utils/logger.js';
+import { authenticateToken } from '../middleware/auth.js';
 
 // STABILITY PATCH v7: pdf-parse PURGED. 
 // This library causes fatal "DOMMatrix is not defined" errors in Node/Vercel.
@@ -20,7 +21,7 @@ const upload = multer({
 
 import geminiPool from '../services/geminiPool.js';
 
-router.post('/process-pdf', upload.single('file'), async (req, res, next) => {
+router.post('/process-pdf', authenticateToken, upload.single('file'), async (req, res, next) => {
   try {
     if (!req.file) throw new AppError(400, 'NO_FILE', 'No file uploaded');
 

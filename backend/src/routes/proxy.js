@@ -3,8 +3,12 @@ import { URL } from 'url';
 import { AppError } from '../middleware/errorHandler.js';
 import extractionService from '../services/extractionService.js';
 import { logger } from '../utils/logger.js';
+import { authenticateToken } from '../middleware/auth.js';
 
 const router = express.Router();
+
+// All web extraction proxy endpoints are secured
+router.use(authenticateToken);
 
 /**
  * GET /extract-web

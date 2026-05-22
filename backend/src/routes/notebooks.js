@@ -628,7 +628,7 @@ router.post("/:id/immerse", async (req, res) => {
  */
 router.post("/:id/chat", async (req, res) => {
   try {
-    const { message, saveAsNote = false, agentId = null } = req.body;
+    const { message, saveAsNote = false, agentId = null, responseStyle = 'dense' } = req.body;
     if (!message) return res.status(400).json({ error: "message is required" });
 
     const notebookId = req.params.id;
@@ -665,7 +665,8 @@ router.post("/:id/chat", async (req, res) => {
         message,
         history: messages,
         callerType: agentId ? 'agent' : 'human',
-        userKeys
+        userKeys,
+        responseStyle
       });
 
       // Save the AI's response to history

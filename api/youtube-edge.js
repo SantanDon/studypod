@@ -109,6 +109,62 @@ async function fetchWithTimeout(url, options = {}, timeoutMs = 8000) {
   }
 }
 
+// ── JWT verification helpers for Edge runtime (no npm deps) ───────────────────
+function base64urlToBytes(str) {
+  str = str.replace(/-/g, '+').replace(/_/g, '/');
+  while (str.length % 4) str += '=';
+  const binary = atob(str);
+  const bytes = new Uint8Array(binary.length);
+  for (let i = 0; i < binary.length; i++) {
+    bytes[i] = binary.charCodeAt(i);
+  }
+  return bytes;
+}
+
+const textEncoder = new TextEncoder();
+function stringToBytes(str) {
+  return textEncoder.encode(str);
+}
+
+async function verifyJwt(token, secret) {
+  try {
+    const parts = token.split('.');
+    if (parts.length !== 3) return false;
+    
+    const [headerB64, payloadB64, signatureB64] = parts;
+    const msgBytes = stringToBytes(headerB64 + '.' + payloadB64);
+    const signatureBytes = base64urlToBytes(signatureB64);
+    
+    const secretBytes = stringToBytes(secret);
+    const key = await crypto.subtle.importKey(
+      'raw',
+      secretBytes,
+      { name: 'HMAC', hash: 'SHA-256' },
+      false,
+      ['verify']
+    );
+    
+    const isValid = await crypto.subtle.verify(
+      'HMAC',
+      key,
+      signatureBytes,
+      msgBytes
+    );
+    
+    if (!isValid) return false;
+    
+    const payloadBytes = base64urlToBytes(payloadB64);
+    const payload = JSON.parse(new TextDecoder().decode(payloadBytes));
+    if (payload.exp && Date.now() / 1000 >= payload.exp) {
+      return false;
+    }
+    
+    return payload;
+  } catch (err) {
+    return false;
+  }
+}
+
 export default async function handler(request) {
   const url = new URL(request.url);
   const origin = request.headers.get('origin') || '';
@@ -116,6 +172,31 @@ export default async function handler(request) {
 
   if (request.method === 'OPTIONS') {
     return new Response(null, { status: 204, headers: cors });
+  }
+
+  // ── Authentication check for Edge Route ──────────────────────────────────
+  const authHeader = request.headers.get('authorization');
+  let token = authHeader && authHeader.split(' ')[1];
+  
+  if (!token && request.headers.get('cookie')) {
+    const cookies = request.headers.get('cookie').split(';').reduce((acc, c) => {
+      const parts = c.split('=');
+      if (parts[0]) acc[parts[0].trim()] = (parts[1] || '').trim();
+      return acc;
+    }, {});
+    token = cookies.accessToken;
+  }
+
+  const secret = process.env.JWT_SECRET;
+  let userPayload = null;
+  if (token && secret) {
+    userPayload = await verifyJwt(token, secret);
+  }
+
+  if (!userPayload) {
+    return new Response(JSON.stringify({ error: 'Access token required or invalid for Edge extraction' }), {
+      status: 401, headers: { ...cors, 'Content-Type': 'application/json' }
+    });
   }
 
   const videoId = url.searchParams.get('videoId');

@@ -37,7 +37,7 @@ export const useYoutubeProcessing = () => {
         description: "Fetching transcript...",
       });
 
-      const result = await extractYoutubeTranscript(url);
+      const result = await extractYoutubeTranscript(url, session?.access_token);
 
       // Check if this is the first source in the notebook
       let existingSources: LocalSource[] = [];

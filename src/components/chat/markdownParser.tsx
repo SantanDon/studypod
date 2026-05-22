@@ -158,6 +158,122 @@ export const processMarkdownWithCitations = (
           continue;
         }
 
+        const isLastLine = blockIndex === blocks.length - 1 && i === lines.length - 1;
+
+        // Check for headings
+        const headingMatch = line.match(/^(#{1,6})\s+(.*)$/);
+        if (headingMatch) {
+          const level = headingMatch[1].length;
+          const headingContentText = headingMatch[2];
+          const processedContent = processTextWithMarkdownAndCitations(
+            headingContentText,
+            citations,
+            onCitationClick,
+            hoveredCitation,
+            onHover
+          );
+          
+          if (level === 1) {
+            elements.push(
+              <div key={`${segmentIndex}-${blockIndex}-${i}`} className="w-full mt-6 mb-4 px-4 py-3 bg-blue-500/5 dark:bg-blue-500/10 border-l-4 border-blue-500 rounded-r-xl ring-1 ring-black/5 shadow-sm">
+                <h1 className="text-lg font-bold text-slate-800 dark:text-slate-100 flex items-center gap-2 tracking-wide uppercase text-[12px] text-blue-500 dark:text-blue-400">
+                  {processedContent}
+                  {isLastLine && citation && onCitationClick && (
+                    <CitationButton
+                      chunkIndex={citation.chunk_index || 0}
+                      onClick={() => onCitationClick(citation)}
+                    />
+                  )}
+                </h1>
+              </div>
+            );
+          } else if (level === 2) {
+            elements.push(
+              <div key={`${segmentIndex}-${blockIndex}-${i}`} className="w-full mt-5 mb-3">
+                <h2 className="text-base font-semibold text-slate-800 dark:text-slate-100 pl-3 border-l-2 border-indigo-500/50 py-0.5 tracking-wide">
+                  {processedContent}
+                  {isLastLine && citation && onCitationClick && (
+                    <CitationButton
+                      chunkIndex={citation.chunk_index || 0}
+                      onClick={() => onCitationClick(citation)}
+                    />
+                  )}
+                </h2>
+              </div>
+            );
+          } else {
+            const Tag = `h${level}` as keyof JSX.IntrinsicElements;
+            const hClass = level === 3 
+              ? "text-sm font-semibold text-slate-700 dark:text-slate-200 mt-4 mb-2 tracking-wide"
+              : "text-xs font-semibold text-slate-600 dark:text-slate-350 mt-3 mb-1.5 uppercase tracking-wider";
+            elements.push(
+              <Tag key={`${segmentIndex}-${blockIndex}-${i}`} className={hClass}>
+                {processedContent}
+                {isLastLine && citation && onCitationClick && (
+                  <CitationButton
+                    chunkIndex={citation.chunk_index || 0}
+                    onClick={() => onCitationClick(citation)}
+                  />
+                )}
+              </Tag>
+            );
+          }
+          i++;
+          continue;
+        }
+
+        // Check for list items (bullet and numbered)
+        const bulletMatch = line.match(/^[-*]\s+(.*)$/);
+        const numberMatch = line.match(/^(\d+)\.\s+(.*)$/);
+        if (bulletMatch || numberMatch) {
+          const listItems: JSX.Element[] = [];
+          const isNumbered = !!numberMatch;
+          
+          while (i < lines.length) {
+            const currentLine = lines[i].trim();
+            const currBullet = currentLine.match(/^[-*]\s+(.*)$/);
+            const currNumber = currentLine.match(/^(\d+)\.\s+(.*)$/);
+            
+            if (!currBullet && !currNumber) {
+              break;
+            }
+            
+            const itemText = currBullet ? currBullet[1] : currNumber![2];
+            const processedItemContent = processTextWithMarkdownAndCitations(
+              itemText,
+              citations,
+              onCitationClick,
+              hoveredCitation,
+              onHover
+            );
+            
+            const isItemLastLine = blockIndex === blocks.length - 1 && i === lines.length - 1;
+            
+            listItems.push(
+              <li key={`li-${segmentIndex}-${blockIndex}-${i}`} className="mb-1.5 text-slate-700 dark:text-slate-350 leading-relaxed text-sm">
+                {processedItemContent}
+                {isItemLastLine && citation && onCitationClick && (
+                  <CitationButton
+                    chunkIndex={citation.chunk_index || 0}
+                    onClick={() => onCitationClick(citation)}
+                  />
+                )}
+              </li>
+            );
+            i++;
+          }
+          
+          const ListTag = isNumbered ? 'ol' : 'ul';
+          const listClass = isNumbered ? 'list-decimal my-3 pl-6 space-y-1.5' : 'list-disc my-3 pl-6 space-y-1.5';
+          
+          elements.push(
+            <ListTag key={`list-${segmentIndex}-${blockIndex}-${i}`} className={listClass}>
+              {listItems}
+            </ListTag>
+          );
+          continue;
+        }
+
         // Regular paragraph
         if (line.length > 0) {
           const processedContent = processTextWithMarkdownAndCitations(
@@ -168,10 +284,8 @@ export const processMarkdownWithCitations = (
             onHover
           );
           
-          const isLastLine = blockIndex === blocks.length - 1 && i === lines.length - 1;
-          
           elements.push(
-            <p key={`${segmentIndex}-${blockIndex}-${i}`} className="mb-1.5 leading-relaxed text-gray-800">
+            <p key={`${segmentIndex}-${blockIndex}-${i}`} className="mb-2.5 leading-relaxed text-slate-700 dark:text-slate-350 text-sm">
               {processedContent}
               {isLastLine && citation && onCitationClick && (
                 <CitationButton

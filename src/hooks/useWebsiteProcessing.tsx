@@ -83,7 +83,7 @@ export const useWebsiteProcessing = () => {
       const webContents = await extractMultipleWebContents(validUrls, {
         maxConcurrent: 2, // Limit concurrent requests to be respectful
         timeout: 45000    // 45 second timeout per URL
-      });
+      }, session?.access_token);
 
       // Process each extracted content as a source
       const processedSources = [];

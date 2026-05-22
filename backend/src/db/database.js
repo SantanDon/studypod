@@ -147,6 +147,17 @@ export async function initializeDatabase() {
       "user_id" text NOT NULL,
       "deleted_at" integer DEFAULT (strftime('%s', 'now'))
     )`);
+    await db.run(sql`CREATE TABLE IF NOT EXISTS "agent_uploads" (
+      "id" text PRIMARY KEY NOT NULL,
+      "user_id" text NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      "notebook_id" text NOT NULL REFERENCES notebooks(id) ON DELETE CASCADE,
+      "file_name" text NOT NULL,
+      "file_size" integer NOT NULL,
+      "mime_type" text NOT NULL,
+      "file_path" text NOT NULL,
+      "status" text DEFAULT 'pending',
+      "created_at" integer DEFAULT (strftime('%s', 'now'))
+    )`);
     logger.info('Schema tables verified.');
   } catch (err) {
     logger.warn('Schema fallback creation skipped (tables may already exist via Drizzle):', err.message);

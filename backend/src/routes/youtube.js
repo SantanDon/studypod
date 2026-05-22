@@ -5,6 +5,7 @@ import { getDatabase, dbHelpers } from '../db/database.js';
 import { users } from '../db/schema.js';
 import { eq, sql } from 'drizzle-orm';
 import { logger } from '../utils/logger.js';
+import { authenticateToken } from '../middleware/auth.js';
 
 const router = express.Router();
 const YT_FETCH_TIMEOUT = 15000;
@@ -628,7 +629,7 @@ async function extractWithRetry(videoId, maxAttempts = 3) {
   return { transcript: null, metadata: null, identity: null, error: lastError };
 }
 
-router.get('/youtube-transcript', async (req, res) => {
+router.get('/youtube-transcript', authenticateToken, async (req, res) => {
   try {
     const { url } = req.query;
     const userType = req.user?.accountType || 'human';

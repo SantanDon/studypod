@@ -5,8 +5,10 @@ import fs from 'fs';
 import multer from 'multer';
 import { EPub } from 'epub';
 import { logger } from '../utils/logger.js';
+import { authenticateToken } from '../middleware/auth.js';
 
 const router = express.Router();
+router.use(authenticateToken);
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 

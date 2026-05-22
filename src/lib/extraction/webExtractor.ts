@@ -29,7 +29,8 @@ export interface WebContentResult {
  * Extracts content from a web page using browser-compatible methods
  */
 export async function extractWebContent(
-  url: string
+  url: string,
+  token?: string
 ): Promise<WebContentResult> {
   const startTime = Date.now();
 
@@ -44,7 +45,11 @@ export async function extractWebContent(
     
     console.log(`[WebExtractor] Attempting smart extraction via backend: ${url}`);
     try {
-      const smartResponse = await fetch(smartUrl);
+      const headers: Record<string, string> = {};
+      if (token) {
+        headers["Authorization"] = `Bearer ${token}`;
+      }
+      const smartResponse = await fetch(smartUrl, { headers });
       if (smartResponse.ok) {
         const data = await smartResponse.json();
         
@@ -152,7 +157,8 @@ export async function extractMultipleWebContents(
   options: {
     maxConcurrent?: number;
     timeout?: number;
-  } = {}
+  } = {},
+  token?: string
 ): Promise<WebContentResult[]> {
   const { maxConcurrent = 3, timeout = 30000 } = options;
 
@@ -165,7 +171,7 @@ export async function extractMultipleWebContents(
 
     const batchPromises = batch.map((url) => {
       return Promise.race([
-        extractWebContent(url),
+        extractWebContent(url, token),
         new Promise<WebContentResult>((_, reject) =>
           setTimeout(() => reject(new Error(`Timeout: ${url}`)), timeout)
         ),
