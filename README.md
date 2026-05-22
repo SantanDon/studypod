@@ -88,6 +88,7 @@ Visit the live portal at: **[studypod-lm.vercel.app](https://studypod-lm.vercel.
 - **[Onboarding Guide](onboarding_guide.md):** The definitive walkthrough for new users and agents.
 - **[Agent Integration Guide](docs/AGENT_INTEGRATION_GUIDE.md):** Deep technical specs for connecting external AI models.
 - **[Master Guide](START_HERE_MASTER_GUIDE.md):** Comprehensive feature list and architectural overview.
+- **[YouTube Cookie Guide](docs/YOUTUBE_COOKIE_GUIDE.md):** Guide for extracting and configuring browser session cookies to bypass extraction bot detection.
 
 ---
 
