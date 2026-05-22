@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { useParams } from 'react-router-dom';
+import { useParams, Link } from 'react-router-dom';
 import { useNotebooks } from '@/hooks/useNotebooks';
 import { useSources } from '@/hooks/useSources';
 import { useIsDesktop } from '@/hooks/useViewport';
@@ -16,7 +16,7 @@ import { ResizablePanelGroup, ResizablePanel, ResizableHandle } from '@/componen
 
 const Notebook = () => {
   const { id: notebookId } = useParams();
-  const { notebooks } = useNotebooks();
+  const { notebooks, isLoading } = useNotebooks();
   const { sources } = useSources(notebookId);
   const [selectedCitation, setSelectedCitation] = useState<Citation | null>(null);
   const isDesktop = useIsDesktop();
@@ -41,8 +41,40 @@ const Notebook = () => {
 
   console.log("DEBUG: Notebook.tsx executing", { notebookId, notebooks, sources, isDesktop });
 
+  if (isLoading) {
+    return (
+      <div className="h-screen w-screen flex flex-col items-center justify-center bg-background text-foreground space-y-4">
+        <div className="w-12 h-12 rounded-full border-4 border-primary border-t-transparent animate-spin"></div>
+        <p className="text-muted-foreground text-sm animate-pulse">Loading notebook...</p>
+      </div>
+    );
+  }
+
+  if (!notebook) {
+    return (
+      <div className="h-screen w-screen flex flex-col items-center justify-center bg-background text-foreground px-4 text-center">
+        <div className="max-w-md p-8 rounded-2xl bg-card border border-border shadow-xl backdrop-blur-md flex flex-col items-center space-y-6 animate-in fade-in zoom-in-95 duration-200">
+          <div className="w-16 h-16 rounded-full bg-destructive/10 text-destructive flex items-center justify-center mb-2">
+            <i className="fi fi-rr-exclamation text-3xl"></i>
+          </div>
+          <h1 className="text-3xl font-semibold tracking-tight">Notebook Not Found</h1>
+          <p className="text-muted-foreground text-sm max-w-xs leading-relaxed">
+            The notebook you are looking for does not exist or was deleted.
+          </p>
+          <Link
+            to="/"
+            className="inline-flex items-center justify-center px-6 py-2.5 rounded-xl bg-primary text-primary-foreground font-medium text-sm hover:opacity-90 active:scale-95 transition-all shadow-md"
+          >
+            <i className="fi fi-rr-arrow-left mr-2"></i>
+            Return to Dashboard
+          </Link>
+        </div>
+      </div>
+    );
+  }
+
   return (
-    <div className="h-screen bg-background flex flex-col overflow-hidden">
+    <div className="h-screen bg-background flex flex-col overflow-hidden text-foreground">
       <NotebookHeader 
         title={notebook?.title || 'Untitled Notebook'} 
         notebookId={notebookId} 

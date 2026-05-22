@@ -230,8 +230,12 @@ export default async function handler(request) {
     let extractedBy = 'edge_web_client';
     let activeUA = desktopUA;
 
-    // ── Fallback: Android client if WEB is hollow or blocked ───────────────────
-    if (!videoDetails?.title || playabilityStatus.status === 'LOGIN_REQUIRED') {
+    const webCaptionTracks = playerData?.captions?.playerCaptionsTracklistRenderer?.captionTracks || [];
+    const isWebUnplayable = playabilityStatus.status === 'UNPLAYABLE';
+    const isWebRestricted = playabilityStatus.status === 'LOGIN_REQUIRED';
+
+    // ── Fallback: Android client if WEB is hollow, blocked, unplayable, or has no captions ───────────────────
+    if (!videoDetails?.title || isWebRestricted || isWebUnplayable || webCaptionTracks.length === 0) {
       try {
         const androidUA = 'com.google.android.youtube/20.10.38 (Linux; U; Android 14)';
         const androidBody = JSON.stringify({

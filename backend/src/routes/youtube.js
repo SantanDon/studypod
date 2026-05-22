@@ -361,16 +361,20 @@ async function extractWithRetry(videoId, maxAttempts = 3) {
           }
         }
 
-        const metadata = {
-          title: videoDetails?.title || `YouTube Video: ${videoId}`,
-          description: videoDetails?.shortDescription || '',
-          author: videoDetails?.author || 'Unknown Channel',
-          keywords: videoDetails?.keywords || [],
-          extractedBy: 'innertube_web_direct',
-          attempt: 1
-        };
+        if (transcript.length > 0) {
+          const metadata = {
+            title: videoDetails?.title || `YouTube Video: ${videoId}`,
+            description: videoDetails?.shortDescription || '',
+            author: videoDetails?.author || 'Unknown Channel',
+            keywords: videoDetails?.keywords || [],
+            extractedBy: 'innertube_web_direct',
+            attempt: 1
+          };
 
-        return { transcript, metadata, identity: { name: 'WEB_DIRECT', ua: desktopUA, clientName: 'WEB' } };
+          return { transcript, metadata, identity: { name: 'WEB_DIRECT', ua: desktopUA, clientName: 'WEB' } };
+        } else {
+          logger.warn(`[YouTube] WEB direct returned no transcript lines. Falling through.`);
+        }
       } else {
         logger.warn(`[YouTube] WEB playability status is UNPLAYABLE: ${playabilityStatus.reason}`);
       }
