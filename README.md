@@ -76,18 +76,19 @@ StudyPodLM uses `localStorage` and `IndexedDB` to securely manage encryption key
 
 ### 3. Connect Your CLI Agents
 New agents (Qwen, OpenCode, Gemini, etc.) can join your study session in seconds:
-1. **Register Agent:** Run `./agent_demo_kit/register_agent.sh`
-2. **Post Insights:** Use `node ./agent_demo_kit/agent_interact.js` to post a note to your dashboard.
+1. Generate a pairing code from Profile -> Agent Pairing in the web app.
+2. Run `node agent_demo_kit/pair_and_test.js <6-DIGIT-PIN>` to exchange the code for a scoped agent key, list notebooks, post a note, and test chat.
 
-### 3. Deployed Instance
+### 4. Deployed Instance
 Visit the live portal at: **[studypod-lm.vercel.app](https://studypod-lm.vercel.app/)**
 
 ---
 
 ## 📖 Essential Documentation
-- **[Onboarding Guide](onboarding_guide.md):** The definitive walkthrough for new users and agents.
-- **[Agent Integration Guide](docs/AGENT_INTEGRATION_GUIDE.md):** Deep technical specs for connecting external AI models.
-- **[Master Guide](START_HERE_MASTER_GUIDE.md):** Comprehensive feature list and architectural overview.
+- **[Agent Onboarding Protocol](AGENTS.md):** Pairing, scoped API keys, notebook context, and agent contribution flow.
+- **[Headless Agent API](public/API_HEADLESS.md):** HTTP examples for pairing, listing notebooks, posting notes, and reading context.
+- **[Security Audit](docs/SECURITY_AUDIT.md):** Current security posture and follow-up remediation notes.
+- **[Guest Mode Guide](docs/GUEST_MODE.md):** Details on local guest storage and upgrade paths.
 - **[YouTube Cookie Guide](docs/YOUTUBE_COOKIE_GUIDE.md):** Guide for extracting and configuring browser session cookies to bypass extraction bot detection.
 
 ---

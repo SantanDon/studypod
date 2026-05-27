@@ -24,7 +24,7 @@ Generated via the **Agent Pairing Wizard**.
 2. Click **Generate Pairing Code**.
 3. In your agent's terminal, run:
    ```bash
-   kilo pair <6-DIGIT-PIN>
+   node agent_demo_kit/pair_and_test.js <6-DIGIT-PIN>
    ```
 4. The agent will exchange the PIN for a persistent API key and store it locally.
 
@@ -34,11 +34,24 @@ Generated via the **Agent Pairing Wizard**.
 Agents can push files to a specific "Dropbox" route without needing your encryption passphrase. These files are queued and will be encrypted locally the next time you open the corresponding notebook.
 
 `POST /api/agent/upload`
-- **Headers:** `X-API-Key: your_agent_key`
-- **Body:** Multipart/form-data containing the file.
+- **Headers:** `Authorization: Bearer spm_your_agent_key`
+- **Body:** Multipart/form-data containing the file and `notebookId`.
 
 ### Checking for Commands
 Agents can poll for user-assigned tasks or study goals.
 
-`GET /api/agent/tasks`
-- **Headers:** `X-API-Key: your_agent_key`
+`GET /api/agent/missions`
+- **Headers:** `Authorization: Bearer spm_your_agent_key`
+
+### Reading Notebook Context
+Agents can load a compact context snapshot before deciding what to do.
+
+`GET /api/notebooks/:id/context`
+- **Headers:** `Authorization: Bearer spm_your_agent_key`
+
+### Posting Notes
+Agents can contribute findings directly to a notebook when their key has `notes:create`.
+
+`POST /api/notebooks/:id/notes`
+- **Headers:** `Authorization: Bearer spm_your_agent_key`
+- **Body:** `{ "content": "Your note" }`

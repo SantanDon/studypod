@@ -17,6 +17,7 @@ import {
   verifyRefreshToken,
   authenticateToken,
   hashApiKey,
+  VALID_SCOPES,
 } from "../middleware/auth.js";
 import crypto, { randomBytes } from "crypto";
 import { AppError } from "../middleware/errorHandler.js";
@@ -51,6 +52,27 @@ const decryptSecret = (text) => {
 };
 
 const router = express.Router();
+const DEFAULT_AGENT_SCOPES = [
+  'notebooks:read',
+  'sources:read',
+  'sources:write',
+  'notes:read',
+  'notes:create',
+  'notes:write',
+  'chat:all',
+  'memories:read',
+  'memories:write',
+  'tasks:read',
+  'tasks:write',
+  'uploads:read',
+  'uploads:write',
+  'missions:read',
+  'missions:write',
+  'messages:read',
+  'messages:write',
+  'activity:read',
+  'activity:write'
+];
 
 // Agent Registration (Requires Human Authentication)
 router.post("/register", authenticateToken, async (req, res, next) => {
@@ -558,13 +580,12 @@ router.post("/agent-key", authenticateToken, async (req, res) => {
   try {
     const {
       label = 'My Agent Key',
-      scopes = ['notebooks:read', 'notes:create', 'chat:all'],
+      scopes = DEFAULT_AGENT_SCOPES,
       notebookIds = null,
       expiresInHours = null,
       rateLimit = 0
     } = req.body;
 
-    const VALID_SCOPES = ['notebooks:read', 'notebooks:write', 'notes:read', 'notes:create', 'notes:delete', 'sources:read', 'chat:all', 'chat:readonly', 'memories:read', 'memories:write', 'tasks:read', 'tasks:write', 'admin:keys'];
     const invalid = (scopes || []).filter(s => !VALID_SCOPES.includes(s));
     if (invalid.length > 0) {
       return res.status(400).json({
@@ -742,7 +763,7 @@ router.post("/pair/complete", authLimiter, async (req, res) => {
     const { 
       code, 
       label = 'Paired Agent',
-      scopes,
+      scopes = DEFAULT_AGENT_SCOPES,
       notebookIds,
       expiresInHours,
       rateLimit = 0
@@ -763,7 +784,6 @@ router.post("/pair/complete", authLimiter, async (req, res) => {
 
     // Validate scopes if specified
     if (scopes) {
-      const VALID_SCOPES = ['notebooks:read', 'notebooks:write', 'notes:read', 'notes:create', 'notes:delete', 'sources:read', 'chat:all', 'chat:readonly', 'memories:read', 'memories:write', 'tasks:read', 'tasks:write', 'admin:keys'];
       const invalid = (scopes || []).filter(s => !VALID_SCOPES.includes(s));
       if (invalid.length > 0) {
         return res.status(400).json({

@@ -223,7 +223,7 @@ export function DeveloperSettings() {
 
             <p className="text-xs text-center text-muted-foreground">
               Don't have a Cloud account yet?{' '}
-              <a href="/auth?mode=create" className="text-primary underline">
+              <a href="/auth?mode=cloud-signup" className="text-primary underline">
                 Create one
               </a>
             </p>

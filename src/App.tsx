@@ -16,23 +16,27 @@ import Notebook from "./pages/Notebook";
 import Settings from "./pages/Settings";
 import NotFound from "./pages/NotFound";
 import VerifyEmail from "./pages/VerifyEmail";
+import Privacy from "./pages/Privacy";
+import Terms from "./pages/Terms";
 import React, { useState, useEffect } from "react";
-import { useLocation } from "react-router-dom";
-import ReactGA from "react-ga4";
-
-const PageTracker = () => {
-  const location = useLocation();
-
-  useEffect(() => {
-    if (import.meta.env.VITE_GA_ID) {
-      ReactGA.send({ hitType: "pageview", page: location.pathname + location.search });
-    }
-  }, [location]);
-
-  return null;
-};
+import { Analytics, type BeforeSendEvent } from "@vercel/analytics/react";
 
 const queryClient = new QueryClient();
+
+const redactAnalyticsEvent = (event: BeforeSendEvent): BeforeSendEvent | null => {
+  try {
+    const url = new URL(event.url);
+    if (url.pathname === "/verify-email") return null;
+    if (url.pathname.startsWith("/notebook")) {
+      return { ...event, url: `${url.origin}/notebook` };
+    }
+    url.search = "";
+    url.hash = "";
+    return { ...event, url: url.toString() };
+  } catch {
+    return null;
+  }
+};
 
 import GlobalSearch from "@/components/dashboard/GlobalSearch";
 // ...
@@ -53,7 +57,7 @@ const AppContent = () => {
 
   return (
     <>
-      <PageTracker />
+      <Analytics beforeSend={redactAnalyticsEvent} />
       <GuestBanner />
       <GlobalSearch open={searchOpen} setOpen={setSearchOpen} />
       <Routes>
@@ -70,6 +74,8 @@ const AppContent = () => {
         
         {/* Email verification route */}
         <Route path="/verify-email" element={<VerifyEmail />} />
+        <Route path="/privacy" element={<Privacy />} />
+        <Route path="/terms" element={<Terms />} />
         
         {/* Protected routes - require encryption/authentication */}
         <Route 

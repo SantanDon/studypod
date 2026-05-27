@@ -258,7 +258,7 @@ export const CloudLogin = ({ onSuccess, onCancel, onRecover, initialIsSignUp = f
                 htmlFor="tosAccepted"
                 className="text-sm font-medium leading-none peer-disabled:cursor-not-allowed peer-disabled:opacity-70"
               >
-                I agree to the <a href="#" className="underline">Terms of Service</a> (required)
+                I agree to the <a href="/terms" target="_blank" rel="noreferrer" className="underline">Terms of Service</a> (required)
               </label>
             </div>
             

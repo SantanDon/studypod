@@ -81,17 +81,12 @@ POST /api/notebooks/:id/memory/search
 Body: { "query": "machine learning trends" }
 ```
 
-### Sovereign BYOK (Bring-Your-Own-Key)
-Agents can now register and use their own AI provider keys to power their reasoning, bypassing centralized system limits.
+### Agent API Keys
+Agents authenticate with scoped StudyPodLM API keys generated from pairing codes or Developer Settings.
 ```
-PUT /api/user/api_keys
 Authorization: Bearer spm_your_key_here
-Body: {
-  "provider": "groq",
-  "key": "gsk_..."
-}
 ```
-Supported providers: `groq`, `nvidia`, `gemini`. Once registered, the system will automatically inject these credentials into all `chatWithNotebook` calls for that agent.
+Provider BYOK storage has been removed. Agents should use their own runtime-side model credentials if they need external reasoning, then send results back to StudyPodLM through the scoped API.
 
 ---
 

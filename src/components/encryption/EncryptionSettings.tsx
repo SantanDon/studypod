@@ -13,8 +13,7 @@ import { DataExport } from './DataExport';
 import { SecurityLogs } from './SecurityLogs';
 import { MfaSettings } from './MfaSettings';
 import { DeveloperSettings } from '../settings/DeveloperSettings';
-import { ApiKeysSettings } from '../settings/ApiKeysSettings';
-import { Shield, Cloud, Download, ScrollText, Code2, KeyRound } from 'lucide-react';
+import { Shield, Cloud, Download, ScrollText, Code2 } from 'lucide-react';
 
 export function EncryptionSettings() {
   const [activeTab, setActiveTab] = useState('sync');
@@ -29,7 +28,7 @@ export function EncryptionSettings() {
       </div>
 
       <Tabs value={activeTab} onValueChange={setActiveTab} className="space-y-6">
-        <TabsList className="grid w-full grid-cols-7">
+        <TabsList className="grid w-full grid-cols-6">
           <TabsTrigger value="sync" className="flex items-center gap-2">
             <Cloud className="w-4 h-4" />
             <span className="hidden sm:inline">Sync</span>
@@ -53,10 +52,6 @@ export function EncryptionSettings() {
           <TabsTrigger value="developer" className="flex items-center gap-2">
             <Code2 className="w-4 h-4" />
             <span className="hidden sm:inline">Developer</span>
-          </TabsTrigger>
-          <TabsTrigger value="providers" className="flex items-center gap-2">
-            <KeyRound className="w-4 h-4" />
-            <span className="hidden sm:inline">Providers</span>
           </TabsTrigger>
         </TabsList>
 
@@ -124,9 +119,6 @@ export function EncryptionSettings() {
           <DeveloperSettings />
         </TabsContent>
 
-        <TabsContent value="providers" className="space-y-6">
-          <ApiKeysSettings />
-        </TabsContent>
       </Tabs>
 
       {/* Privacy Notice */}
@@ -136,11 +128,15 @@ export function EncryptionSettings() {
           Your Privacy is Protected
         </h3>
         <ul className="text-sm text-muted-foreground space-y-1">
-          <li>• All data is encrypted on your device before syncing</li>
-          <li>• Your passphrase never leaves your device</li>
-          <li>• The server only stores encrypted data it cannot read</li>
-          <li>• You have full control over what gets synced</li>
+          <li>Local mode keeps notebook data in this browser</li>
+          <li>Encrypted sync protects synced payloads before storage</li>
+          <li>Agent access is controlled by scoped, revocable StudyPodLM API keys</li>
+          <li>Source extraction and AI answers may use StudyPodLM backend services</li>
         </ul>
+        <div className="mt-3 flex gap-3 text-xs">
+          <a href="/privacy" className="text-primary underline">Privacy</a>
+          <a href="/terms" className="text-primary underline">Terms</a>
+        </div>
       </div>
     </div>
   );

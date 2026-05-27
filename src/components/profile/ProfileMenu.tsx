@@ -60,25 +60,16 @@ export function ProfileMenu() {
   
   const isEmailVerified = user?.is_verified !== 0; // if undefined, assume verified (local mode)
 
-  console.log('ProfileMenu render:', { isSignedIn, user, authMethod, displayEmail, isEmailVerified });
-
   const handleSignOut = async () => {
     try {
-      console.log('Sign out initiated, auth method:', authMethod);
-      
       // Step 1: Clear encryption state first (synchronous)
       clearMasterKey();
-      console.log('Encryption state cleared');
       
       // Step 2: Sign out from legacy auth (async)
       await signOut();
-      console.log('Legacy auth cleared');
       
       // Step 3: Clear all React Query cache (after auth cleared)
       queryClient.clear();
-      console.log('Query cache cleared');
-      
-      console.log('Sign out completed successfully');
       
       toast({
         title: 'Signed out',
@@ -100,7 +91,6 @@ export function ProfileMenu() {
   };
 
   const handleSignIn = () => {
-    console.log('Sign in clicked');
     navigate('/auth');
   };
 
@@ -439,12 +429,16 @@ export function ProfileMenu() {
             <div>
               <h4 className="font-semibold mb-2">Features</h4>
               <ul className="text-sm text-muted-foreground space-y-1">
-                <li>• AI-powered study assistant</li>
-                <li>• Podcast-style audio generation</li>
-                <li>• Document processing and analysis</li>
-                <li>• Smart note-taking with AI assistance</li>
-                <li>• 100% private and local</li>
+                <li>AI-powered study assistant</li>
+                <li>Podcast-style audio generation</li>
+                <li>Document processing and analysis</li>
+                <li>Smart note-taking with AI assistance</li>
+                <li>Local, encrypted sync, and agent collaboration modes</li>
               </ul>
+              <div className="mt-3 flex gap-3 text-xs">
+                <a href="/privacy" className="text-primary underline">Privacy</a>
+                <a href="/terms" className="text-primary underline">Terms</a>
+              </div>
             </div>
           </div>
         </DialogContent>

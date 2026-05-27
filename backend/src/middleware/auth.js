@@ -6,6 +6,35 @@ import { eq, asc } from 'drizzle-orm';
 import { logger } from '../utils/logger.js';
 
 const JWT_SECRET = process.env.JWT_SECRET;
+const apiKeyWindows = new Map();
+
+export const VALID_SCOPES = [
+  'notebooks:read',
+  'notebooks:write',
+  'notes:read',
+  'notes:create',
+  'notes:write',
+  'notes:delete',
+  'sources:read',
+  'sources:write',
+  'chat:all',
+  'chat:readonly',
+  'memories:read',
+  'memories:write',
+  'tasks:read',
+  'tasks:write',
+  'uploads:read',
+  'uploads:write',
+  'missions:read',
+  'missions:write',
+  'messages:read',
+  'messages:write',
+  'webhooks:read',
+  'webhooks:write',
+  'activity:read',
+  'activity:write',
+  'admin:keys'
+];
 
 if (!JWT_SECRET) {
   logger.warn('JWT_SECRET is not set. Token verification will fail.');
@@ -36,6 +65,18 @@ export async function authenticateToken(req, res, next) {
      return res.status(401).json({ error: 'Access token required' });
    }
 
+   // Guest path — starts with guest_
+   if (token.startsWith('guest_')) {
+     req.user = {
+       userId: token,
+       email: `${token}@guest.local`,
+       displayName: 'Guest User',
+       accountType: 'guest',
+       authMethod: 'guest'
+     };
+     return next();
+   }
+
   // API key path — starts with spm_
   if (token.startsWith('spm_')) {
     try {
@@ -55,6 +96,21 @@ export async function authenticateToken(req, res, next) {
         return res.status(401).json({ error: 'User not found' });
       }
 
+      if (keyRow.rateLimit && keyRow.rateLimit > 0) {
+        const now = Date.now();
+        const windowMs = 60 * 1000;
+        const current = apiKeyWindows.get(keyRow.id) || { count: 0, resetAt: now + windowMs };
+        if (now > current.resetAt) {
+          current.count = 0;
+          current.resetAt = now + windowMs;
+        }
+        current.count += 1;
+        apiKeyWindows.set(keyRow.id, current);
+        if (current.count > keyRow.rateLimit) {
+          return res.status(429).json({ error: 'API key rate limit exceeded' });
+        }
+      }
+
       let scopes = [];
       try { scopes = JSON.parse(keyRow.scopes || '[]'); } catch {}
 
@@ -67,9 +123,13 @@ export async function authenticateToken(req, res, next) {
         userId: user.id,
         email: user.email,
         apiKeyId: keyRow.id,
+        apiKeyLabel: keyRow.label,
+        apiKeyPrefix: keyRow.prefix,
         scopes,
         restrictedNotebooks,
         rateLimit: keyRow.rateLimit || 0,
+        displayName: user.displayName,
+        accountType: user.accountType,
         authMethod: 'api_key'
       };
       req.keyRow = keyRow;
@@ -129,7 +189,7 @@ export function verifyRefreshToken(token) {
   }
 }
 
-export function requireScope(requiredScope) {
+export function requireScope(requiredScope, options = {}) {
   return (req, res, next) => {
     if (!req.user || !req.user.scopes) {
       return next();
@@ -137,18 +197,24 @@ export function requireScope(requiredScope) {
     if (req.user.authMethod !== 'api_key') {
       return next();
     }
+    const requiredScopes = Array.isArray(requiredScope) ? requiredScope : [requiredScope];
     if (req.user.scopes.includes('admin:keys') || req.user.scopes.includes('admin:all')) {
       return next();
     }
-    if (!req.user.scopes.includes(requiredScope)) {
+    if (!requiredScopes.some(scope => req.user.scopes.includes(scope))) {
       return res.status(403).json({
-        error: `API key lacks required scope: ${requiredScope}`,
+        error: `API key lacks required scope: ${requiredScopes.join(' or ')}`,
         keyScopes: req.user.scopes
       });
     }
 
-    if (req.user.restrictedNotebooks && req.params.id) {
-      if (!req.user.restrictedNotebooks.includes(req.params.id)) {
+    const notebookId =
+      req.params?.[options.notebookParam || 'id'] ||
+      (options.bodyField ? req.body?.[options.bodyField] : null) ||
+      (options.queryField ? req.query?.[options.queryField] : null);
+
+    if (req.user.restrictedNotebooks && notebookId) {
+      if (!req.user.restrictedNotebooks.includes(notebookId)) {
         return res.status(403).json({
           error: 'API key is not authorized for this notebook',
           allowedNotebooks: req.user.restrictedNotebooks

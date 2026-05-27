@@ -123,21 +123,12 @@ logger.info(`[Titan] Provider status: ${JSON.stringify(getProviderStatus())}`);
  * Dispatches a chat completion request to the best available Titan.
  * Auto-skips providers with missing/invalid keys and adds timeouts.
  */
-export async function dispatchToTitan({ messages, priority = 'context', temperature = 0.7, userKeys = null }) {
+export async function dispatchToTitan({ messages, priority = 'context', temperature = 0.7 }) {
   const PRIORITY_MAP = {
     'context': 'TOKENLLM7',
     'reasoning': 'GROQ',
     'maverick': 'NVIDIA'
   };
-
-  // BYOK injection: patch TITANS before selecting primary
-  if (userKeys) {
-    if (hasValidKey(userKeys.groq)) TITANS.GROQ.key = userKeys.groq;
-    if (hasValidKey(userKeys.nvidia)) TITANS.NVIDIA.key = userKeys.nvidia;
-    if (hasValidKey(userKeys.openai)) TITANS.OPENAI.key = userKeys.openai;
-    if (hasValidKey(userKeys.gemini)) TITANS.GEMINI.key = userKeys.gemini;
-    if (hasValidKey(userKeys.anthropic)) TITANS.ANTHROPIC.key = userKeys.anthropic;
-  }
 
   const preferred = PRIORITY_MAP[priority] || 'TOKENLLM7';
   let available = getAvailableProvider(preferred);
@@ -228,7 +219,7 @@ export async function dispatchToTitan({ messages, priority = 'context', temperat
       const nextAvailable = getAvailableProvider(preferred);
 
       if (nextAvailable !== available && nextAvailable) {
-        return await dispatchToTitan({ messages, priority, temperature, userKeys });
+        return await dispatchToTitan({ messages, priority, temperature });
       }
 
       if (hasValidKey(TITANS.GEMINI.key)) {
@@ -269,7 +260,7 @@ export async function dispatchToTitan({ messages, priority = 'context', temperat
     const nextAvailable = getAvailableProvider(preferred);
 
     if (nextAvailable !== available && nextAvailable) {
-      return await dispatchToTitan({ messages, priority, temperature, userKeys });
+      return await dispatchToTitan({ messages, priority, temperature });
     }
 
     if (hasValidKey(TITANS.GEMINI.key)) {

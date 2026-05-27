@@ -5,7 +5,7 @@ import fsPromises from 'fs/promises';
 import fsSync from 'fs';
 import { v4 as uuidv4 } from 'uuid';
 import { sql } from "drizzle-orm";
-import { authenticateToken } from '../middleware/auth.js';
+import { authenticateToken, requireScope } from '../middleware/auth.js';
 import { dbHelpers, getDatabase } from '../db/database.js';
 import { logger } from '../utils/logger.js';
 
@@ -36,7 +36,7 @@ const upload = multer({
  * POST /api/agent/upload
  * Allows an agent to upload a raw file to a notebook for the frontend to process later
  */
-router.post('/upload', authenticateToken, upload.single('file'), async (req, res) => {
+router.post('/upload', authenticateToken, requireScope('uploads:write', { bodyField: 'notebookId' }), upload.single('file'), async (req, res) => {
   try {
     const { notebookId } = req.body;
     
@@ -77,7 +77,7 @@ router.post('/upload', authenticateToken, upload.single('file'), async (req, res
  * GET /api/agent/pending-uploads
  * Returns a list of all unprocessed agent files for the user
  */
-router.get('/pending-uploads', authenticateToken, async (req, res) => {
+router.get('/pending-uploads', authenticateToken, requireScope('uploads:read', { queryField: 'notebookId' }), async (req, res) => {
   try {
     const { notebookId } = req.query;
     const db = await getDatabase();
@@ -101,7 +101,7 @@ router.get('/pending-uploads', authenticateToken, async (req, res) => {
  * DELETE /api/agent/upload/:id
  * Removes the raw file and the database record after the frontend has successfully encrypted and processed it
  */
-router.delete('/upload/:id', authenticateToken, async (req, res) => {
+router.delete('/upload/:id', authenticateToken, requireScope('uploads:write'), async (req, res) => {
   try {
     const { id } = req.params;
     const userId = req.user.userId || req.user.id;
@@ -112,6 +112,9 @@ router.delete('/upload/:id', authenticateToken, async (req, res) => {
     
     if (!record) {
       return res.status(404).json({ error: 'Upload record not found' });
+    }
+    if (req.user.restrictedNotebooks && !req.user.restrictedNotebooks.includes(record.notebook_id)) {
+      return res.status(403).json({ error: 'API key is not authorized for this notebook' });
     }
 
     // Delete the physical file from the file system
@@ -137,7 +140,7 @@ router.delete('/upload/:id', authenticateToken, async (req, res) => {
  * GET /api/agent/download/:id
  * Securely streams the raw file to the frontend for local processing
  */
-router.get('/download/:id', authenticateToken, async (req, res) => {
+router.get('/download/:id', authenticateToken, requireScope('uploads:read'), async (req, res) => {
   try {
     const { id } = req.params;
     const userId = req.user.userId || req.user.id;
@@ -148,6 +151,9 @@ router.get('/download/:id', authenticateToken, async (req, res) => {
     
     if (!record) {
       return res.status(404).json({ error: 'Upload record not found' });
+    }
+    if (req.user.restrictedNotebooks && !req.user.restrictedNotebooks.includes(record.notebook_id)) {
+      return res.status(403).json({ error: 'API key is not authorized for this notebook' });
     }
 
     res.download(record.file_path, record.file_name);

@@ -26,6 +26,7 @@ router.get('/profile', async (req, res) => {
         id: user.id,
         email: user.email,
         displayName: user.displayName || user.display_name,
+        accountType: user.accountType || user.account_type,
         avatarUrl: user.avatarUrl || user.avatar_url,
         bio: user.bio,
         createdAt: user.createdAt || user.created_at,
@@ -68,6 +69,7 @@ router.put('/profile', async (req, res) => {
         id: user.id,
         email: user.email,
         displayName: user.displayName || user.display_name,
+        accountType: user.accountType || user.account_type,
         avatarUrl: user.avatarUrl || user.avatar_url,
         bio: user.bio,
         updatedAt: user.updatedAt || user.updated_at,
@@ -263,75 +265,10 @@ router.delete('/account', async (req, res) => {
   }
 });
 
-async function validateProviderKey(provider, key) {
-  const PING_ENDPOINTS = {
-    openai: { url: 'https://api.openai.com/v1/models', headers: { 'Authorization': `Bearer ${key}` } },
-    groq: { url: 'https://api.groq.com/openai/v1/models', headers: { 'Authorization': `Bearer ${key}` } },
-    nvidia: { url: 'https://integrate.api.nvidia.com/v1/models', headers: { 'Authorization': `Bearer ${key}` } },
-    gemini: { url: 'https://generativelanguage.googleapis.com/v1beta/models?key=' + key, headers: {} },
-    anthropic: { url: 'https://api.anthropic.com/v1/messages', headers: { 'x-api-key': key, 'anthropic-version': '2023-06-01', 'Content-Type': 'application/json' } }
-  };
-
-  const config = PING_ENDPOINTS[provider];
-  if (!config) return { valid: false, error: 'Unknown provider' };
-
-  try {
-    const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), 5000);
-    const res = await fetch(config.url, { method: 'GET', headers: config.headers, signal: controller.signal });
-    clearTimeout(timeout);
-    if (res.ok || res.status === 400 || res.status === 401) {
-      if (res.status === 401) return { valid: false, error: 'Invalid key (401)' };
-      return { valid: res.ok, status: res.status };
-    }
-    return { valid: false, error: `HTTP ${res.status}` };
-  } catch (err) {
-    return { valid: false, error: err.message };
-  }
-}
-
-// Update user API keys (BYOK) with key validation
-router.put('/api_keys', async (req, res) => {
-  try {
-    const { apiKeys, skipValidation } = req.body;
-    
-    if (!apiKeys || typeof apiKeys !== 'object') {
-      return res.status(400).json({ error: 'Valid apiKeys object is required' });
-    }
-
-    const SUPPORTED = ['gemini', 'groq', 'nvidia', 'openai', 'anthropic'];
-    const hasValidKey = Object.keys(apiKeys).some(p => 
-      SUPPORTED.includes(p) && typeof apiKeys[p] === 'string' && apiKeys[p].length > 0
-    );
-
-    if (!hasValidKey) {
-      return res.status(400).json({ error: 'At least one non-empty provider key must be provided' });
-    }
-
-    if (!skipValidation) {
-      const results = {};
-      for (const provider of SUPPORTED) {
-        if (apiKeys[provider]) {
-          results[provider] = await validateProviderKey(provider, apiKeys[provider]);
-        }
-      }
-      const failures = Object.entries(results).filter(([, r]) => !r.valid);
-      if (failures.length > 0) {
-        return res.status(400).json({
-          error: 'Some provider keys failed validation',
-          validationResults: results,
-          hint: 'Set skipValidation: true to bypass'
-        });
-      }
-    }
-
-    await dbHelpers.updateUserApiKeys(req.user.userId, apiKeys);
-    
-    res.json({ message: 'API keys updated and validated successfully' });
-  } catch (error) {
-    logger.error('Update API keys error:', error);
-    res.status(500).json({ error: 'Failed to update API keys' });
-  }
+router.all('/api_keys', (req, res) => {
+  res.status(410).json({
+    error: 'BYOK provider keys have been removed. Use Agent Pairing or generated spm_ API keys for external agent access.'
+  });
 });
 
 export default router;

@@ -4,13 +4,16 @@ import path from "path";
 
 // https://vitejs.dev/config/
 export default defineConfig(({ mode }) => ({
+  esbuild: {
+    pure: mode === "production" ? ["console.log", "console.debug"] : [],
+  },
   server: {
     host: "127.0.0.1",
     port: 5173,
     strictPort: true,
     proxy: {
       '/api': {
-        target: 'http://127.0.0.1:4000',
+        target: 'http://127.0.0.1:3001',
         changeOrigin: true,
         secure: false,
       }

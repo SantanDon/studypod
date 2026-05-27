@@ -32,21 +32,58 @@ function setCachedResponse(notebookId, message, response, responseStyle = 'dense
   }
 }
 
+const STOP_WORDS = new Set([
+  'about', 'after', 'again', 'against', 'also', 'because', 'before', 'being',
+  'between', 'could', 'does', 'from', 'have', 'into', 'more', 'most', 'only',
+  'should', 'than', 'that', 'their', 'there', 'these', 'this', 'what', 'when',
+  'where', 'which', 'while', 'with', 'would', 'your'
+]);
+
+function tokenize(text = '') {
+  return stripBase64Images(String(text))
+    .toLowerCase()
+    .match(/[a-z0-9]{3,}/g)
+    ?.filter(token => !STOP_WORDS.has(token)) || [];
+}
+
+function scoreTextAgainstQuery(text, query) {
+  const terms = tokenize(query);
+  if (terms.length === 0) return 0;
+
+  const haystack = stripBase64Images(String(text || '')).toLowerCase();
+  return terms.reduce((score, term) => {
+    const occurrences = haystack.split(term).length - 1;
+    return score + Math.min(occurrences, 8);
+  }, 0);
+}
+
+function rankByQuery(items, query, getText) {
+  return items
+    .map((item, index) => ({
+      item,
+      index,
+      score: scoreTextAgainstQuery(getText(item), query)
+    }))
+    .sort((a, b) => (b.score - a.score) || (a.index - b.index))
+    .map(entry => entry.item);
+}
+
 /**
  * Strips base64 image data from a string so text-only AI models
  * never receive binary payloads they cannot process.
  */
-function stripBase64Images(text) {
-  return text.replace(BASE64_IMAGE_RE, '[image omitted — text-only model]');
+function stripBase64Images(text = '') {
+  return String(text || '').replace(BASE64_IMAGE_RE, '[image omitted - text-only model]');
 }
 
 /**
  * Build a structured context block from all notebook sources and notes.
  * With the 128k Titan context, we raise limits significantly.
  */
-function buildNotebookContext(notebook, sources, notes) {
+function buildNotebookContext(notebook, sources, notes, query) {
   const MAX_COMBINED_CHARS = 12000; // Safeguard to stay under Groq 12k TPM rate limits (~3k tokens)
   const MAX_NOTE_CHARS = 4000;
+  const sourceRefs = [];
 
   let ctx = `=== NOTEBOOK: "${notebook.title}" ===\n`;
   if (notebook.description) ctx += `Description: ${notebook.description}\n`;
@@ -58,13 +95,21 @@ function buildNotebookContext(notebook, sources, notes) {
     ctx += `=== SOURCES (${sources.length}) ===\n`;
     currentLength = ctx.length;
     
-    for (const s of sources) {
+    const rankedSources = rankByQuery(
+      sources,
+      query,
+      s => `${s.title || ''}\n${s.type || ''}\n${s.url || ''}\n${s.content || ''}`
+    );
+
+    for (const s of rankedSources) {
       if (currentLength >= MAX_COMBINED_CHARS) {
         ctx += `\n[Remaining sources truncated due to context limits]\n`;
         break;
       }
       
-      let sourceBlock = `\n[SOURCE: ${s.title} | type: ${s.type}]\n`;
+      const sourceNumber = sourceRefs.length + 1;
+      let sourceBlock = `\n[${sourceNumber}] SOURCE: ${s.title} | type: ${s.type}\n`;
+      if (s.url) sourceBlock += `URL: ${s.url}\n`;
       if (s.content && s.content.length > 0 && !s.content.startsWith('Client-side PDF processing failed')) {
         const cleanContent = stripBase64Images(s.content);
         const remainingBudget = MAX_COMBINED_CHARS - currentLength - sourceBlock.length;
@@ -81,13 +126,19 @@ function buildNotebookContext(notebook, sources, notes) {
           
         sourceBlock += truncated + '\n';
       } else if (s.url) {
-        sourceBlock += `URL: ${s.url}\n`;
         sourceBlock += `[Note: Content not extracted — URL source only]\n`;
       } else {
         sourceBlock += `[Content not available]\n`;
       }
       
       ctx += sourceBlock;
+      sourceRefs.push({
+        index: sourceNumber,
+        id: s.id,
+        title: s.title,
+        type: s.type,
+        url: s.url || null
+      });
       currentLength = ctx.length;
     }
   } else {
@@ -98,7 +149,7 @@ function buildNotebookContext(notebook, sources, notes) {
     ctx += `\n=== NOTES (${notes.length} most recent) ===\n`;
     currentLength = ctx.length;
     
-    const recentNotes = notes.slice(0, 50);
+    const recentNotes = rankByQuery(notes, query, n => `${n.content || ''}\n${n.author_name || ''}`).slice(0, 50);
     for (const n of recentNotes) {
       if (currentLength >= MAX_COMBINED_CHARS) {
         ctx += `\n[Remaining notes truncated]\n`;
@@ -122,7 +173,7 @@ function buildNotebookContext(notebook, sources, notes) {
     }
   }
 
-  return ctx;
+  return { context: ctx, sourceRefs };
 }
 
 /**
@@ -166,7 +217,7 @@ Caller: ${callerType}`;
 /**
  * Main chat function — the core of the AI-Human collaboration feature.
  */
-export async function chatWithNotebook({ notebook, sources, notes, message, history = [], callerType = 'human', userKeys = null, responseStyle = 'dense' }) {
+export async function chatWithNotebook({ notebook, sources, notes, message, history = [], callerType = 'human', responseStyle = 'dense' }) {
   let contextSources = [...sources];
   let searchResult = null;
   let isFallbackUsed = false;
@@ -194,7 +245,7 @@ export async function chatWithNotebook({ notebook, sources, notes, message, hist
     }
   }
 
-  const notebookContext = buildNotebookContext(notebook, contextSources, notes);
+  let { context: notebookContext, sourceRefs } = buildNotebookContext(notebook, contextSources, notes, message);
   const systemPrompt = buildSystemPrompt(callerType, responseStyle);
 
   const messages = [{ role: 'system', content: systemPrompt }];
@@ -244,7 +295,6 @@ export async function chatWithNotebook({ notebook, sources, notes, message, hist
       messages, 
       priority, 
       temperature: 0.7,
-      userKeys
     });
 
     // Check if the answer indicates insufficient context, if so, trigger fallback search
@@ -278,7 +328,9 @@ export async function chatWithNotebook({ notebook, sources, notes, message, hist
           }));
           
           const combinedSources = [...sources, ...virtualSources];
-          const newNotebookContext = buildNotebookContext(notebook, combinedSources, notes);
+          const rebuiltContext = buildNotebookContext(notebook, combinedSources, notes, message);
+          const newNotebookContext = rebuiltContext.context;
+          sourceRefs = rebuiltContext.sourceRefs;
           const newFullMessage = `${newNotebookContext}\n\n=== USER QUESTION ===\n${cleanMessage}`;
           
           // Update the user message in messages array
@@ -293,7 +345,6 @@ export async function chatWithNotebook({ notebook, sources, notes, message, hist
             messages,
             priority: 'reasoning',
             temperature: 0.7,
-            userKeys
           });
           
           answer = fallbackRes.answer;
@@ -320,7 +371,7 @@ Output your critique starting with a score from 1-10.`;
       ];
 
       try {
-        const { answer: critique } = await dispatchToTitan({ messages: critiqueChat, priority: 'reasoning', temperature: 0.3, userKeys });
+        const { answer: critique } = await dispatchToTitan({ messages: critiqueChat, priority: 'reasoning', temperature: 0.3 });
 
         if (!critique.startsWith('10') && !critique.startsWith('9')) {
           const finalizePrompt = `Rewrite the final answer incorporating the improvements from your audit. 
@@ -333,7 +384,7 @@ Internal Audit: ${critique}`;
             { role: 'user', content: finalizePrompt }
           ];
 
-          const finalRes = await dispatchToTitan({ messages: finalChat, priority: 'context', temperature: 0.5, userKeys });
+          const finalRes = await dispatchToTitan({ messages: finalChat, priority: 'context', temperature: 0.5 });
           answer = finalRes.answer;
           tokensUsed += finalRes.tokensUsed;
         }
@@ -342,12 +393,16 @@ Internal Audit: ${critique}`;
       }
     }
 
-    // Identify which sources the answer likely draws from (simple keyword matching)
-    const groundedSources = contextSources
-      .filter(s => answer.toLowerCase().includes(s.title.toLowerCase().slice(0, 20)))
-      .map(s => s.id);
+    const citedNumbers = new Set(
+      [...answer.matchAll(/\[(\d+)\]/g)]
+        .map(match => Number(match[1]))
+        .filter(Number.isFinite)
+    );
+    const groundedSources = sourceRefs
+      .filter(ref => citedNumbers.has(ref.index))
+      .map(ref => ref.id);
 
-    const result = { answer, groundedSources, tokensUsed, modelUsed };
+    const result = { answer, groundedSources, sourceRefs, tokensUsed, modelUsed };
     setCachedResponse(notebookId, message, result, responseStyle);
     return result;
   } catch (error) {

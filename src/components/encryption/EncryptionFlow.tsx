@@ -57,6 +57,10 @@ export function EncryptionFlow({ onUnlocked, allowGuest = true }: EncryptionFlow
         setFlowState('recover-account');
       } else if (mode === 'create') {
         setFlowState('create-account');
+      } else if (mode === 'cloud-signup') {
+        setFlowState('cloud-signup');
+      } else if (mode === 'cloud-login') {
+        setFlowState('cloud-login');
       } else if (mode === 'authenticate') {
         setFlowState('authenticate');
       } else if (userIds.length === 0) {

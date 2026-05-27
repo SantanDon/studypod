@@ -15,6 +15,17 @@ const router = express.Router();
 // Track explicitly deleted notebooks to prevent JIT recovery race condition
 const deletedNotebooks = new Set();
 
+function getActorName(req) {
+  if (req.user?.authMethod === 'api_key') {
+    return req.user.apiKeyLabel || req.user.apiKeyPrefix || 'agent';
+  }
+  return req.user?.displayName || 'user';
+}
+
+function isAgentRequest(req, agentId = null) {
+  return req.user?.authMethod === 'api_key' || !!agentId;
+}
+
 async function getNotebookOrRecover(id, userId, description = "Auto-provisioned") {
   if (deletedNotebooks.has(id)) {
     return null;
@@ -46,7 +57,7 @@ router.use(authenticateToken);
  * GET /api/notebooks
  * List all notebooks for the authenticated user
  */
-router.get("/", async (req, res) => {
+router.get("/", requireScope('notebooks:read'), async (req, res) => {
   try {
     const { include_contexts } = req.query;
     let notebooks;
@@ -55,6 +66,10 @@ router.get("/", async (req, res) => {
       notebooks = await dbHelpers.getNotebooksWithDeepContext(req.user.userId);
     } else {
       notebooks = await dbHelpers.getNotebooksByUserId(req.user.userId);
+    }
+
+    if (Array.isArray(req.user.restrictedNotebooks)) {
+      notebooks = notebooks.filter(notebook => req.user.restrictedNotebooks.includes(notebook.id));
     }
 
     notebooks.forEach(notebook => {
@@ -74,7 +89,7 @@ router.get("/", async (req, res) => {
  * POST /api/notebooks
  * Create a new notebook
  */
-router.post("/", async (req, res, next) => {
+router.post("/", requireScope('notebooks:write'), async (req, res, next) => {
   logger.debug("Creating notebook:", { title: req.body?.title, id: req.body?.id });
   try {
     const { title, description, id: providedId } = req.body;
@@ -109,7 +124,7 @@ router.post("/", async (req, res, next) => {
  * POST /api/notebooks/join
  * Join a notebook using a shared join code
  */
-router.post("/join", async (req, res) => {
+router.post("/join", requireScope('notebooks:write'), async (req, res) => {
   try {
     const { code } = req.body;
     if (!code) {
@@ -137,7 +152,7 @@ router.post("/join", async (req, res) => {
  * GET /api/notebooks/:id
  * Get details for a specific notebook
  */
-router.get("/:id", async (req, res) => {
+router.get("/:id", requireScope('notebooks:read'), async (req, res) => {
   try {
     let notebook = await getNotebookOrRecover(req.params.id, req.user.userId);
     if (!notebook) {
@@ -162,7 +177,7 @@ router.get("/:id", async (req, res) => {
  * PUT /api/notebooks/:id
  * Update notebook metadata
  */
-router.put("/:id", async (req, res) => {
+router.put("/:id", requireScope('notebooks:write'), async (req, res) => {
   try {
     const { title, description, example_questions, generation_status, icon } = req.body;
     const updates = {};
@@ -211,11 +226,17 @@ router.put("/:id", async (req, res) => {
  * DELETE /api/notebooks/batch
  * Batch delete multiple notebooks
  */
-router.delete("/batch", async (req, res) => {
+router.delete("/batch", requireScope('notebooks:write'), async (req, res) => {
   try {
     const { ids } = req.body;
     if (!ids || !Array.isArray(ids) || ids.length === 0) {
       return res.status(400).json({ error: "No notebook IDs provided" });
+    }
+    if (req.user.restrictedNotebooks) {
+      const denied = ids.filter(id => !req.user.restrictedNotebooks.includes(id));
+      if (denied.length > 0) {
+        return res.status(403).json({ error: "API key is not authorized for one or more notebooks", denied });
+      }
     }
     const result = await dbHelpers.batchDeleteNotebooks(ids, req.user.userId);
     if (result.changes > 0) {
@@ -232,7 +253,7 @@ router.delete("/batch", async (req, res) => {
  * DELETE /api/notebooks/:id
  * Delete a notebook
  */
-router.delete("/:id", async (req, res) => {
+router.delete("/:id", requireScope('notebooks:write'), async (req, res) => {
   try {
     const result = await dbHelpers.deleteNotebook(req.params.id, req.user.userId);
     if (result.action === 'none') {
@@ -255,7 +276,7 @@ router.delete("/:id", async (req, res) => {
  * GET /api/notebooks/:id/notes
  * List all notes in a notebook
  */
-router.get("/:id/notes", async (req, res) => {
+router.get("/:id/notes", requireScope('notes:read'), async (req, res) => {
   try {
     let notebook = await getNotebookOrRecover(req.params.id, req.user.userId);
     if (!notebook) return res.status(404).json({ error: { code: "NOTEBOOK_NOT_FOUND", message: "Notebook not found" } });
@@ -276,27 +297,28 @@ router.post("/:id/notes", requireScope('notes:create'), async (req, res) => {
     let notebook = await getNotebookOrRecover(req.params.id, req.user.userId, "Automatically provisioned after system reset");
     if (!notebook) return res.status(404).json({ error: { code: "NOTEBOOK_NOT_FOUND", message: "Notebook not found and could not be recovered" } });
 
-    const { content, authorId } = req.body;
+    const { content } = req.body;
     if (!content) {
       return res.status(400).json({ error: "Note content is required" });
     }
 
     const id = uuidv4();
     const userId = req.user.userId;
-    const author_id = authorId || userId;
+    const author_id = userId;
     
     await dbHelpers.createNote(id, req.params.id, userId, content, author_id);
     
     const authorUser = await dbHelpers.getUserById(author_id);
-    if (authorUser && authorUser.accountType === 'agent') {
+    if (req.user.authMethod === 'api_key' || (authorUser && authorUser.accountType === 'agent')) {
       MemoryService.storeMemory(userId, req.params.id, content, {
         source: 'agent_note',
+        actor: getActorName(req),
         noteId: id
       });
     }
 
     WebhookDispatcher.recordActivityAndNotify(
-      req.params.id, userId, req.user.displayName || 'agent', 'note.created',
+      req.params.id, userId, getActorName(req), 'note.created',
       content.substring(0, 100)
     );
 
@@ -311,7 +333,7 @@ router.post("/:id/notes", requireScope('notes:create'), async (req, res) => {
  * GET /api/notebooks/:id/notes/:noteId
  * Get a single note
  */
-router.get("/:id/notes/:noteId", async (req, res) => {
+router.get("/:id/notes/:noteId", requireScope('notes:read'), async (req, res) => {
   try {
     const note = await dbHelpers.getNoteById(req.params.noteId, req.user.userId);
     if (!note) return res.status(404).json({ error: "Note not found" });
@@ -325,7 +347,7 @@ router.get("/:id/notes/:noteId", async (req, res) => {
  * PUT /api/notebooks/:id/notes/:noteId
  * Update note content
  */
-router.put("/:id/notes/:noteId", async (req, res) => {
+router.put("/:id/notes/:noteId", requireScope(['notes:write', 'notes:create']), async (req, res) => {
   try {
     const { content } = req.body;
     if (!content) return res.status(400).json({ error: "content is required" });
@@ -341,7 +363,7 @@ router.put("/:id/notes/:noteId", async (req, res) => {
  * DELETE /api/notebooks/:id/notes/:noteId
  * Delete a note
  */
-router.delete("/:id/notes/:noteId", async (req, res) => {
+router.delete("/:id/notes/:noteId", requireScope('notes:delete'), async (req, res) => {
   try {
     const result = await dbHelpers.deleteNote(req.params.noteId, req.user.userId);
     if (result.changes === 0) return res.status(404).json({ error: "Note not found" });
@@ -356,7 +378,7 @@ router.delete("/:id/notes/:noteId", async (req, res) => {
  * POST /api/notebooks/:id/memory/store
  * Generate a local embedding and store it in SQLite
  */
-router.post("/:id/memory/store", async (req, res) => {
+router.post("/:id/memory/store", requireScope('memories:write'), async (req, res) => {
   try {
     const { content, metadata } = req.body;
     if (!content) {
@@ -385,7 +407,7 @@ router.post("/:id/memory/store", async (req, res) => {
  * POST /api/notebooks/:id/memory/search
  * Semantic search using local Cosine Similarity
  */
-router.post("/:id/memory/search", async (req, res) => {
+router.post("/:id/memory/search", requireScope('memories:read'), async (req, res) => {
   try {
     const { query, limit = 5, metadataFilter } = req.body;
     if (!query) {
@@ -394,6 +416,8 @@ router.post("/:id/memory/search", async (req, res) => {
 
     const userId = req.user.userId;
     const notebookId = req.params.id;
+    const notebook = await dbHelpers.getNotebookById(notebookId, userId);
+    if (!notebook) return res.status(404).json({ error: "Notebook not found" });
     
     const result = await MemoryService.searchMemories(userId, notebookId, query, limit, { metadataFilter });
 
@@ -409,7 +433,7 @@ router.post("/:id/memory/search", async (req, res) => {
  * POST /api/notebooks/:id/sources
  * Create a new source in a notebook
  */
-router.post("/:id/sources", async (req, res) => {
+router.post("/:id/sources", requireScope('sources:write'), async (req, res) => {
   try {
     let notebook = await getNotebookOrRecover(req.params.id, req.user.userId, "Automatically provisioned after system reset");
     if (!notebook) return res.status(404).json({ error: { code: "NOTEBOOK_NOT_FOUND", message: "Notebook not found and could not be recovered" } });
@@ -445,7 +469,7 @@ router.post("/:id/sources", async (req, res) => {
  * PUT /api/notebooks/:id/sources/:sourceId
  * Update an existing source
  */
-router.put("/:id/sources/:sourceId", async (req, res) => {
+router.put("/:id/sources/:sourceId", requireScope('sources:write'), async (req, res) => {
   try {
     const updates = req.body;
     const result = await dbHelpers.updateSource(req.params.sourceId, req.user.userId, updates);
@@ -486,7 +510,7 @@ router.put("/:id/sources/:sourceId", async (req, res) => {
  * GET /api/notebooks/:id/sources
  * List all sources in a notebook
  */
-router.get("/:id/sources", async (req, res) => {
+router.get("/:id/sources", requireScope('sources:read'), async (req, res) => {
   try {
     let notebook = await getNotebookOrRecover(req.params.id, req.user.userId);
     if (!notebook) return res.status(404).json({ error: { code: "NOTEBOOK_NOT_FOUND", message: "Notebook not found" } });
@@ -502,7 +526,7 @@ router.get("/:id/sources", async (req, res) => {
  * POST /api/notebooks/:id/sources/:sourceId/generate-hooks
  * Generates viral outreach hooks from a source and persists as a note.
  */
-router.post("/:id/sources/:sourceId/generate-hooks", async (req, res) => {
+router.post("/:id/sources/:sourceId/generate-hooks", requireScope('notes:create'), async (req, res) => {
   try {
     const { id, sourceId } = req.params;
     const userId = req.user.userId;
@@ -544,7 +568,7 @@ router.post("/:id/sources/:sourceId/generate-hooks", async (req, res) => {
  * GET /api/notebooks/:id/messages
  * Get conversation history for a notebook
  */
-router.get("/:id/messages", async (req, res) => {
+router.get("/:id/messages", requireScope(['chat:all', 'chat:readonly']), async (req, res) => {
   try {
     let notebook = await getNotebookOrRecover(req.params.id, req.user.userId);
     if (!notebook) return res.status(404).json({ error: { code: "NOTEBOOK_NOT_FOUND", message: "Notebook not found" } });
@@ -560,7 +584,7 @@ router.get("/:id/messages", async (req, res) => {
  * GET /api/notebooks/:id/context
  * Build an AI-optimized context payload for agents loading a notebook
  */
-router.get("/:id/context", async (req, res) => {
+router.get("/:id/context", requireScope('notebooks:read'), async (req, res) => {
   try {
     const notebook = await dbHelpers.getNotebookById(req.params.id, req.user.userId);
     if (!notebook) return res.status(404).json({ error: "Notebook not found" });
@@ -602,7 +626,7 @@ router.get("/:id/context", async (req, res) => {
  * POST /api/notebooks/:id/immerse
  * Trigger the Mastication Loop for a specific source
  */
-router.post("/:id/immerse", async (req, res) => {
+router.post("/:id/immerse", requireScope('missions:write'), async (req, res) => {
   try {
     const { sourceId, agentId } = req.body;
     const notebookId = req.params.id;
@@ -626,7 +650,7 @@ router.post("/:id/immerse", async (req, res) => {
  * POST /api/notebooks/:id/chat
  * Human/Agent conversation endpoint powered by notebook context
  */
-router.post("/:id/chat", async (req, res) => {
+router.post("/:id/chat", requireScope('chat:all'), async (req, res) => {
   try {
     const { message, saveAsNote = false, agentId = null, responseStyle = 'dense' } = req.body;
     if (!message) return res.status(400).json({ error: "message is required" });
@@ -640,21 +664,10 @@ router.post("/:id/chat", async (req, res) => {
     const sources = await dbHelpers.getSourcesByNotebookId(notebookId, userId);
     const notes = await dbHelpers.getNotesByNotebookId(notebookId, userId);
     const messages = await dbHelpers.getChatMessagesByNotebookId(notebookId, userId);
-    const user = await dbHelpers.getUserById(userId);
-
-    // BYOK: Load user's private keys if they exist
-    let userKeys = null;
-    if (user && user.apiKeys) {
-      try {
-        userKeys = typeof user.apiKeys === 'string' ? JSON.parse(user.apiKeys) : user.apiKeys;
-      } catch (e) {
-        logger.warn(`Failed to parse apiKeys for user ${userId}:`, e.message);
-      }
-    }
-
     // Save the user's message to history
     const userMsgId = uuidv4();
-    await dbHelpers.createChatMessage(userMsgId, notebookId, userId, agentId ? 'agent' : 'user', message);
+    const callerIsAgent = isAgentRequest(req, agentId);
+    await dbHelpers.createChatMessage(userMsgId, notebookId, userId, callerIsAgent ? 'agent' : 'user', message);
 
     try {
       // Call Gemini using our context service
@@ -664,8 +677,7 @@ router.post("/:id/chat", async (req, res) => {
         notes,
         message,
         history: messages,
-        callerType: agentId ? 'agent' : 'human',
-        userKeys,
+        callerType: callerIsAgent ? 'agent' : 'human',
         responseStyle
       });
 
@@ -678,11 +690,11 @@ router.post("/:id/chat", async (req, res) => {
       if (saveAsNote) {
         noteId = uuidv4();
         const noteContent = `**Q:** ${message}\n\n**A:** ${chatResult.answer}`;
-        await dbHelpers.createNote(noteId, notebookId, userId, noteContent, agentId || userId);
+        await dbHelpers.createNote(noteId, notebookId, userId, noteContent, userId);
       }
 
       WebhookDispatcher.recordActivityAndNotify(
-        notebookId, userId, agentId ? 'agent' : 'human', 'chat.message',
+        notebookId, userId, callerIsAgent ? getActorName(req) : 'human', 'chat.message',
         message.substring(0, 100)
       );
 
@@ -724,7 +736,7 @@ const requireNotebookAccess = async (req, res, next) => {
  * GET /api/notebooks/:id/activity
  * Get activity log
  */
-router.get("/:id/activity", requireNotebookAccess, async (req, res) => {
+router.get("/:id/activity", requireScope('activity:read'), requireNotebookAccess, async (req, res) => {
   try {
     const activities = await dbHelpers.getActivityLogsByNotebookId(req.params.id);
     res.json({ activities });
@@ -738,7 +750,7 @@ router.get("/:id/activity", requireNotebookAccess, async (req, res) => {
  * POST /api/notebooks/:id/activity
  * Record an activity log entry (for agents reporting actions)
  */
-router.post("/:id/activity", requireNotebookAccess, async (req, res) => {
+router.post("/:id/activity", requireScope('activity:write'), requireNotebookAccess, async (req, res) => {
   try {
     const { actionType, contentPreview } = req.body;
     if (!actionType) return res.status(400).json({ error: "actionType is required" });
@@ -746,7 +758,7 @@ router.post("/:id/activity", requireNotebookAccess, async (req, res) => {
     await dbHelpers.createActivityLog(
       req.params.id,
       req.user.userId,
-      req.user.displayName || 'Agent',
+      getActorName(req),
       actionType,
       contentPreview || null
     );
@@ -761,15 +773,15 @@ router.post("/:id/activity", requireNotebookAccess, async (req, res) => {
  * GET /api/notebooks/:id/sources/:sourceId/content
  * Get full untruncated source content
  */
-router.get("/:id/sources/:sourceId/content", requireNotebookAccess, async (req, res) => {
+router.get("/:id/sources/:sourceId/content", requireScope('sources:read'), requireNotebookAccess, async (req, res) => {
   try {
     const sources = await dbHelpers.getSourcesByNotebookId(req.params.id, req.user.userId);
     const source = sources.find(s => s.id === req.params.sourceId);
     if (!source) return res.status(404).json({ error: "Source not found" });
     
     // Log activity if it's an agent reading
-    if (req.user.accountType === 'agent') {
-      await dbHelpers.createActivityLog(req.params.id, req.user.userId, req.user.displayName || 'Agent', 'read_source', `Read full source: ${source.title}`);
+    if (req.user.authMethod === 'api_key' || req.user.accountType === 'agent') {
+      await dbHelpers.createActivityLog(req.params.id, req.user.userId, getActorName(req), 'read_source', `Read full source: ${source.title}`);
     }
     
     res.json({
@@ -788,7 +800,7 @@ router.get("/:id/sources/:sourceId/content", requireNotebookAccess, async (req, 
 /**
  * GET /api/notebooks/:id/tasks
  */
-router.get("/:id/tasks", requireNotebookAccess, async (req, res) => {
+router.get("/:id/tasks", requireScope('tasks:read'), requireNotebookAccess, async (req, res) => {
   try {
     const tasks = await dbHelpers.getTasksByNotebookId(req.params.id);
     res.json({ tasks });
@@ -801,12 +813,12 @@ router.get("/:id/tasks", requireNotebookAccess, async (req, res) => {
 /**
  * POST /api/notebooks/:id/tasks
  */
-router.post("/:id/tasks", requireNotebookAccess, async (req, res) => {
+router.post("/:id/tasks", requireScope('tasks:write'), requireNotebookAccess, async (req, res) => {
   try {
     const { instruction, assignee, priority, due_by } = req.body;
     const task = await dbHelpers.createTask(req.user.userId, req.params.id, instruction, assignee, priority, null, due_by);
     
-    await dbHelpers.createActivityLog(req.params.id, req.user.userId, req.user.displayName || 'User', 'created_task', `Task assigned to ${assignee || 'human'}: ${instruction.substring(0, 50)}...`);
+    await dbHelpers.createActivityLog(req.params.id, req.user.userId, getActorName(req), 'created_task', `Task assigned to ${assignee || 'human'}: ${instruction.substring(0, 50)}...`);
     
     res.status(201).json(task);
   } catch (error) {
@@ -818,14 +830,14 @@ router.post("/:id/tasks", requireNotebookAccess, async (req, res) => {
 /**
  * PUT /api/notebooks/:id/tasks/:taskId
  */
-router.put("/:id/tasks/:taskId", requireNotebookAccess, async (req, res) => {
+router.put("/:id/tasks/:taskId", requireScope('tasks:write'), requireNotebookAccess, async (req, res) => {
   try {
     const { status, result } = req.body;
     const updates = { status, result };
     if (status === 'completed') updates.completedAt = new Date();
     
     await dbHelpers.updateTask(req.params.taskId, updates);
-    await dbHelpers.createActivityLog(req.params.id, req.user.userId, req.user.displayName || 'User', 'updated_task', `Task ${req.params.taskId} marked as ${status}`);
+    await dbHelpers.createActivityLog(req.params.id, req.user.userId, getActorName(req), 'updated_task', `Task ${req.params.taskId} marked as ${status}`);
     
     res.json({ message: "Task updated" });
   } catch (error) {
@@ -837,7 +849,7 @@ router.put("/:id/tasks/:taskId", requireNotebookAccess, async (req, res) => {
 /**
  * GET /api/notebooks/:id/scratch
  */
-router.get("/:id/scratch", requireNotebookAccess, async (req, res) => {
+router.get("/:id/scratch", requireScope('notes:read'), requireNotebookAccess, async (req, res) => {
   try {
     const entries = await dbHelpers.getScratchpadByNotebookId(req.params.id, req.user.userId);
     res.json({ scratchpad: entries });
@@ -850,7 +862,7 @@ router.get("/:id/scratch", requireNotebookAccess, async (req, res) => {
 /**
  * POST /api/notebooks/:id/scratch
  */
-router.post("/:id/scratch", requireNotebookAccess, async (req, res) => {
+router.post("/:id/scratch", requireScope('notes:create'), requireNotebookAccess, async (req, res) => {
   try {
     const { content, ttl_hours } = req.body;
     const expiresAt = ttl_hours ? new Date(Date.now() + ttl_hours * 60 * 60 * 1000) : null;
@@ -865,7 +877,7 @@ router.post("/:id/scratch", requireNotebookAccess, async (req, res) => {
 /**
  * POST /api/notebooks/:id/scratch/:scratchId/promote
  */
-router.post("/:id/scratch/:scratchId/promote", requireNotebookAccess, async (req, res) => {
+router.post("/:id/scratch/:scratchId/promote", requireScope('notes:create'), requireNotebookAccess, async (req, res) => {
   try {
     const entries = await dbHelpers.getScratchpadByNotebookId(req.params.id, req.user.userId);
     const entry = entries.find(e => e.id === req.params.scratchId);
@@ -875,7 +887,7 @@ router.post("/:id/scratch/:scratchId/promote", requireNotebookAccess, async (req
     await dbHelpers.createNote(noteId, req.params.id, req.user.userId, entry.content, req.user.userId);
     await dbHelpers.deleteScratchpadEntry(entry.id);
     
-    await dbHelpers.createActivityLog(req.params.id, req.user.userId, req.user.displayName || 'User', 'promoted_scratchpad', "Promoted a scratchpad entry to a persistent note");
+    await dbHelpers.createActivityLog(req.params.id, req.user.userId, getActorName(req), 'promoted_scratchpad', "Promoted a scratchpad entry to a persistent note");
     
     res.json({ message: "Promoted to note successfully", noteId });
   } catch (error) {
@@ -887,7 +899,7 @@ router.post("/:id/scratch/:scratchId/promote", requireNotebookAccess, async (req
 /**
  * GET /api/notebooks/:id/webhooks
  */
-router.get("/:id/webhooks", requireNotebookAccess, async (req, res) => {
+router.get("/:id/webhooks", requireScope('webhooks:read'), requireNotebookAccess, async (req, res) => {
   try {
     const hooks = await dbHelpers.getWebhooksByNotebookId(req.params.id);
     res.json({ webhooks: hooks });
@@ -900,7 +912,7 @@ router.get("/:id/webhooks", requireNotebookAccess, async (req, res) => {
 /**
  * POST /api/notebooks/:id/webhooks
  */
-router.post("/:id/webhooks", requireNotebookAccess, async (req, res) => {
+router.post("/:id/webhooks", requireScope('webhooks:write'), requireNotebookAccess, async (req, res) => {
   try {
     const { url, events } = req.body;
     const hook = await dbHelpers.createWebhook(req.params.id, req.user.userId, url, JSON.stringify(events || []));
@@ -915,7 +927,7 @@ router.post("/:id/webhooks", requireNotebookAccess, async (req, res) => {
  * POST /api/notebooks/:id/pulse
  * Agent broadcasts a thought to the notebook activity stream.
  */
-router.post("/:id/pulse", async (req, res) => {
+router.post("/:id/pulse", requireScope('missions:write'), async (req, res) => {
   try {
     const { thought, mission } = req.body;
     const notebookId = req.params.id;

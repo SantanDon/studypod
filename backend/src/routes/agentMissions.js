@@ -1,7 +1,7 @@
 import express from 'express';
 import { v4 as uuidv4 } from 'uuid';
 import { dbHelpers } from '../db/database.js';
-import { authenticateToken } from '../middleware/auth.js';
+import { authenticateToken, requireScope } from '../middleware/auth.js';
 import { agentPulse } from '../services/agentPulse.js';
 import { WebhookDispatcher } from '../services/webhookDispatcher.js';
 import { logger } from '../utils/logger.js';
@@ -10,20 +10,42 @@ const router = express.Router();
 
 router.use(authenticateToken);
 
+function getActorName(req) {
+  if (req.user?.authMethod === 'api_key') {
+    return req.user.apiKeyLabel || req.user.apiKeyPrefix || 'agent';
+  }
+  return req.user?.displayName || 'agent';
+}
+
+async function requireNotebookAccessForId(req, res, notebookId) {
+  if (!notebookId) return false;
+  if (req.user.restrictedNotebooks && !req.user.restrictedNotebooks.includes(notebookId)) {
+    res.status(403).json({ error: 'API key is not authorized for this notebook' });
+    return false;
+  }
+  const notebook = await dbHelpers.getNotebookById(notebookId, req.user.userId);
+  if (!notebook) {
+    res.status(404).json({ error: 'Notebook not found' });
+    return false;
+  }
+  return true;
+}
+
 // ─── Agent Missions ───────────────────────────────────────────
 
-router.post('/missions', async (req, res) => {
+router.post('/missions', requireScope('missions:write', { bodyField: 'notebookId' }), async (req, res) => {
   try {
     const { notebookId, goal, cron = null, maxNotes = 5 } = req.body;
     if (!notebookId || !goal) {
       return res.status(400).json({ error: 'notebookId and goal are required' });
     }
+    if (!(await requireNotebookAccessForId(req, res, notebookId))) return;
 
     const id = uuidv4();
     await dbHelpers.createAgentMission(id, req.user.userId, notebookId, goal, cron, maxNotes);
 
     await agentPulse.startMission(req.user.userId, notebookId, goal);
-    WebhookDispatcher.recordActivityAndNotify(notebookId, req.user.userId, req.user.displayName || 'agent', 'mission.started', goal.substring(0, 100));
+    WebhookDispatcher.recordActivityAndNotify(notebookId, req.user.userId, getActorName(req), 'mission.started', goal.substring(0, 100));
 
     res.status(201).json({ id, notebookId, goal, cron, maxNotes, status: 'active' });
   } catch (error) {
@@ -32,11 +54,12 @@ router.post('/missions', async (req, res) => {
   }
 });
 
-router.get('/missions', async (req, res) => {
+router.get('/missions', requireScope('missions:read', { queryField: 'notebookId' }), async (req, res) => {
   try {
     const { notebookId } = req.query;
     let missions;
     if (notebookId) {
+      if (!(await requireNotebookAccessForId(req, res, notebookId))) return;
       missions = await dbHelpers.getAgentMissionsByNotebookId(notebookId);
     } else {
       missions = await dbHelpers.getAgentMissionsByUserId(req.user.userId);
@@ -48,10 +71,11 @@ router.get('/missions', async (req, res) => {
   }
 });
 
-router.get('/missions/:id', async (req, res) => {
+router.get('/missions/:id', requireScope('missions:read'), async (req, res) => {
   try {
     const mission = await dbHelpers.getAgentMissionById(req.params.id);
     if (!mission) return res.status(404).json({ error: 'Mission not found' });
+    if (!(await requireNotebookAccessForId(req, res, mission.notebookId))) return;
     res.json(mission);
   } catch (error) {
     logger.error('Get mission error:', error);
@@ -59,7 +83,7 @@ router.get('/missions/:id', async (req, res) => {
   }
 });
 
-router.put('/missions/:id', async (req, res) => {
+router.put('/missions/:id', requireScope('missions:write'), async (req, res) => {
   try {
     const { status, goal, cron, maxNotes } = req.body;
     const updates = {};
@@ -70,10 +94,11 @@ router.put('/missions/:id', async (req, res) => {
 
     const mission = await dbHelpers.getAgentMissionById(req.params.id);
     if (!mission) return res.status(404).json({ error: 'Mission not found' });
+    if (!(await requireNotebookAccessForId(req, res, mission.notebookId))) return;
 
     if (status === 'completed') {
       await agentPulse.endMission(mission.userId, mission.notebookId);
-      WebhookDispatcher.recordActivityAndNotify(mission.notebookId, mission.userId, req.user.displayName || 'agent', 'mission.ended', mission.goal.substring(0, 100));
+      WebhookDispatcher.recordActivityAndNotify(mission.notebookId, mission.userId, getActorName(req), 'mission.ended', mission.goal.substring(0, 100));
     }
 
     await dbHelpers.updateAgentMission(req.params.id, updates);
@@ -84,11 +109,14 @@ router.put('/missions/:id', async (req, res) => {
   }
 });
 
-router.delete('/missions/:id', async (req, res) => {
+router.delete('/missions/:id', requireScope('missions:write'), async (req, res) => {
   try {
     const mission = await dbHelpers.getAgentMissionById(req.params.id);
     if (mission) {
+      if (!(await requireNotebookAccessForId(req, res, mission.notebookId))) return;
       await agentPulse.endMission(mission.userId, mission.notebookId);
+    } else {
+      return res.status(404).json({ error: 'Mission not found' });
     }
     await dbHelpers.deleteAgentMission(req.params.id);
     res.json({ message: 'Mission deleted' });
@@ -100,17 +128,18 @@ router.delete('/missions/:id', async (req, res) => {
 
 // ─── Agent-to-Agent Messaging ─────────────────────────────────
 
-router.post('/messages', async (req, res) => {
+router.post('/messages', requireScope('messages:write', { bodyField: 'notebookId' }), async (req, res) => {
   try {
     const { notebookId, content, toAgentId = null, messageType = 'thought', subject = null } = req.body;
     if (!notebookId || !content) {
       return res.status(400).json({ error: 'notebookId and content are required' });
     }
+    if (!(await requireNotebookAccessForId(req, res, notebookId))) return;
 
     const id = uuidv4();
     await dbHelpers.createAgentMessage(id, notebookId, req.user.userId, content, toAgentId, messageType, subject);
 
-    WebhookDispatcher.recordActivityAndNotify(notebookId, req.user.userId, req.user.displayName || 'agent', `${messageType}.sent`, content.substring(0, 100));
+    WebhookDispatcher.recordActivityAndNotify(notebookId, req.user.userId, getActorName(req), `${messageType}.sent`, content.substring(0, 100));
 
     res.status(201).json({ id, messageType, subject, toAgentId });
   } catch (error) {
@@ -119,10 +148,11 @@ router.post('/messages', async (req, res) => {
   }
 });
 
-router.get('/messages', async (req, res) => {
+router.get('/messages', requireScope('messages:read', { queryField: 'notebookId' }), async (req, res) => {
   try {
     const { notebookId } = req.query;
     if (!notebookId) return res.status(400).json({ error: 'notebookId query param is required' });
+    if (!(await requireNotebookAccessForId(req, res, notebookId))) return;
 
     const messages = await dbHelpers.getAgentMessages(notebookId, req.user.userId);
     res.json({ messages });
@@ -132,9 +162,14 @@ router.get('/messages', async (req, res) => {
   }
 });
 
-router.put('/messages/:id/read', async (req, res) => {
+router.put('/messages/:id/read', requireScope('messages:write'), async (req, res) => {
   try {
-    await dbHelpers.markAgentMessageRead(req.params.id);
+    const message = await dbHelpers.getAgentMessageById(req.params.id);
+    if (!message) return res.status(404).json({ error: 'Message not found' });
+    if (!(await requireNotebookAccessForId(req, res, message.notebookId))) return;
+    const isParticipant = !message.toAgentId || message.toAgentId === req.user.userId || message.fromAgentId === req.user.userId;
+    if (!isParticipant) return res.status(403).json({ error: 'Message is not addressed to this agent' });
+    await dbHelpers.markAgentMessageRead(req.params.id, req.user.userId);
     res.json({ message: 'Message marked as read' });
   } catch (error) {
     logger.error('Mark message read error:', error);
@@ -144,7 +179,7 @@ router.put('/messages/:id/read', async (req, res) => {
 
 // ─── Agent Dashboard ──────────────────────────────────────────
 
-router.get('/dashboard', async (req, res) => {
+router.get('/dashboard', requireScope(['missions:read', 'messages:read']), async (req, res) => {
   try {
     const userId = req.user.userId;
     const [missions, apiKeys, unreadMessages] = await Promise.all([
@@ -153,18 +188,11 @@ router.get('/dashboard', async (req, res) => {
       dbHelpers.getUnreadAgentMessageCount(userId)
     ]);
 
-    const user = await dbHelpers.getUserById(userId);
-    let byok = null;
-    if (user?.apiKeys) {
-      try { byok = typeof user.apiKeys === 'string' ? JSON.parse(user.apiKeys) : user.apiKeys; } catch {}
-    }
-
     res.json({
       activeMissions: missions.filter(m => m.status === 'active').length,
       totalMissions: missions.length,
       apiKeyCount: apiKeys.length,
       unreadMessages,
-      byokConfigured: byok ? Object.keys(byok).filter(k => byok[k]).length : 0,
       missions: missions.map(m => ({
         id: m.id,
         notebookId: m.notebookId,
@@ -193,7 +221,7 @@ router.get('/dashboard', async (req, res) => {
 
 const sseClients = new Map();
 
-router.get('/stream', (req, res) => {
+router.get('/stream', requireScope('messages:read'), (req, res) => {
   const userId = req.user.userId;
   res.writeHead(200, {
     'Content-Type': 'text/event-stream',

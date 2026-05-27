@@ -222,12 +222,6 @@ export const dbHelpers = {
     return await db.update(schema.users).set(dbUpdates).where(eq(schema.users.id, id));
   },
 
-  async updateUserApiKeys(userId, apiKeys) {
-    const db = await getDatabase();
-    const keysJson = typeof apiKeys === 'string' ? apiKeys : JSON.stringify(apiKeys);
-    return await db.update(schema.users).set({ apiKeys: keysJson, updatedAt: new Date() }).where(eq(schema.users.id, userId));
-  },
-
   // User preferences (Dummy handles for legacy compatibility)
   async createUserPreferences(id, userId) {
     logger.debug(`Preferences creation skipped for ${userId}`);
@@ -900,11 +894,26 @@ export const dbHelpers = {
       .orderBy(desc(schema.agentMessages.createdAt));
   },
 
-  async markAgentMessageRead(id) {
+  async getAgentMessageById(id) {
     const db = await getDatabase();
+    const result = await db.select().from(schema.agentMessages)
+      .where(eq(schema.agentMessages.id, id))
+      .limit(1);
+    return result[0];
+  },
+
+  async markAgentMessageRead(id, agentId = null) {
+    const db = await getDatabase();
+    const conditions = [eq(schema.agentMessages.id, id)];
+    if (agentId) {
+      conditions.push(or(
+        eq(schema.agentMessages.toAgentId, agentId),
+        eq(schema.agentMessages.fromAgentId, agentId)
+      ));
+    }
     return await db.update(schema.agentMessages)
       .set({ read: true })
-      .where(eq(schema.agentMessages.id, id));
+      .where(and(...conditions));
   },
 
   async getUnreadAgentMessageCount(agentId) {
