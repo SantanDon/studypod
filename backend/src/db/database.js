@@ -158,6 +158,34 @@ export async function initializeDatabase() {
       "status" text DEFAULT 'pending',
       "created_at" integer DEFAULT (strftime('%s', 'now'))
     )`);
+    // Signal Queue — staged social posts (LinkedIn, Twitter/X, Reddit)
+    await db.run(sql`CREATE TABLE IF NOT EXISTS "signal_queue" (
+      "id" text PRIMARY KEY NOT NULL,
+      "user_id" text NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      "notebook_id" text REFERENCES notebooks(id) ON DELETE CASCADE,
+      "source_id" text,
+      "tweet_source_id" text,
+      "platform" text NOT NULL,
+      "content" text NOT NULL,
+      "status" text DEFAULT 'draft',
+      "scheduled_for" integer,
+      "posted_at" integer,
+      "note_id" text,
+      "created_at" integer DEFAULT (strftime('%s', 'now')),
+      "updated_at" integer DEFAULT (strftime('%s', 'now'))
+    )`);
+    try { await db.run(sql`ALTER TABLE signal_queue ADD COLUMN tweet_source_id text`); } catch (e) { logger.debug(`Schema migration (signal_queue.tweet_source_id): ${e.message}`); }
+    
+    // Research Goals — user targets for closed-loop bookmark routing
+    await db.run(sql`CREATE TABLE IF NOT EXISTS "research_goals" (
+      "id" text PRIMARY KEY NOT NULL,
+      "user_id" text NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      "notebook_id" text NOT NULL REFERENCES notebooks(id) ON DELETE CASCADE,
+      "title" text NOT NULL,
+      "description" text,
+      "created_at" text NOT NULL
+    )`);
+
     logger.info('Schema tables verified.');
   } catch (err) {
     logger.warn('Schema fallback creation skipped (tables may already exist via Drizzle):', err.message);
@@ -927,6 +955,94 @@ export const dbHelpers = {
         eq(schema.agentMessages.read, false)
       ));
     return Number(result[0]?.count || 0);
+  },
+
+  // ─── Signal Queue ─────────────────────────────────────────────────────────
+
+  async createSignalQueueItem(id, userId, notebookId, platform, content, sourceId = null, tweetSourceId = null, scheduledFor = null, noteId = null) {
+    const db = await getDatabase();
+    return await db.run(sql`
+      INSERT INTO signal_queue (id, user_id, notebook_id, platform, content, source_id, tweet_source_id, scheduled_for, note_id, status)
+      VALUES (${id}, ${userId}, ${notebookId}, ${platform}, ${content}, ${sourceId}, ${tweetSourceId}, ${scheduledFor ? Math.floor(new Date(scheduledFor).getTime() / 1000) : null}, ${noteId}, 'draft')
+    `);
+  },
+
+  async getSignalQueueByUserId(userId, { status, platform, notebookId, limit = 50 } = {}) {
+    const db = await getDatabase();
+    let query = sql`SELECT * FROM signal_queue WHERE user_id = ${userId}`;
+    if (status) query = sql`${query} AND status = ${status}`;
+    if (platform) query = sql`${query} AND platform = ${platform}`;
+    if (notebookId) query = sql`${query} AND notebook_id = ${notebookId}`;
+    query = sql`${query} ORDER BY created_at DESC LIMIT ${limit}`;
+    const result = await db.all(query);
+    return result || [];
+  },
+
+  async getSignalQueueItemById(id) {
+    const db = await getDatabase();
+    const result = await db.all(sql`SELECT * FROM signal_queue WHERE id = ${id} LIMIT 1`);
+    return result[0] || null;
+  },
+
+  async updateSignalQueueItem(id, userId, updates) {
+    const db = await getDatabase();
+    const fields = [];
+    const values = [];
+    if (updates.content !== undefined) { fields.push('content = ?'); values.push(updates.content); }
+    if (updates.status !== undefined) { fields.push('status = ?'); values.push(updates.status); }
+    if (updates.platform !== undefined) { fields.push('platform = ?'); values.push(updates.platform); }
+    if (updates.scheduled_for !== undefined) { fields.push('scheduled_for = ?'); values.push(updates.scheduled_for ? Math.floor(new Date(updates.scheduled_for).getTime() / 1000) : null); }
+    if (updates.posted_at !== undefined) { fields.push('posted_at = ?'); values.push(updates.posted_at ? Math.floor(new Date(updates.posted_at).getTime() / 1000) : null); }
+    fields.push('updated_at = strftime(\'%s\', \'now\')');
+    if (fields.length === 1) return; // only timestamp, nothing to update
+    values.push(id, userId);
+    await db.$client.execute({ sql: `UPDATE signal_queue SET ${fields.join(', ')} WHERE id = ? AND user_id = ?`, args: values });
+  },
+
+  async deleteSignalQueueItem(id, userId) {
+    const db = await getDatabase();
+    const result = await db.$client.execute({ sql: 'DELETE FROM signal_queue WHERE id = ? AND user_id = ?', args: [id, userId] });
+    return { changes: result.rowsAffected || 0 };
+  },
+
+  async getSignalQueueStats(userId) {
+    const db = await getDatabase();
+    const result = await db.all(sql`
+      SELECT status, platform, count(*) as count
+      FROM signal_queue
+      WHERE user_id = ${userId}
+      GROUP BY status, platform
+    `);
+    return result || [];
+  },
+
+  async createResearchGoal(id, userId, notebookId, title, description) {
+    const db = await getDatabase();
+    const createdAt = new Date().toISOString();
+    await db.run(sql`
+      INSERT INTO research_goals (id, user_id, notebook_id, title, description, created_at)
+      VALUES (${id}, ${userId}, ${notebookId}, ${title}, ${description}, ${createdAt})
+    `);
+    return { id, title, description };
+  },
+
+  async getResearchGoalsByNotebookId(notebookId, userId) {
+    const db = await getDatabase();
+    const result = await db.all(sql`
+      SELECT * FROM research_goals
+      WHERE notebook_id = ${notebookId} AND user_id = ${userId}
+      ORDER BY created_at DESC
+    `);
+    return result || [];
+  },
+
+  async deleteResearchGoal(id, userId) {
+    const db = await getDatabase();
+    const result = await db.$client.execute({
+      sql: 'DELETE FROM research_goals WHERE id = ? AND user_id = ?',
+      args: [id, userId]
+    });
+    return { changes: result.rowsAffected || 0 };
   }
 };
 
