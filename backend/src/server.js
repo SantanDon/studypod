@@ -21,6 +21,7 @@ import notebookRoutes from './routes/notebooks.js';
 import agentRoutes from './routes/agent.js';
 import agentMissionRoutes from './routes/agentMissions.js';
 import proxyRoutes from './routes/proxy.js';
+import antigravityRouter from './routes/antigravity.js';
 import docxRouter from './routes/docx.js';
 import searchRouter from './routes/search.js';
 import signalRouter from './routes/signal.js';
@@ -64,7 +65,7 @@ const PORT = process.env.PORT || 3001;
 
 // Trust Vercel's (and any reverse proxy's) X-Forwarded-For headers
 // Required for express-rate-limit to correctly identify client IPs behind the load balancer
-app.set('trust proxy', 1);
+app.set('trust proxy', true);
 
 // Global Security Hardening — dynamic CSP allows both 127.0.0.1 and localhost
 const selfUrl = `http://127.0.0.1:${PORT}`;
@@ -98,6 +99,7 @@ const apiLimiter = rateLimit({
   limit: 10000,
   standardHeaders: 'draft-7',
   legacyHeaders: false,
+  skip: (req) => process.env.NODE_ENV !== 'production' || !!process.env.VERCEL,
 });
 
 // STRICTOR Rate Limiting for Auth (Brute Force Protection)
@@ -107,6 +109,7 @@ const authLimiter = rateLimit({
   message: { error: 'Too many login attempts. Please try again in 5 minutes.' },
   standardHeaders: 'draft-7',
   legacyHeaders: false,
+  skip: (req) => process.env.NODE_ENV !== 'production' || !!process.env.VERCEL,
 });
 
 // Middleware
@@ -159,6 +162,7 @@ app.use('/api/notebooks', apiLimiter, notebookRoutes);
 app.use('/api/pdf', apiLimiter, pdfRoutes);
 app.use('/api/youtube', apiLimiter, youtubeRouter);
 app.use('/api/tasks', apiLimiter, tasksRouter);
+app.use('/api/agent/antigravity', apiLimiter, antigravityRouter);
 app.use('/api/agent', apiLimiter, agentRoutes);
 app.use('/api/agent', apiLimiter, agentMissionRoutes);
 app.use('/api/proxy', apiLimiter, proxyRoutes);

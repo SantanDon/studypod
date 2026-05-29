@@ -10,6 +10,7 @@ const authLimiter = rateLimit({
   message: { error: 'Too many attempts. Please try again in 5 minutes.' },
   standardHeaders: 'draft-7',
   legacyHeaders: false,
+  skip: (req) => process.env.NODE_ENV !== 'production' || !!process.env.VERCEL,
 });
 import {
   generateToken,
@@ -713,6 +714,16 @@ router.post("/reset-passphrase", async (req, res, next) => {
     // Make sure we generate real login tokens so the UI can auto-login
     const accessToken = generateToken(user.id, user.email);
     const refreshToken = generateRefreshToken(user.id, user.email);
+
+    const cookieOptions = {
+      httpOnly: true,
+      secure: process.env.NODE_ENV === 'production',
+      sameSite: 'lax',
+      maxAge: 7 * 24 * 60 * 60 * 1000 // 7 days
+    };
+
+    res.cookie('accessToken', accessToken, cookieOptions);
+    res.cookie('refreshToken', refreshToken, { ...cookieOptions, maxAge: 30 * 24 * 60 * 60 * 1000 });
 
     res.json({ 
       success: true, 

@@ -21,6 +21,7 @@ const YouTubeUrlInput = ({ open, onOpenChange, onSubmit }: YouTubeUrlInputProps)
   const [url, setUrl] = useState('');
   const [isLoading, setIsLoading] = useState(false);
   const { status, canExtract } = useUsageLimits();
+  const isValidYoutubeUrl = /^(https?:\/\/)?(www\.)?(youtube\.com|youtu\.be)\//i.test(url.trim());
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -61,7 +62,7 @@ const YouTubeUrlInput = ({ open, onOpenChange, onSubmit }: YouTubeUrlInputProps)
         <form onSubmit={handleSubmit} className="space-y-6 pt-2">
           <div className="space-y-3">
             <Label htmlFor="youtube-url" className="text-white/60 text-xs uppercase tracking-widest">
-              Video Destination
+              YouTube video URL
             </Label>
             <Input
               id="youtube-url"
@@ -74,7 +75,7 @@ const YouTubeUrlInput = ({ open, onOpenChange, onSubmit }: YouTubeUrlInputProps)
             />
             <div className="flex justify-between items-center px-1">
               <p className="text-[10px] text-white/40 italic">
-                Paste the full URL to ingest transcripts and metadata.
+                We will import captions when available and clearly mark metadata-only videos.
               </p>
               {status && (
                 <div className={`flex items-center space-x-1.5 px-2 py-0.5 rounded-full border ${isLimitReached ? 'border-red-500/30 bg-red-500/10 text-red-400' : 'border-green-500/20 bg-green-500/5 text-green-400/80'} transition-colors duration-500`}>
@@ -99,9 +100,9 @@ const YouTubeUrlInput = ({ open, onOpenChange, onSubmit }: YouTubeUrlInputProps)
             <Button
               type="submit"
               className={`flex-1 ${isLimitReached ? 'bg-zinc-800 text-zinc-500 cursor-not-allowed' : 'bg-white text-black hover:bg-zinc-200'} transition-all font-bold`}
-              disabled={!url.trim() || isLoading || isLimitReached}
+              disabled={!url.trim() || !isValidYoutubeUrl || isLoading || isLimitReached}
             >
-              {isLoading ? 'Ingesting...' : isLimitReached ? 'Limit Reached' : 'Add Source'}
+              {isLoading ? 'Extracting...' : isLimitReached ? 'Limit Reached' : !isValidYoutubeUrl && url.trim() ? 'Invalid URL' : 'Add Source'}
             </Button>
           </div>
         </form>

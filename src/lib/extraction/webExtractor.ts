@@ -46,8 +46,9 @@ export async function extractWebContent(
     console.log(`[WebExtractor] Attempting smart extraction via backend: ${url}`);
     try {
       const headers: Record<string, string> = {};
-      if (token) {
-        headers["Authorization"] = `Bearer ${token}`;
+      const authToken = token || localStorage.getItem("guest_id");
+      if (authToken) {
+        headers["Authorization"] = `Bearer ${authToken}`;
       }
       const smartResponse = await fetch(smartUrl, { headers });
       if (smartResponse.ok) {

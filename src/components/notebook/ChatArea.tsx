@@ -64,18 +64,20 @@ const ChatArea = ({
   
   const sourceCount = sources?.length || 0;
 
-  // Check if at least one source has finished processing (either successfully or failed)
-  const hasProcessedSource = sources?.some(source => 
-    source.processing_status === 'completed' || 
-    source.processing_status === 'failed' ||
-    (source as any).processingStatus === 'completed' ||
-    (source as any).processingStatus === 'failed'
-  ) || false;
+  const hasReadySource = sources?.some(source => {
+    const status = source.processing_status || (source as { processingStatus?: string }).processingStatus;
+    return status === 'completed';
+  }) || false;
+  const hasProcessingSource = sources?.some(source => {
+    const status = source.processing_status || (source as { processingStatus?: string }).processingStatus;
+    return status === 'pending' || status === 'uploading' || status === 'processing';
+  }) || false;
+  const hasFailedSource = sources?.some(source => {
+    const status = source.processing_status || (source as { processingStatus?: string }).processingStatus;
+    return status === 'failed';
+  }) || false;
 
-  // Never permanently lock the chat box just because a state flag is stuck.
-  // If there's 0 sources, we show the 'upload a source' message, but if there are ANY sources,
-  // we let the user chat. The backend can handle if it's not ready.
-  const isChatDisabled = sourceCount === 0;
+  const isChatDisabled = sourceCount === 0 || !hasReadySource;
 
   // Track when we send a message to show loading state
   const [lastMessageCount, setLastMessageCount] = useState(0);
@@ -217,8 +219,12 @@ const ChatArea = ({
     if (isChatDisabled) {
       if (sourceCount === 0) {
         return "Upload a source to get started...";
+      } else if (hasProcessingSource) {
+        return "Sources are still processing...";
+      } else if (hasFailedSource) {
+        return "Source extraction failed. Add or retry a source to chat.";
       } else {
-        return "Please wait while your sources are being processed...";
+        return "Add a ready source to chat...";
       }
     }
     // Show remaining messages for guests

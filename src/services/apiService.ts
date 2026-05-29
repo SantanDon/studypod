@@ -14,6 +14,8 @@ export const API_BASE_URL = import.meta.env.VITE_API_URL || '/api';
  */
 async function handleResponse(response: Response) {
   if (response.status === 401 || response.status === 403) {
+    // Notify the AuthContext to clear stale local sessions
+    window.dispatchEvent(new CustomEvent('auth:unauthorized'));
     throw new Error('Authentication expired or invalid. Please sign in again.');
   }
   if (!response.ok) {

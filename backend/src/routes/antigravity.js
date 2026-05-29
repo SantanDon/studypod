@@ -14,7 +14,7 @@ let currentPulse = {
   timestamp: new Date().toISOString()
 };
 
-router.post('/pulse', async (req, res) => {
+router.post('/pulse', authenticateToken, async (req, res) => {
   try {
     const { status, thought, activeTask, lastTool, checklist } = req.body;
     

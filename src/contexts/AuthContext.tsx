@@ -54,10 +54,16 @@ export const AuthProvider = ({ children }: AuthProviderProps) => {
     setError(null);
   }, []);
 
-  const signIn = async (credentials: any) => {
+  const signIn = async (credentials: any, sessionData?: any) => {
     console.log("AuthContext: Starting sign in process...");
     setError(null);
     try {
+      if (sessionData) {
+        console.log("AuthContext: Direct sign in using provided user and session");
+        signInWithCloud(credentials);
+        return;
+      }
+
       const data = await ApiService.signin(credentials);
       
       if (data.mfaRequired) {
@@ -187,6 +193,13 @@ export const AuthProvider = ({ children }: AuthProviderProps) => {
           }
         } catch (authErr) {
           console.warn("AuthContext: No active cookie session or verification failed", authErr);
+          // If we had a cloud session stored, but verification failed, clear it!
+          const currentUser = localStorageService.getCurrentUser();
+          if (currentUser && currentUser.account_type !== 'guest') {
+            console.log("AuthContext: Clearing stale cloud session from localStorage");
+            localStorageService.setCurrentUser(null);
+            localStorage.removeItem("currentSession");
+          }
         }
 
         // Fallback for Guest/Local only if no cookie session
@@ -224,6 +237,19 @@ export const AuthProvider = ({ children }: AuthProviderProps) => {
       mounted = false;
     };
   }, [updateAuthState]); // updateAuthState is stable via useCallback
+
+  // Listen for global unauthorized API responses to force signout
+  useEffect(() => {
+    const handleUnauthorized = () => {
+      console.log("AuthContext: Received auth:unauthorized event, forcing signout...");
+      signOut();
+    };
+
+    window.addEventListener('auth:unauthorized', handleUnauthorized);
+    return () => {
+      window.removeEventListener('auth:unauthorized', handleUnauthorized);
+    };
+  }, [signOut]);
 
   const value: AuthContextType = {
     user,

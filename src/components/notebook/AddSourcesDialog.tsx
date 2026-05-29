@@ -50,7 +50,7 @@ const AddSourcesDialog = ({
                   <i className="fi fi-rr-book-alt text-white"></i>
                 </div>
                 <DialogTitle className="text-2xl font-bold tracking-tight text-white">
-                  Knowledge Ingestion
+                  Add sources
                 </DialogTitle>
               </div>
             </div>
@@ -60,7 +60,7 @@ const AddSourcesDialog = ({
             <div>
               <h2 className="text-xl font-medium text-white/90 mb-2">Primary sources</h2>
               <p className="text-white/50 text-sm leading-relaxed">
-                Connect your research, transcripts, and documents to anchor the Sovereign AI in ground truth.
+                Add documents, transcripts, websites, and pasted text. StudyPodLM will show when each source is ready to use in chat.
               </p>
             </div>
 
@@ -83,12 +83,12 @@ const AddSourcesDialog = ({
                 <div className="space-y-2">
                   <h3 className="text-lg font-semibold text-white">
                     {isProcessingFiles
-                      ? "Masticating files..."
+                      ? "Uploading files..."
                       : "Drop your files here"}
                   </h3>
                   <p className="text-white/40 text-sm">
                     {isProcessingFiles ? (
-                      "Synthesizing knowledge into the Sovereign core"
+                      "Extracting text and preparing sources for chat"
                     ) : (
                       <>
                         PDF, Markdown, EPUB, TXT, or Audio. Or{" "}
@@ -133,7 +133,7 @@ const AddSourcesDialog = ({
                 <div className="text-center">
                   <span className="text-lg font-bold text-white block">YouTube Ingestion</span>
                   <span className="text-sm text-white/40">
-                    High-fidelity transcript extraction & chapter analysis
+                    Import transcripts, chapters, and metadata
                   </span>
                 </div>
               </Button>
@@ -149,7 +149,7 @@ const AddSourcesDialog = ({
                 </div>
                 <div className="text-center">
                   <span className="font-semibold text-white block">Website URLs</span>
-                  <span className="text-xs text-white/40">Bulk link scraping</span>
+                  <span className="text-xs text-white/40">Extract readable article text</span>
                 </div>
               </Button>
 
@@ -164,7 +164,7 @@ const AddSourcesDialog = ({
                 </div>
                 <div className="text-center">
                   <span className="font-semibold text-white block">Pasted Content</span>
-                  <span className="text-xs text-white/40">Instant text ingestion</span>
+                  <span className="text-xs text-white/40">Add notes or copied text</span>
                 </div>
               </Button>
             </div>

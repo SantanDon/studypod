@@ -13,6 +13,7 @@ import PodcastGenerationIndicator from '@/components/notebook/PodcastGenerationI
 import ErrorBoundary from '@/components/ErrorBoundary';
 import { Citation } from '@/types/message';
 import { ResizablePanelGroup, ResizablePanel, ResizableHandle } from '@/components/ui/resizable';
+import AntigravityTelemetry from '@/components/agent/AntigravityTelemetry';
 
 const Notebook = () => {
   const { id: notebookId } = useParams();
@@ -178,6 +179,7 @@ const Notebook = () => {
         </ErrorBoundary>
       )}
 
+      <AntigravityTelemetry notebookId={notebookId} />
     </div>
   );
 };

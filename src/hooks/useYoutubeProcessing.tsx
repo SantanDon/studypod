@@ -1,13 +1,26 @@
 import { useState } from "react";
 import { useToast } from "@/hooks/use-toast";
 import { localStorageService, LocalSource } from "@/services/localStorageService";
-import { extractYoutubeTranscript } from "@/lib/extraction/youtubeExtractor";
+import { extractVideoId, extractYoutubeTranscript } from "@/lib/extraction/youtubeExtractor";
 import { useDocumentProcessing } from "@/hooks/useDocumentProcessing";
 import { useNotebookGeneration } from "@/hooks/useNotebookGeneration";
 import { useQueryClient } from "@tanstack/react-query";
 import { useAuth } from "@/hooks/useAuth";
 import { ApiService } from "@/services/apiService";
 import { v4 as uuidv4 } from "uuid";
+
+function parseSourceMetadata(source: LocalSource): Record<string, unknown> {
+  const rawMetadata = source.metadata as unknown;
+  if (!rawMetadata) return {};
+  if (typeof rawMetadata === "string") {
+    try {
+      return JSON.parse(rawMetadata);
+    } catch {
+      return {};
+    }
+  }
+  return rawMetadata as Record<string, unknown>;
+}
 
 export const useYoutubeProcessing = () => {
   const [isProcessing, setIsProcessing] = useState(false);
@@ -32,13 +45,6 @@ export const useYoutubeProcessing = () => {
         throw new Error("Notebook ID is required");
       }
 
-      toast({
-        title: "Processing YouTube Video",
-        description: "Fetching transcript...",
-      });
-
-      const result = await extractYoutubeTranscript(url, session?.access_token);
-
       // Check if this is the first source in the notebook
       let existingSources: LocalSource[] = [];
       if (session?.access_token) {
@@ -47,6 +53,29 @@ export const useYoutubeProcessing = () => {
         existingSources = (await localStorageService.getSources(notebookId)) as LocalSource[];
       }
       const isFirstSource = existingSources.length === 0;
+      const videoId = extractVideoId(url);
+
+      const duplicateSource = videoId
+        ? existingSources.find((source) => {
+            const metadata = parseSourceMetadata(source);
+            return metadata.videoId === videoId || source.url?.includes(videoId);
+          })
+        : null;
+
+      if (duplicateSource) {
+        toast({
+          title: "Video already added",
+          description: `"${duplicateSource.title}" is already in this notebook.`,
+        });
+        return false;
+      }
+
+      toast({
+        title: "Processing YouTube Video",
+        description: "Fetching transcript and metadata...",
+      });
+
+      const result = await extractYoutubeTranscript(url, session?.access_token);
 
       console.log(`📺 YouTube: isFirstSource=${isFirstSource}, existingSources=${existingSources.length}`);
 
@@ -64,6 +93,14 @@ export const useYoutubeProcessing = () => {
           charCount: result.content.length,
           duration: result.metadata.duration,
           originalUrl: result.url,
+          videoId: result.metadata.videoId,
+          author: result.metadata.author,
+          keywords: result.metadata.keywords || [],
+          extractedBy: result.metadata.extractedBy,
+          transcriptStatus: result.metadata.transcriptStatus,
+          transcriptLineCount: result.metadata.transcriptLineCount,
+          extractionWarning: result.metadata.extractionWarning,
+          sovereign_signal: result.metadata.sovereign_signal,
         }
       };
 
@@ -137,10 +174,17 @@ export const useYoutubeProcessing = () => {
           queryClient.invalidateQueries({ queryKey: ["notebooks"] });
         }
         
-        toast({
-          title: "Video Added",
-          description: "YouTube transcript added successfully.",
-        });
+        if (result.metadata.transcriptStatus === "metadata_only") {
+          toast({
+            title: "Video added with limited context",
+            description: result.metadata.extractionWarning || "No transcript was available, so answers can only use metadata.",
+          });
+        } else {
+          toast({
+            title: "Video Added",
+            description: `Transcript added successfully (${result.metadata.transcriptLineCount || 0} caption lines).`,
+          });
+        }
         
         return true;
       } catch (processingError) {

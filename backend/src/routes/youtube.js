@@ -698,17 +698,22 @@ router.get('/youtube-transcript', authenticateToken, async (req, res) => {
     const structuredContent = buildStructuredContent({ transcript: transcript || [], metadata, chapters });
 
     // ── Persist Usage ─────────────────────────
-    if (userId && structuredContent.length > 50 && !error) {
+    const extractionSuccess = transcript && transcript.length > 0;
+
+    if (userId && extractionSuccess && !error) {
       await db.update(users)
         .set({ youtubeExtractionsToday: sql`${users.youtubeExtractionsToday} + 1` })
         .where(eq(users.id, userId));
     }
 
-    const extractionSuccess = transcript && transcript.length > 0;
     res.status(extractionSuccess ? 200 : 206).json({
       transcript: transcript || [],
       metadata: {
         ...metadata,
+        videoId,
+        transcriptStatus: extractionSuccess ? 'full' : 'metadata_only',
+        transcriptLineCount: transcript?.length || 0,
+        extractionWarning: extractionSuccess ? undefined : 'Could not extract captions. Content is based on metadata only.',
         sovereign_signal: {
           identity: identity?.name || 'library',
           farm_health: extractionSuccess ? 'nominal' : 'fallback',
@@ -721,9 +726,11 @@ router.get('/youtube-transcript', authenticateToken, async (req, res) => {
 
   } catch (error) {
     logger.error('[YouTube] Error:', error);
+    if (error instanceof AppError || error.statusCode) {
+      throw error;
+    }
     throw new AppError(500, 'YOUTUBE_EXTRACTION_FAILED', error.message);
   }
 });
 
 export default router;
-

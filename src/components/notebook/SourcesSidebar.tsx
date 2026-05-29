@@ -30,6 +30,28 @@ import { LocalSource } from "@/services/localStorageService";
 
 type Source = LocalSource;
 
+interface SourceMetadata {
+  suggestedSources?: Array<{ id?: string; title?: string; url?: string }>;
+  transcriptStatus?: string;
+  transcriptLineCount?: number;
+  extractionWarning?: string;
+  extractedBy?: string;
+  duration?: number;
+}
+
+function parseSourceMetadata(source: Source): SourceMetadata {
+  const rawMetadata = source.metadata as unknown;
+  if (!rawMetadata) return {};
+  if (typeof rawMetadata === "string") {
+    try {
+      return JSON.parse(rawMetadata) as SourceMetadata;
+    } catch {
+      return {};
+    }
+  }
+  return rawMetadata as SourceMetadata;
+}
+
 interface SourcesSidebarProps {
   hasSource: boolean;
   notebookId?: string;
@@ -75,21 +97,11 @@ const SourcesSidebar = ({
     const map = new Map<string, { id: string; title: string; url: string }>();
     
     sources.forEach((source) => {
-      let metadataObj: any = {};
-      if (typeof source.metadata === 'string') {
-        try {
-          metadataObj = JSON.parse(source.metadata);
-        } catch (e) {
-          metadataObj = {};
-        }
-      } else if (source.metadata) {
-        metadataObj = source.metadata;
-      }
-      
+      const metadataObj = parseSourceMetadata(source);
       const list = metadataObj.suggestedSources || [];
-      list.forEach((item: any) => {
+      list.forEach((item) => {
         if (item && item.url) {
-          map.set(item.url, { id: item.id, title: item.title, url: item.url });
+          map.set(item.url, { id: item.id || item.url, title: item.title || item.url, url: item.url });
         }
       });
     });
@@ -188,6 +200,56 @@ const SourcesSidebar = ({
       default:
         return null;
     }
+  };
+
+  const renderSourceTrustBadge = (source: Source) => {
+    const metadata = parseSourceMetadata(source);
+
+    if (source.processing_status === "failed") {
+      return (
+        <span className="text-[10px] font-medium rounded-full border border-red-300 bg-red-50 px-2 py-0.5 text-red-700 dark:border-red-900/60 dark:bg-red-950/40 dark:text-red-300">
+          Failed
+        </span>
+      );
+    }
+
+    if (source.processing_status === "processing" || source.processing_status === "pending" || source.processing_status === "uploading") {
+      return (
+        <span className="text-[10px] font-medium rounded-full border border-blue-300 bg-blue-50 px-2 py-0.5 text-blue-700 dark:border-blue-900/60 dark:bg-blue-950/40 dark:text-blue-300">
+          Processing
+        </span>
+      );
+    }
+
+    if (source.type === "youtube") {
+      if (metadata.transcriptStatus === "metadata_only") {
+        return (
+          <span
+            className="text-[10px] font-medium rounded-full border border-amber-300 bg-amber-50 px-2 py-0.5 text-amber-800 dark:border-amber-900/60 dark:bg-amber-950/40 dark:text-amber-300"
+            title={metadata.extractionWarning || "Transcript unavailable; only video metadata was imported."}
+          >
+            Metadata only
+          </span>
+        );
+      }
+
+      if (metadata.transcriptLineCount) {
+        return (
+          <span
+            className="text-[10px] font-medium rounded-full border border-green-300 bg-green-50 px-2 py-0.5 text-green-700 dark:border-green-900/60 dark:bg-green-950/40 dark:text-green-300"
+            title={`Transcript extracted with ${metadata.transcriptLineCount} caption lines${metadata.extractedBy ? ` via ${metadata.extractedBy}` : ""}.`}
+          >
+            Transcript
+          </span>
+        );
+      }
+    }
+
+    return (
+      <span className="text-[10px] font-medium rounded-full border border-gray-300 bg-gray-50 px-2 py-0.5 text-gray-600 dark:border-gray-700 dark:bg-muted/30 dark:text-gray-300">
+        Ready
+      </span>
+    );
   };
 
   const handleRemoveSource = (source: Source) => {
@@ -348,6 +410,9 @@ const SourcesSidebar = ({
                             <span className="text-sm text-gray-900 dark:text-foreground truncate block font-medium">
                               {source.title}
                             </span>
+                            <div className="mt-1 flex flex-wrap items-center gap-1.5">
+                              {renderSourceTrustBadge(source)}
+                            </div>
                           </div>
                         </div>
                         <div className="flex-shrink-0 py-[4px]">

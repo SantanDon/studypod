@@ -549,6 +549,9 @@ export const dbHelpers = {
     const db = await getDatabase();
     // Map camcelCase to snake_case if processingStatus is in updates
     const mappedUpdates = { ...updates };
+    if (mappedUpdates.metadata && typeof mappedUpdates.metadata !== 'string') {
+      mappedUpdates.metadata = JSON.stringify(mappedUpdates.metadata);
+    }
     if (mappedUpdates.processing_status) {
       mappedUpdates.processingStatus = mappedUpdates.processing_status;
       delete mappedUpdates.processing_status;

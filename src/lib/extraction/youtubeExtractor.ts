@@ -10,6 +10,10 @@ export interface YoutubeTranscriptResult {
     author?: string;
     videoId?: string;
     keywords?: string[];
+    extractedBy?: string;
+    transcriptStatus?: 'full' | 'metadata_only';
+    transcriptLineCount?: number;
+    extractionWarning?: string;
     sovereign_signal?: {
       identity: string;
       farm_health: string;
@@ -21,7 +25,7 @@ export interface YoutubeTranscriptResult {
 /**
  * Extract video ID from various YouTube URL formats
  */
-function extractVideoId(url: string): string | null {
+export function extractVideoId(url: string): string | null {
   const patterns = [
     /(?:youtube\.com\/watch\?v=|youtu\.be\/|youtube\.com\/embed\/|youtube\.com\/v\/)([a-zA-Z0-9_-]{11})/,
     /youtube\.com\/shorts\/([a-zA-Z0-9_-]{11})/,
@@ -157,8 +161,9 @@ export async function extractYoutubeTranscript(url: string, token?: string): Pro
     console.log('📡 Fetching transcript and metadata via server API...');
     const apiUrl = `/api/youtube/youtube-transcript?url=${encodeURIComponent(normalizedUrl)}`;
     const headers: Record<string, string> = {};
-    if (token) {
-      headers['Authorization'] = `Bearer ${token}`;
+    const authToken = token || localStorage.getItem('guest_id');
+    if (authToken) {
+      headers['Authorization'] = `Bearer ${authToken}`;
     }
     const transcriptResponse = await fetch(apiUrl, { headers });
 
@@ -180,6 +185,7 @@ export async function extractYoutubeTranscript(url: string, token?: string): Pro
     
     let transcriptData = payload.transcript || (Array.isArray(payload) ? payload : []);
     let metadata = payload.metadata || {};
+    let extractionWarning = payload.extractionWarning || metadata.extractionWarning;
 
     // ── Edge Function Fallback ─────────────────────────────────────────────────
     // If the server returned no transcript, it likely hit YouTube's datacenter
@@ -189,8 +195,9 @@ export async function extractYoutubeTranscript(url: string, token?: string): Pro
       console.log('⚡ Server returned no transcript — trying Edge Function (Cloudflare network)...');
       try {
         const edgeHeaders: Record<string, string> = {};
-        if (token) {
-          edgeHeaders['Authorization'] = `Bearer ${token}`;
+        const edgeAuthToken = token || localStorage.getItem('guest_id');
+        if (edgeAuthToken) {
+          edgeHeaders['Authorization'] = `Bearer ${edgeAuthToken}`;
         }
         const edgeRes = await fetch(`/api/youtube-edge?videoId=${encodeURIComponent(videoId)}`, { headers: edgeHeaders });
         if (edgeRes.ok) {
@@ -207,6 +214,7 @@ export async function extractYoutubeTranscript(url: string, token?: string): Pro
               sovereign_signal: { identity: 'EDGE_CLOUDFLARE', farm_health: 'healthy', timestamp: new Date().toISOString() },
             };
           } else {
+            extractionWarning = edgeData.error || 'Edge fallback returned metadata without transcript.';
             console.warn('⚠️ Edge Function also returned no transcript:', edgeData.error || 'unknown');
           }
         } else {
@@ -223,6 +231,9 @@ export async function extractYoutubeTranscript(url: string, token?: string): Pro
     const description = metadata.description || "";
     const author = metadata.author || "Unknown Channel";
     const keywords = metadata.keywords || [];
+    const transcriptLineCount = Array.isArray(transcriptData) ? transcriptData.length : 0;
+    const transcriptStatus = transcriptLineCount > 0 ? 'full' : 'metadata_only';
+    const extractedBy = metadata.extractedBy || payload.extractedBy || 'server_api';
 
     console.log(`📝 Extracted Title: ${title}`);
     console.log(`📝 Extracted Author: ${author}`);
@@ -245,7 +256,8 @@ export async function extractYoutubeTranscript(url: string, token?: string): Pro
       console.log(`✅ Using backend structured content (${content.length} chars)`);
     } else if (!Array.isArray(transcriptData) || transcriptData.length === 0) {
       console.warn(`[YouTube Extractor] No transcript available. Falling back to metadata only.`);
-      content = `# ${title}\n**Channel:** ${author}\n**Keywords:** ${keywords.join(', ') || 'None'}\n\n**Description:** ${description || 'No description available.'}\n\n> No transcript available for this video.`;
+      extractionWarning = extractionWarning || 'No transcript/captions were available. Answers can only use video metadata.';
+      content = `# ${title}\n**Channel:** ${author}\n**Keywords:** ${keywords.join(', ') || 'None'}\n**Extraction status:** Metadata only - transcript unavailable\n\n**Description:** ${description || 'No description available.'}\n\n> No transcript available for this video. Do not treat this source as a full transcript.`;
     } else {
       console.log(`⚡ Building structured content locally due to Edge fallback (${transcriptData.length} lines)...`);
       content = buildStructuredContent(transcriptData, metadata);
@@ -263,6 +275,10 @@ export async function extractYoutubeTranscript(url: string, token?: string): Pro
         videoId,
         author,
         keywords,
+        extractedBy,
+        transcriptStatus,
+        transcriptLineCount,
+        extractionWarning,
         sovereign_signal: metadata.sovereign_signal
       },
     };
