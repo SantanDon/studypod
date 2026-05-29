@@ -2,6 +2,7 @@ import React from "react";
 import DashboardHeader from "@/components/dashboard/DashboardHeader";
 import NotebookGrid from "@/components/dashboard/NotebookGrid";
 import EmptyDashboard from "@/components/dashboard/EmptyDashboard";
+import WhatsHappening from "@/components/dashboard/WhatsHappening";
 import MetallicText from "@/components/ui/MetallicText";
 import { useNotebooks } from "@/hooks/useNotebooks";
 import { useAuth } from "@/hooks/useAuth";
@@ -117,7 +118,18 @@ const Dashboard = () => {
           </h1>
         </div>
 
-        {hasNotebooks ? <NotebookGrid /> : <EmptyDashboard />}
+        {hasNotebooks ? (
+          <div className="grid grid-cols-1 lg:grid-cols-4 gap-8 items-start">
+            <div className="lg:col-span-3">
+              <NotebookGrid />
+            </div>
+            <div className="lg:col-span-1 space-y-6">
+              <WhatsHappening />
+            </div>
+          </div>
+        ) : (
+          <EmptyDashboard />
+        )}
       </main>
     </div>
   );

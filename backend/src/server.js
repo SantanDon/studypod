@@ -26,6 +26,7 @@ import docxRouter from './routes/docx.js';
 import searchRouter from './routes/search.js';
 import signalRouter from './routes/signal.js';
 import audiobookRoutes from './routes/audiobook.js';
+import signalQueueRoutes from './routes/signalQueue.js';
 // Middleware / DB Imports
 import { initializeDatabase } from './db/database.js';
 import { errorHandler } from './middleware/errorHandler.js';
@@ -168,6 +169,7 @@ app.use('/api/agent', apiLimiter, agentMissionRoutes);
 app.use('/api/proxy', apiLimiter, proxyRoutes);
 app.use('/api/search', apiLimiter, searchRouter);
 app.use('/api/signal', apiLimiter, signalRouter);
+app.use('/api/signal-queue', apiLimiter, signalQueueRoutes);
 app.use('/api/docx', apiLimiter, docxRouter);
 app.use('/api/audiobook', apiLimiter, audiobookRoutes);
 

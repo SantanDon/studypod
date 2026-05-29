@@ -88,6 +88,33 @@ Authorization: Bearer spm_your_key_here
 ```
 Provider BYOK storage has been removed. Agents should use their own runtime-side model credentials if they need external reasoning, then send results back to StudyPodLM through the scoped API.
 
+### Social Media Signal Queue (Drafting & Posting)
+Agents can poll the Signal Queue to find posts that are approved by the human and ready to be automatically published, or agents can draft new posts to the queue.
+
+#### Poll Approved Posts
+```
+GET /api/signal-queue?status=approved
+```
+Returns a list of approved signal items ready to post.
+
+#### Mark Post as Posted
+```
+PUT /api/signal-queue/:id
+Body: { "status": "posted", "posted_at": "2026-06-01T09:00:00Z" }
+```
+
+#### Queue a New Post (Draft)
+```
+POST /api/signal-queue
+Body: { 
+  "notebookId": "notebook-uuid", 
+  "platform": "twitter", 
+  "content": "Self-hosted agents can now orchestrate across notebooks. #StudyPod",
+  "scheduledFor": "2026-06-01T12:00:00Z" 
+}
+```
+Valid platforms: `linkedin`, `twitter`, `reddit`, `threads`.
+
 ---
 
 ## 4. Troubleshooting

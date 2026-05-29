@@ -407,6 +407,106 @@ export const ApiService = {
       credentials: 'include'
     });
     return handleResponse(response);
+  },
+
+  async fetchSignalQueue(token: string, params?: { status?: string; platform?: string; notebookId?: string; limit?: number }) {
+    const query = new URLSearchParams();
+    if (params?.status) query.append('status', params.status);
+    if (params?.platform) query.append('platform', params.platform);
+    if (params?.notebookId) query.append('notebookId', params.notebookId);
+    if (params?.limit) query.append('limit', String(params.limit));
+
+    const response = await fetch(`${API_BASE_URL}/signal-queue?${query.toString()}`, {
+      headers: { 'Authorization': `Bearer ${token}` },
+      credentials: 'include'
+    });
+    return handleResponse(response);
+  },
+
+  async fetchSignalQueueStats(token: string) {
+    const response = await fetch(`${API_BASE_URL}/signal-queue/stats`, {
+      headers: { 'Authorization': `Bearer ${token}` },
+      credentials: 'include'
+    });
+    return handleResponse(response);
+  },
+
+  async createSignalQueueItem(token: string, item: { notebookId?: string; platform: string; content: string; sourceId?: string; tweetSourceId?: string; scheduledFor?: string; noteId?: string }) {
+    const response = await fetch(`${API_BASE_URL}/signal-queue`, {
+      method: 'POST',
+      headers: { 
+        'Authorization': `Bearer ${token}`,
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify(item),
+      credentials: 'include'
+    });
+    return handleResponse(response);
+  },
+
+  async updateSignalQueueItem(id: string, token: string, updates: any) {
+    const response = await fetch(`${API_BASE_URL}/signal-queue/${id}`, {
+      method: 'PUT',
+      headers: { 
+        'Authorization': `Bearer ${token}`,
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify(updates),
+      credentials: 'include'
+    });
+    return handleResponse(response);
+  },
+
+  async deleteSignalQueueItem(id: string, token: string) {
+    const response = await fetch(`${API_BASE_URL}/signal-queue/${id}`, {
+      method: 'DELETE',
+      headers: { 'Authorization': `Bearer ${token}` },
+      credentials: 'include'
+    });
+    return handleResponse(response);
+  },
+
+  async importTweets(notebookId: string, token: string, data: { urls?: string[]; fileContent?: string }) {
+    const response = await fetch(`${API_BASE_URL}/notebooks/${notebookId}/sources/tweets`, {
+      method: 'POST',
+      headers: { 
+        'Authorization': `Bearer ${token}`,
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify(data),
+      credentials: 'include'
+    });
+    return handleResponse(response);
+  },
+
+  async fetchResearchGoals(notebookId: string, token: string) {
+    const response = await fetch(`${API_BASE_URL}/notebooks/${notebookId}/research-goals`, {
+      headers: { 'Authorization': `Bearer ${token}` },
+      credentials: 'include'
+    });
+    return handleResponse(response);
+  },
+
+  async createResearchGoal(notebookId: string, title: string, description: string, token: string) {
+    const response = await fetch(`${API_BASE_URL}/notebooks/${notebookId}/research-goals`, {
+      method: 'POST',
+      headers: { 
+        'Authorization': `Bearer ${token}`,
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify({ title, description }),
+      credentials: 'include'
+    });
+    return handleResponse(response);
+  },
+
+  async deleteResearchGoal(notebookId: string, goalId: string, token: string) {
+    const response = await fetch(`${API_BASE_URL}/notebooks/${notebookId}/research-goals/${goalId}`, {
+      method: 'DELETE',
+      headers: { 'Authorization': `Bearer ${token}` },
+      credentials: 'include'
+    });
+    return handleResponse(response);
   }
 };
 

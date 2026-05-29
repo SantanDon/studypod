@@ -10,6 +10,7 @@ import { Button } from "@/components/ui/button";
 import MultipleWebsiteUrlsDialog from "./MultipleWebsiteUrlsDialog";
 import CopiedTextDialog from "./CopiedTextDialog";
 import YouTubeUrlInput from "./YouTubeUrlInput";
+import BookmarkImportDialog from "./BookmarkImportDialog";
 import { useAddSourcesHandlers } from "./hooks/useAddSourcesHandlers";
 
 interface AddSourcesDialogProps {
@@ -26,6 +27,7 @@ const AddSourcesDialog = ({
   const [showCopiedTextDialog, setShowCopiedTextDialog] = useState(false);
   const [showMultipleWebsiteDialog, setShowMultipleWebsiteDialog] = useState(false);
   const [showYouTubeDialog, setShowYouTubeDialog] = useState(false);
+  const [showBookmarkImportDialog, setShowBookmarkImportDialog] = useState(false);
 
   const {
     handleMultipleWebsiteSubmit,
@@ -121,7 +123,7 @@ const AddSourcesDialog = ({
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
               <Button
                 variant="outline"
-                className="h-auto p-6 flex flex-col items-center space-y-4 bg-white/[0.02] border-white/10 hover:bg-white/5 hover:border-red-500/50 transition-all duration-500 group md:col-span-2"
+                className="h-auto p-6 flex flex-col items-center space-y-4 bg-white/[0.02] border-white/10 hover:bg-white/5 hover:border-red-500/50 transition-all duration-500 group"
                 onClick={() => setShowYouTubeDialog(true)}
                 disabled={isProcessingFiles}
               >
@@ -135,6 +137,21 @@ const AddSourcesDialog = ({
                   <span className="text-sm text-white/40">
                     Import transcripts, chapters, and metadata
                   </span>
+                </div>
+              </Button>
+
+              <Button
+                variant="outline"
+                className="h-auto p-6 flex flex-col items-center space-y-3 bg-white/[0.02] border-white/10 hover:bg-white/5 hover:border-indigo-500/50 transition-all duration-500 group"
+                onClick={() => setShowBookmarkImportDialog(true)}
+                disabled={isProcessingFiles}
+              >
+                <div className="p-3 rounded-xl bg-indigo-500/10 border border-indigo-500/20 group-hover:bg-indigo-500/20 transition-all duration-500">
+                  <i className="fi fi-rr-bookmark text-xl text-indigo-500"></i>
+                </div>
+                <div className="text-center">
+                  <span className="font-semibold text-white block">Bookmarks & Tweets</span>
+                  <span className="text-xs text-white/40">Crawl links & replies recursively</span>
                 </div>
               </Button>
 
@@ -190,6 +207,14 @@ const AddSourcesDialog = ({
         onOpenChange={setShowYouTubeDialog}
         onSubmit={handleYouTubeSubmit}
       />
+
+      {notebookId && (
+        <BookmarkImportDialog
+          open={showBookmarkImportDialog}
+          onOpenChange={setShowBookmarkImportDialog}
+          notebookId={notebookId}
+        />
+      )}
     </>
   );
 };

@@ -3,6 +3,7 @@ import { v4 as uuidv4 } from "uuid";
 import { generateSovereignHooks } from "../services/outreachService.js";
 import { dbHelpers } from "../db/database.js";
 import { authenticateToken, requireScope } from "../middleware/auth.js";
+import { deepDiveBookmarks } from "../services/bookmarkDeepDiveService.js";
 import { MemoryService } from "../services/memoryService.js";
 import { chatWithNotebook } from "../services/aiChatService.js";
 import { MasticationService } from "../services/masticationService.js";
@@ -466,6 +467,41 @@ router.post("/:id/sources", requireScope('sources:write'), async (req, res) => {
 });
 
 /**
+ * POST /api/notebooks/:id/sources/tweets
+ * Bulk tweet/bookmark import & deep-dive crawling
+ */
+router.post("/:id/sources/tweets", requireScope('sources:write'), async (req, res) => {
+  try {
+    let notebook = await getNotebookOrRecover(req.params.id, req.user.userId, "Automatically provisioned after system reset");
+    if (!notebook) return res.status(404).json({ error: { code: "NOTEBOOK_NOT_FOUND", message: "Notebook not found and could not be recovered" } });
+
+    const { urls, fileContent } = req.body;
+    let tweetUrls = [];
+
+    if (urls && Array.isArray(urls)) {
+      tweetUrls = urls;
+    }
+
+    if (fileContent) {
+      const { parseTwitterBookmarksExport } = await import('../services/tweetExtractionService.js');
+      const parsedUrls = parseTwitterBookmarksExport(fileContent);
+      tweetUrls = [...new Set([...tweetUrls, ...parsedUrls])];
+    }
+
+    if (tweetUrls.length === 0) {
+      return res.status(400).json({ error: "No tweet URLs or bookmarks archive file provided" });
+    }
+
+    // Process deep dive sequentially
+    const result = await deepDiveBookmarks(tweetUrls, req.params.id, req.user.userId);
+    res.json(result);
+  } catch (error) {
+    logger.error("Tweet import error:", error);
+    res.status(500).json({ error: "Failed to process tweet bookmarks", details: error.message });
+  }
+});
+
+/**
  * PUT /api/notebooks/:id/sources/:sourceId
  * Update an existing source
  */
@@ -553,10 +589,34 @@ router.post("/:id/sources/:sourceId/generate-hooks", requireScope('notes:create'
     const noteId = uuidv4();
     await dbHelpers.createNote(noteId, id, userId, noteContent);
 
+    // 4. Persist to signal_queue
+    try {
+      if (hooks.linkedin) {
+        await dbHelpers.createSignalQueueItem(
+          uuidv4(), userId, id, 'linkedin', hooks.linkedin,
+          sourceId, null, null, noteId
+        );
+      }
+      if (hooks.twitter) {
+        await dbHelpers.createSignalQueueItem(
+          uuidv4(), userId, id, 'twitter', hooks.twitter,
+          sourceId, null, null, noteId
+        );
+      }
+      if (hooks.reddit) {
+        await dbHelpers.createSignalQueueItem(
+          uuidv4(), userId, id, 'reddit', hooks.reddit,
+          sourceId, null, null, noteId
+        );
+      }
+    } catch (err) {
+      logger.warn(`🧬 [SOVEREIGN SIGNAL] Failed to persist signal hooks to queue: ${err.message}`);
+    }
+
     res.json({ 
       hooks, 
       noteId,
-      message: "Sovereign Signal generated and persisted as a note for later refinement." 
+      message: "Sovereign Signal generated, saved as note, and staged to Signal Queue." 
     });
   } catch (error) {
     logger.error("Signal generation error:", error);
@@ -951,6 +1011,63 @@ router.post("/:id/pulse", requireScope('missions:write'), async (req, res) => {
   } catch (error) {
     logger.error("Pulse error:", error);
     res.status(500).json({ error: "Failed to broadcast thought" });
+  }
+});
+
+/**
+ * GET /api/notebooks/:id/research-goals
+ * List all active research goals for the notebook
+ */
+router.get("/:id/research-goals", requireScope('notebooks:read'), async (req, res) => {
+  try {
+    const goals = await dbHelpers.getResearchGoalsByNotebookId(req.params.id, req.user.userId);
+    res.json({ goals });
+  } catch (error) {
+    logger.error("Failed to list research goals:", error);
+    res.status(500).json({ error: "Failed to list research goals" });
+  }
+});
+
+/**
+ * POST /api/notebooks/:id/research-goals
+ * Create a new research goal
+ */
+router.post("/:id/research-goals", requireScope('notes:create'), async (req, res) => {
+  try {
+    const { title, description } = req.body;
+    if (!title) {
+      return res.status(400).json({ error: "title is required" });
+    }
+
+    const id = uuidv4();
+    const goal = await dbHelpers.createResearchGoal(id, req.user.userId, req.params.id, title, description || "");
+    
+    await dbHelpers.createActivityLog(req.params.id, req.user.userId, getActorName(req), 'create_research_goal', `Created research goal: "${title}"`);
+    
+    res.status(201).json(goal);
+  } catch (error) {
+    logger.error("Failed to create research goal:", error);
+    res.status(500).json({ error: "Failed to create research goal" });
+  }
+});
+
+/**
+ * DELETE /api/notebooks/:id/research-goals/:goalId
+ * Delete an existing research goal
+ */
+router.delete("/:id/research-goals/:goalId", requireScope('notes:create'), async (req, res) => {
+  try {
+    const result = await dbHelpers.deleteResearchGoal(req.params.goalId, req.user.userId);
+    if (result.changes === 0) {
+      return res.status(404).json({ error: "Research goal not found or unauthorized" });
+    }
+    
+    await dbHelpers.createActivityLog(req.params.id, req.user.userId, getActorName(req), 'delete_research_goal', "Deleted a research goal");
+    
+    res.json({ message: "Research goal deleted successfully" });
+  } catch (error) {
+    logger.error("Failed to delete research goal:", error);
+    res.status(500).json({ error: "Failed to delete research goal" });
   }
 });
 
