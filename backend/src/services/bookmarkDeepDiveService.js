@@ -13,7 +13,7 @@
  */
 
 import { v4 as uuidv4 } from 'uuid';
-import { extractTweet, classifyUrl } from './tweetExtractionService.js';
+import { extractTweet, classifyUrl, extractUrlsFromText, parseTweetId } from './tweetExtractionService.js';
 import { extractWebSource } from './extractionService.js';
 import { dbHelpers } from '../db/database.js';
 import { MemoryService } from './memoryService.js';
@@ -27,13 +27,14 @@ const MAX_LINKS_PER_TWEET = 8;
 const MIN_CONTENT_LENGTH = 200;
 
 /**
- * Process a single tweet URL:
+ * Process a single tweet URL or pre-parsed object:
  *  - Extract tweet text + all links
  *  - Create a `tweet` type source in the notebook
  *  - Crawl up to MAX_LINKS_PER_TWEET discovered links
  *  - Return summary of what was found
  */
-async function processSingleTweet(tweetUrl, notebookId, userId) {
+async function processSingleTweet(tweetInput, notebookId, userId) {
+  const tweetUrl = typeof tweetInput === 'string' ? tweetInput : tweetInput.url;
   const result = {
     tweetUrl,
     tweetSourceId: null,
@@ -43,12 +44,34 @@ async function processSingleTweet(tweetUrl, notebookId, userId) {
 
   // ── 1. Extract the tweet ─────────────────────────────────────────────────
   let tweetData;
-  try {
-    tweetData = await extractTweet(tweetUrl);
-  } catch (err) {
-    logger.error(`[DeepDive] Failed to extract tweet ${tweetUrl}: ${err.message}`);
-    result.errors.push(`Tweet extraction failed: ${err.message}`);
-    return result;
+  if (tweetInput && typeof tweetInput === 'object' && tweetInput.text && tweetInput.author) {
+    logger.info(`[DeepDive] Using pre-parsed tweet data for ${tweetUrl}`);
+    const bodyLinks = extractUrlsFromText(tweetInput.text).filter(
+      u => !u.includes('twitter.com') && !u.includes('x.com')
+    );
+    const classifiedLinks = bodyLinks.map(url => ({
+      url,
+      type: classifyUrl(url)
+    }));
+    tweetData = {
+      tweetId: parseTweetId(tweetUrl),
+      tweetUrl,
+      text: tweetInput.text,
+      author: tweetInput.author,
+      authorUrl: '',
+      bodyLinks,
+      replyLinks: [], // No replies inside the local JSON file
+      allLinks: bodyLinks,
+      classifiedLinks
+    };
+  } else {
+    try {
+      tweetData = await extractTweet(tweetUrl);
+    } catch (err) {
+      logger.error(`[DeepDive] Failed to extract tweet ${tweetUrl}: ${err.message}`);
+      result.errors.push(`Tweet extraction failed: ${err.message}`);
+      return result;
+    }
   }
 
   // ── 2. Create the tweet source ────────────────────────────────────────────
@@ -65,12 +88,21 @@ async function processSingleTweet(tweetUrl, notebookId, userId) {
       : ''
   ].filter(Boolean).join('\n\n');
 
+  // Let's create a beautiful, descriptive title for the tweet source
+  let cleanText = tweetData.text || '';
+  cleanText = cleanText.replace(/https?:\/\/[^\s]+/g, '').trim();
+  cleanText = cleanText.replace(/\s+/g, ' ');
+  const textSnippet = cleanText.length > 50 ? cleanText.substring(0, 50) + '...' : cleanText;
+  const sourceTitle = textSnippet.length > 0 
+    ? `Tweet: ${tweetData.author} - "${textSnippet}"` 
+    : `Tweet by ${tweetData.author}`;
+
   try {
     await dbHelpers.createSource(
       tweetSourceId,
       notebookId,
       userId,
-      `Tweet by ${tweetData.author}`,
+      sourceTitle,
       'tweet',
       tweetContent,
       tweetData.tweetUrl,
@@ -86,6 +118,8 @@ async function processSingleTweet(tweetUrl, notebookId, userId) {
 
     await dbHelpers.updateSource(tweetSourceId, userId, { processing_status: 'completed' });
     result.tweetSourceId = tweetSourceId;
+    result.author = tweetData.author;
+    result.text = tweetData.text; // Store for renaming use
     logger.info(`[DeepDive] Tweet source created: ${tweetSourceId}`);
   } catch (err) {
     logger.error(`[DeepDive] Failed to create tweet source: ${err.message}`);
@@ -292,6 +326,43 @@ export async function deepDiveBookmarks(tweetUrls, notebookId, userId) {
   }
 
   logger.info(`[DeepDive] Complete: ${results.length} tweets, ${totalSources} total sources created`);
+
+  // Notebook Rename Logic (If generic name)
+  try {
+    const successfulTweets = results.filter(r => r.tweetSourceId && r.author);
+    if (successfulTweets.length > 0) {
+      const firstTweet = successfulTweets[0];
+      const notebook = await dbHelpers.getNotebookById(notebookId, userId);
+      const isGeneric = !notebook || 
+        notebook.title === 'Untitled notebook' || 
+        notebook.title === 'Untitled Notebook' || 
+        notebook.title === 'Recovered Notebook' ||
+        notebook.title === 'Auto-provisioned' ||
+        notebook.title.startsWith('Automatically provisioned');
+
+      if (isGeneric) {
+        let cleanText = firstTweet.text || '';
+        cleanText = cleanText.replace(/https?:\/\/[^\s]+/g, '').trim();
+        cleanText = cleanText.replace(/\s+/g, ' ');
+
+        let title = `Research: ${firstTweet.author}`;
+        if (cleanText.length > 0) {
+          const snippet = cleanText.length > 40 ? cleanText.substring(0, 40) + '...' : cleanText;
+          title = `${firstTweet.author}: "${snippet}"`;
+        }
+
+        const description = `Automatically organized from bookmarks. Starting seed: "${cleanText.substring(0, 200)}${cleanText.length > 200 ? '...' : ''}"`;
+
+        await dbHelpers.updateNotebook(notebookId, userId, {
+          title,
+          description
+        });
+        logger.info(`[DeepDive] Auto-renamed generic notebook ${notebookId} to "${title}"`);
+      }
+    }
+  } catch (err) {
+    logger.warn(`[DeepDive] Auto-renaming notebook failed: ${err.message}`);
+  }
 
   // Closed Loop: broker newly created sources against active research goals
   const newlyCreatedSourceIds = [];

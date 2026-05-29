@@ -22,7 +22,7 @@ const URL_REGEX = /https?:\/\/(?!(?:twitter\.com|x\.com|t\.co))[^\s"'<>]+/g;
 /**
  * Parse tweet ID from a twitter/x.com URL
  */
-function parseTweetId(url) {
+export function parseTweetId(url) {
   const match = url.match(/(?:twitter|x)\.com\/[^/]+\/status(?:es)?\/(\d+)/);
   return match ? match[1] : null;
 }
@@ -164,7 +164,7 @@ async function fetchReplyLinks(tweetId, authorUsername) {
 /**
  * Extract all URLs from a raw text string (tweet body fallback)
  */
-function extractUrlsFromText(text) {
+export function extractUrlsFromText(text) {
   const matches = text.match(URL_REGEX) || [];
   // Clean up trailing punctuation that gets caught
   return [...new Set(matches.map(u => u.replace(/[.,;:!?)\]"']+$/, '')))];
@@ -287,12 +287,17 @@ export function parseTwitterBookmarksExport(fileContent) {
     const urls = [];
 
     const extractFromItem = (item) => {
-      // bookmarks format: { tweet: { full_text, entities: { urls: [...] } }, tweetId, user: { screen_name } }
       const tweetId = item?.tweet?.id_str || item?.tweetId || item?.id;
       const username = item?.tweet?.user?.screen_name || item?.user?.screen_name || 'unknown';
+      const text = item?.tweet?.full_text || item?.tweet?.text || item?.text || '';
+      const author = item?.tweet?.user?.name || item?.user?.name || (username !== 'unknown' ? `@${username}` : 'Unknown');
 
       if (tweetId) {
-        urls.push(`https://x.com/${username}/status/${tweetId}`);
+        urls.push({
+          url: `https://x.com/${username}/status/${tweetId}`,
+          text: text.trim(),
+          author: author.trim()
+        });
       }
     };
 
@@ -308,8 +313,14 @@ export function parseTwitterBookmarksExport(fileContent) {
               const tweetResult = entry?.content?.itemContent?.tweet_results?.result?.tweet || entry?.content?.itemContent?.tweet_results?.result;
               const id = tweetResult?.rest_id;
               const screenName = tweetResult?.core?.user_results?.result?.legacy?.screen_name;
+              const text = tweetResult?.legacy?.full_text || tweetResult?.legacy?.text || '';
+              const author = tweetResult?.core?.user_results?.result?.legacy?.name || (screenName ? `@${screenName}` : 'Unknown');
               if (id && screenName) {
-                urls.push(`https://x.com/${screenName}/status/${id}`);
+                urls.push({
+                  url: `https://x.com/${screenName}/status/${id}`,
+                  text: text.trim(),
+                  author: author.trim()
+                });
               }
             });
           });
@@ -319,8 +330,16 @@ export function parseTwitterBookmarksExport(fileContent) {
       });
     }
 
-    logger.info(`[BookmarkParser] Parsed ${urls.length} tweet URLs from archive`);
-    return [...new Set(urls)]; // deduplicate
+    // Deduplicate by url
+    const seen = new Set();
+    const uniqueUrls = urls.filter(item => {
+      if (!item.url || seen.has(item.url)) return false;
+      seen.add(item.url);
+      return true;
+    });
+
+    logger.info(`[BookmarkParser] Parsed ${uniqueUrls.length} unique tweet bookmarks from archive`);
+    return uniqueUrls;
   } catch (err) {
     throw new Error(`Failed to parse Twitter bookmarks export: ${err.message}`);
   }

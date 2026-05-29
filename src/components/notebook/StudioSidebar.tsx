@@ -42,6 +42,7 @@ const StudioSidebar = ({
   const [isResearchGoalsSectionOpen, setIsResearchGoalsSectionOpen] = React.useState(false);
 
   const { notes, sources, installedModels, conceptMaps, currentSession } = data;
+  const hasOnlyTweets = sources && sources.length > 0 && sources.every(s => s.type === 'tweet');
   const { isLoading, isCreating, isUpdating, isDeleting, isGenerating, isGeneratingMap, isDeletingMap, isEditingMode, isQuizActive, isQuizCompleted } = flags;
   const { generationError, generatingProgress } = misc;
   const {
@@ -115,19 +116,26 @@ const StudioSidebar = ({
 
   return (
     <div className="w-full bg-gray-50 dark:bg-background border-l border-gray-200 dark:border-border flex flex-col h-full overflow-hidden shadow-sm">
-      <div className="p-4 border-b border-gray-200 dark:border-border flex-shrink-0 flex items-center h-[65px]">
+      <div className="p-4 border-b border-gray-200 dark:border-border flex-shrink-0 flex items-center h-[65px] justify-between">
         <h2 className="text-lg font-medium text-foreground">Studio</h2>
+        {hasOnlyTweets && (
+          <span className="px-2 py-0.5 text-[10px] font-semibold bg-indigo-50 dark:bg-indigo-950/40 text-indigo-600 dark:text-indigo-400 border border-indigo-100 dark:border-indigo-900/40 rounded-full font-mono animate-pulse">
+            Bookmark Mode
+          </span>
+        )}
       </div>
       
       <ScrollArea className="flex-1">
         <div className="p-4 space-y-6">
           {/* Audio Overview */}
-          <div className="relative group">
-            <div className="absolute -inset-0.5 bg-gradient-to-r from-blue-500/10 to-purple-500/10 rounded-xl blur opacity-0 group-hover:opacity-100 transition duration-1000 group-hover:duration-200"></div>
-            <div className="relative">
-              {notebookId && <PodcastView notebookId={notebookId} />}
+          {!hasOnlyTweets && (
+            <div className="relative group">
+              <div className="absolute -inset-0.5 bg-gradient-to-r from-blue-500/10 to-purple-500/10 rounded-xl blur opacity-0 group-hover:opacity-100 transition duration-1000 group-hover:duration-200"></div>
+              <div className="relative">
+                {notebookId && <PodcastView notebookId={notebookId} />}
+              </div>
             </div>
-          </div>
+          )}
 
           {/* Notes Section */}
           <div className="space-y-3">
@@ -213,48 +221,52 @@ const StudioSidebar = ({
             </Collapsible>
 
             {/* Quiz Section */}
-            <Collapsible open={isQuizSectionOpen} onOpenChange={setIsQuizSectionOpen}>
-              <CollapsibleTrigger className="flex items-center justify-between w-full p-3 bg-white dark:bg-card border border-gray-200 dark:border-border rounded-xl hover:bg-gray-50 dark:hover:bg-muted/50 transition-all shadow-sm">
-                <div className="flex items-center gap-3">
-                  <div className="w-8 h-8 rounded-lg bg-green-50 dark:bg-green-950/40 border border-green-100 dark:border-green-900/40 flex items-center justify-center">
-                    <i className="fi fi-rr-brain text-green-600 dark:text-green-400 text-xs"></i>
+            {!hasOnlyTweets && (
+              <Collapsible open={isQuizSectionOpen} onOpenChange={setIsQuizSectionOpen}>
+                <CollapsibleTrigger className="flex items-center justify-between w-full p-3 bg-white dark:bg-card border border-gray-200 dark:border-border rounded-xl hover:bg-gray-50 dark:hover:bg-muted/50 transition-all shadow-sm">
+                  <div className="flex items-center gap-3">
+                    <div className="w-8 h-8 rounded-lg bg-green-50 dark:bg-green-950/40 border border-green-100 dark:border-green-900/40 flex items-center justify-center">
+                      <i className="fi fi-rr-brain text-green-600 dark:text-green-400 text-xs"></i>
+                    </div>
+                    <span className="text-sm font-medium text-foreground">Quiz</span>
                   </div>
-                  <span className="text-sm font-medium text-foreground">Quiz</span>
-                </div>
-                <i className={`fi fi-rr-angle-small-down text-muted-foreground transition-transform duration-300 ${isQuizSectionOpen ? 'rotate-180' : ''}`}></i>
-              </CollapsibleTrigger>
-              <CollapsibleContent className="pt-2">
-                {notebookId && sources && sources.length > 0 ? (
-                  <QuizSelector
-                    onStart={handleStartQuiz}
-                    isGenerating={isGenerating}
-                    error={generationError}
-                    sourcesCount={sources.length}
-                    availableModels={installedModels || []}
-                  />
-                ) : (
-                  <div className="p-8 text-center bg-white dark:bg-card border border-dashed border-gray-200 dark:border-border rounded-xl">
-                    <p className="text-xs text-muted-foreground">Add sources to generate a quiz</p>
-                  </div>
-                )}
-              </CollapsibleContent>
-            </Collapsible>
+                  <i className={`fi fi-rr-angle-small-down text-muted-foreground transition-transform duration-300 ${isQuizSectionOpen ? 'rotate-180' : ''}`}></i>
+                </CollapsibleTrigger>
+                <CollapsibleContent className="pt-2">
+                  {notebookId && sources && sources.length > 0 ? (
+                    <QuizSelector
+                      onStart={handleStartQuiz}
+                      isGenerating={isGenerating}
+                      error={generationError}
+                      sourcesCount={sources.length}
+                      availableModels={installedModels || []}
+                    />
+                  ) : (
+                    <div className="p-8 text-center bg-white dark:bg-card border border-dashed border-gray-200 dark:border-border rounded-xl">
+                      <p className="text-xs text-muted-foreground">Add sources to generate a quiz</p>
+                    </div>
+                  )}
+                </CollapsibleContent>
+              </Collapsible>
+            )}
 
             {/* Flashcards Section */}
-            <Collapsible open={isFlashcardSectionOpen} onOpenChange={setIsFlashcardSectionOpen}>
-              <CollapsibleTrigger className="flex items-center justify-between w-full p-3 bg-white dark:bg-card border border-gray-200 dark:border-border rounded-xl hover:bg-gray-50 dark:hover:bg-muted/50 transition-all shadow-sm mt-2">
-                <div className="flex items-center gap-3">
-                  <div className="w-8 h-8 rounded-lg bg-purple-50 dark:bg-purple-950/40 border border-purple-100 dark:border-purple-900/40 flex items-center justify-center">
-                    <i className="fi fi-rr-layers text-purple-600 dark:text-purple-400 text-xs"></i>
+            {!hasOnlyTweets && (
+              <Collapsible open={isFlashcardSectionOpen} onOpenChange={setIsFlashcardSectionOpen}>
+                <CollapsibleTrigger className="flex items-center justify-between w-full p-3 bg-white dark:bg-card border border-gray-200 dark:border-border rounded-xl hover:bg-gray-50 dark:hover:bg-muted/50 transition-all shadow-sm mt-2">
+                  <div className="flex items-center gap-3">
+                    <div className="w-8 h-8 rounded-lg bg-purple-50 dark:bg-purple-950/40 border border-purple-100 dark:border-purple-900/40 flex items-center justify-center">
+                      <i className="fi fi-rr-layers text-purple-600 dark:text-purple-400 text-xs"></i>
+                    </div>
+                    <span className="text-sm font-medium text-foreground">Flashcards</span>
                   </div>
-                  <span className="text-sm font-medium text-foreground">Flashcards</span>
-                </div>
-                <i className={`fi fi-rr-angle-small-down text-muted-foreground transition-transform duration-300 ${isFlashcardSectionOpen ? 'rotate-180' : ''}`}></i>
-              </CollapsibleTrigger>
-              <CollapsibleContent>
-                {notebookId && <FlashcardDeckComponent notebookId={notebookId} />}
-              </CollapsibleContent>
-            </Collapsible>
+                  <i className={`fi fi-rr-angle-small-down text-muted-foreground transition-transform duration-300 ${isFlashcardSectionOpen ? 'rotate-180' : ''}`}></i>
+                </CollapsibleTrigger>
+                <CollapsibleContent>
+                  {notebookId && <FlashcardDeckComponent notebookId={notebookId} />}
+                </CollapsibleContent>
+              </Collapsible>
+            )}
 
             {/* Concept Map Section */}
             <Collapsible open={isConceptMapSectionOpen} onOpenChange={setIsConceptMapSectionOpen}>
@@ -317,34 +329,36 @@ const StudioSidebar = ({
             </Collapsible>
 
             {/* Compare Sources Section */}
-            <Collapsible open={isComparisonOpen} onOpenChange={setIsComparisonOpen}>
-              <CollapsibleTrigger className="flex items-center justify-between w-full p-3 bg-white dark:bg-card border border-gray-200 dark:border-border rounded-xl hover:bg-gray-50 dark:hover:bg-muted/50 transition-all shadow-sm mt-2">
-                <div className="flex items-center gap-3">
-                  <div className="w-8 h-8 rounded-lg bg-orange-50 dark:bg-orange-950/40 border border-orange-100 dark:border-orange-900/40 flex items-center justify-center">
-                    <i className="fi fi-rr-shuffle text-orange-600 dark:text-orange-400 text-xs"></i>
+            {!hasOnlyTweets && (
+              <Collapsible open={isComparisonOpen} onOpenChange={setIsComparisonOpen}>
+                <CollapsibleTrigger className="flex items-center justify-between w-full p-3 bg-white dark:bg-card border border-gray-200 dark:border-border rounded-xl hover:bg-gray-50 dark:hover:bg-muted/50 transition-all shadow-sm mt-2">
+                  <div className="flex items-center gap-3">
+                    <div className="w-8 h-8 rounded-lg bg-orange-50 dark:bg-orange-950/40 border border-orange-100 dark:border-orange-900/40 flex items-center justify-center">
+                      <i className="fi fi-rr-shuffle text-orange-600 dark:text-orange-400 text-xs"></i>
+                    </div>
+                    <span className="text-sm font-medium text-foreground">Compare Sources</span>
                   </div>
-                  <span className="text-sm font-medium text-foreground">Compare Sources</span>
-                </div>
-                <i className={`fi fi-rr-angle-small-down text-muted-foreground transition-transform duration-300 ${isComparisonOpen ? 'rotate-180' : ''}`}></i>
-              </CollapsibleTrigger>
-              <CollapsibleContent className="pt-2">
-                <Button
-                  variant="outline"
-                  size="sm"
-                  className="w-full bg-white dark:bg-card border border-gray-200 dark:border-border text-foreground hover:bg-gray-50 dark:hover:bg-muted/50 hover:border-gray-300 dark:hover:border-border shadow-sm"
-                  onClick={() => setIsComparisonOpen(true)}
-                  disabled={!sources || sources.length < 2}
-                >
-                  <i className="fi fi-rr-git-compare mr-2"></i>
-                  Open Comparison Tool
-                </Button>
-                {(!sources || sources.length < 2) && (
-                  <p className="text-[10px] text-muted-foreground text-center mt-2">
-                    Need at least 2 sources to compare
-                  </p>
-                )}
-              </CollapsibleContent>
-            </Collapsible>
+                  <i className={`fi fi-rr-angle-small-down text-muted-foreground transition-transform duration-300 ${isComparisonOpen ? 'rotate-180' : ''}`}></i>
+                </CollapsibleTrigger>
+                <CollapsibleContent className="pt-2">
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    className="w-full bg-white dark:bg-card border border-gray-200 dark:border-border text-foreground hover:bg-gray-50 dark:hover:bg-muted/50 hover:border-gray-300 dark:hover:border-border shadow-sm"
+                    onClick={() => setIsComparisonOpen(true)}
+                    disabled={!sources || sources.length < 2}
+                  >
+                    <i className="fi fi-rr-git-compare mr-2"></i>
+                    Open Comparison Tool
+                  </Button>
+                  {(!sources || sources.length < 2) && (
+                    <p className="text-[10px] text-muted-foreground text-center mt-2">
+                      Need at least 2 sources to compare
+                    </p>
+                  )}
+                </CollapsibleContent>
+              </Collapsible>
+            )}
           </div>
         </div>
       </ScrollArea>

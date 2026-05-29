@@ -476,24 +476,32 @@ router.post("/:id/sources/tweets", requireScope('sources:write'), async (req, re
     if (!notebook) return res.status(404).json({ error: { code: "NOTEBOOK_NOT_FOUND", message: "Notebook not found and could not be recovered" } });
 
     const { urls, fileContent } = req.body;
-    let tweetUrls = [];
+    let tweetInputs = [];
 
     if (urls && Array.isArray(urls)) {
-      tweetUrls = urls;
+      tweetInputs = urls.map(u => typeof u === 'string' ? { url: u } : u);
     }
 
     if (fileContent) {
       const { parseTwitterBookmarksExport } = await import('../services/tweetExtractionService.js');
-      const parsedUrls = parseTwitterBookmarksExport(fileContent);
-      tweetUrls = [...new Set([...tweetUrls, ...parsedUrls])];
+      const parsed = parseTwitterBookmarksExport(fileContent);
+      tweetInputs = [...tweetInputs, ...parsed];
     }
 
-    if (tweetUrls.length === 0) {
+    // Deduplicate by url
+    const seen = new Set();
+    tweetInputs = tweetInputs.filter(item => {
+      if (!item.url || seen.has(item.url)) return false;
+      seen.add(item.url);
+      return true;
+    });
+
+    if (tweetInputs.length === 0) {
       return res.status(400).json({ error: "No tweet URLs or bookmarks archive file provided" });
     }
 
     // Process deep dive sequentially
-    const result = await deepDiveBookmarks(tweetUrls, req.params.id, req.user.userId);
+    const result = await deepDiveBookmarks(tweetInputs, req.params.id, req.user.userId);
     res.json(result);
   } catch (error) {
     logger.error("Tweet import error:", error);
