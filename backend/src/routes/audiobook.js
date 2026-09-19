@@ -9,6 +9,7 @@ import { Worker } from "worker_threads";
 import multer from "multer";
 import { logger } from "../utils/logger.js";
 import { authenticateToken, requireScope } from "../middleware/auth.js";
+import { singleFileUploadLimits } from "../middleware/uploadSecurity.js";
 import {
   getAudiobookRuntimeCapabilities,
   requireAudiobookRuntime,
@@ -100,7 +101,7 @@ for (const dir of [
 
 const upload = multer({
   dest: TEMP_DIR,
-  limits: { fileSize: MAX_BOOK_UPLOAD_BYTES },
+  limits: singleFileUploadLimits(MAX_BOOK_UPLOAD_BYTES),
   fileFilter: (_req, file, cb) => {
     if (!isSupportedBookFile(file.originalname)) {
       cb(

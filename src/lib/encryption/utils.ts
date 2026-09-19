@@ -5,8 +5,8 @@
 /**
  * Convert ArrayBuffer to Base64 string
  */
-export function arrayBufferToBase64(buffer: ArrayBuffer): string {
-  const bytes = new Uint8Array(buffer);
+export function arrayBufferToBase64(buffer: ArrayBuffer | Uint8Array): string {
+  const bytes = buffer instanceof Uint8Array ? buffer : new Uint8Array(buffer);
   let binary = '';
   for (let i = 0; i < bytes.byteLength; i++) {
     binary += String.fromCharCode(bytes[i]);
@@ -30,12 +30,12 @@ export function base64ToArrayBuffer(base64: string): ArrayBuffer {
  * Convert Uint8Array to Base64 string
  */
 export function uint8ArrayToBase64(array: Uint8Array): string {
-  return arrayBufferToBase64(array.buffer);
+  return arrayBufferToBase64(array);
 }
 
 /**
  * Convert Base64 string to Uint8Array
  */
-export function base64ToUint8Array(base64: string): Uint8Array {
+export function base64ToUint8Array(base64: string): Uint8Array<ArrayBuffer> {
   return new Uint8Array(base64ToArrayBuffer(base64));
 }

@@ -102,6 +102,13 @@ export async function generateAIResponse(
       }
     }
 
+    // Generic follow-ups such as "what is this about?" can legitimately score
+    // below retrieval thresholds. If usable notebook text exists, keep the
+    // turn grounded by falling back to the source text itself.
+    if (!relevantContext && hasSourcesInNotebook) {
+      relevantContext = formatSourcesForPrompt(sources);
+    }
+
     const hasContext = relevantContext.length > 0;
     const promptConfig = getContextualPrompt(hasContext, false);
 

@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
   buildSourceProcessingError,
   isSourceUsableForGroundedChat,
+  isSourceUsableForGroundedWork,
   parseSourceProcessingMetadata,
   shouldSkipClientSemanticIndexing,
 } from '@/lib/sources/sourceProcessing';
@@ -21,6 +22,17 @@ describe('source processing contract', () => {
       content: 'Readable article text',
       processing_status: 'degraded',
     })).toBe(true);
+  });
+
+  it('lets chat use extracted text while indexing continues without unlocking richer grounded work', () => {
+    const source = {
+      type: 'pdf',
+      content: 'Reliable extracted text is already available.',
+      processing_status: 'processing',
+    };
+
+    expect(isSourceUsableForGroundedChat(source)).toBe(true);
+    expect(isSourceUsableForGroundedWork(source)).toBe(false);
   });
 
   it('rejects failed and empty sources', () => {

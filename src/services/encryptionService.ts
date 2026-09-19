@@ -13,7 +13,7 @@ export interface EncryptedData {
 
 export interface EncryptionKey {
   key: CryptoKey;
-  salt: Uint8Array;
+  salt: Uint8Array<ArrayBuffer>;
 }
 
 class EncryptionService {
@@ -27,7 +27,7 @@ class EncryptionService {
   /**
    * Derive an encryption key from a password using PBKDF2
    */
-  async deriveKey(password: string, salt?: Uint8Array): Promise<EncryptionKey> {
+  async deriveKey(password: string, salt?: Uint8Array<ArrayBuffer>): Promise<EncryptionKey> {
     const saltToUse = salt || this.generateSalt();
     
     const encoder = new TextEncoder();
@@ -65,14 +65,14 @@ class EncryptionService {
   /**
    * Generate a random salt
    */
-  generateSalt(): Uint8Array {
+  generateSalt(): Uint8Array<ArrayBuffer> {
     return crypto.getRandomValues(new Uint8Array(this.SALT_LENGTH));
   }
 
   /**
    * Generate a random initialization vector
    */
-  generateIV(): Uint8Array {
+  generateIV(): Uint8Array<ArrayBuffer> {
     return crypto.getRandomValues(new Uint8Array(this.IV_LENGTH));
   }
 

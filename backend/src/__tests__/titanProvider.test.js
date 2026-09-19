@@ -25,7 +25,7 @@ describe("Titan provider configuration", () => {
 
     expect(getAvailableProviders().GROQ).toMatchObject({
       configured: true,
-      model: "llama-3.3-70b-versatile",
+      model: "qwen/qwen3.8-27b",
       protocol: "chat-completions",
     });
     expect(log.warn).toHaveBeenCalledWith(
@@ -42,6 +42,63 @@ describe("Titan provider configuration", () => {
 
     expect(getAvailableProviders().GROQ.configured).toBe(true);
     expect(log.warn).not.toHaveBeenCalled();
+  });
+
+  it("recovers from a stale Groq model override with the verified fallback model", async () => {
+    vi.stubEnv("OPENAI_API_KEY", "");
+    vi.stubEnv("TOKENLLM7_KEY", "");
+    vi.stubEnv("NVIDIA_API_KEY", "");
+    vi.stubEnv("GEMINI_API_KEY", "");
+    vi.stubEnv("ANTHROPIC_API_KEY", "");
+    vi.stubEnv("VITE_GROQ_API_KEY", "");
+    vi.stubEnv("GROQ_API_KEY", "fixture");
+    vi.stubEnv("GROQ_MODEL", "retired-model");
+    vi.stubEnv("OVHCLOUD_ENABLED", "false");
+    vi.stubEnv("OLLAMA_BASE_URL", "");
+
+    const requestModels = [];
+    const fetchMock = vi.fn(async (_url, options) => {
+      const body = JSON.parse(options.body);
+      requestModels.push(body.model);
+
+      if (requestModels.length === 1) {
+        return {
+          ok: false,
+          status: 404,
+          headers: { get: () => null },
+          text: async () =>
+            JSON.stringify({
+              error: { message: "The requested model does not exist." },
+            }),
+        };
+      }
+
+      return {
+        ok: true,
+        json: async () => ({
+          choices: [{ message: { content: "fallback response" } }],
+          usage: { total_tokens: 7 },
+        }),
+      };
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const { dispatchToTitan } =
+      await import("../services/titanProvider.js?groq-model-fallback-test");
+
+    const result = await dispatchToTitan({
+      messages: [{ role: "user", content: "Summarize this source." }],
+      priority: "performance",
+    });
+
+    expect(result).toMatchObject({
+      answer: "fallback response",
+      modelUsed: "qwen/qwen3.8-27b",
+    });
+    expect(requestModels).toEqual(["retired-model", "qwen/qwen3.8-27b"]);
+    expect(log.warn).toHaveBeenCalledWith(
+      expect.stringContaining("retrying once with qwen/qwen3.8-27b"),
+    );
   });
 
   it("queues burst traffic instead of rejecting requests when provider capacity is full", async () => {

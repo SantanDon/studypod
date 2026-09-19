@@ -1279,7 +1279,7 @@ export async function chatWithNotebook({
 
   // Web fallback is only allowed for unscoped notebook chat. Explicit source
   // scopes must fail clearly rather than silently changing the evidence base.
-  if (contextSources.length === 0 && allowWebFallback) {
+  if (contextSources.length === 0 && sources.length === 0 && allowWebFallback) {
     logger.info(
       `[aiChatService] No sources in notebook. Running proactive web search.`,
     );

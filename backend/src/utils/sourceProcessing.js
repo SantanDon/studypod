@@ -51,9 +51,11 @@ export function isSourceUsableForGroundedChat(source) {
   const status = getSourceProcessingStatus(source);
   const metadata = parseSourceMetadata(source);
   const isMetadataOnlyYoutube = source?.type === 'youtube' && metadata.transcriptStatus === 'metadata_only';
-  const readyStatus = status === 'completed' || status === 'ready' || status === 'degraded';
+  const terminalFailure = status === 'failed' || status === 'cancelled';
 
-  return readyStatus && hasUsableSourceContent(source) && !isMetadataOnlyYoutube;
+  // Grounded chat only needs trustworthy extracted text. Semantic indexing may
+  // continue asynchronously without blocking conversation.
+  return !terminalFailure && hasUsableSourceContent(source) && !isMetadataOnlyYoutube;
 }
 
 export function getSourceTrust(source) {

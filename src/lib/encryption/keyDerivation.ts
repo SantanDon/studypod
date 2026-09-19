@@ -23,7 +23,7 @@ export const KEY_DERIVATION_PARAMS: KeyDerivationParams = {
  * Generate a cryptographically secure random salt
  * @returns 256-bit salt as Uint8Array
  */
-export function generateSalt(): Uint8Array {
+export function generateSalt(): Uint8Array<ArrayBuffer> {
   return crypto.getRandomValues(new Uint8Array(KEY_DERIVATION_PARAMS.saltLength));
 }
 
@@ -36,7 +36,7 @@ export function generateSalt(): Uint8Array {
  */
 export async function deriveMasterKey(
   passphrase: string,
-  salt: Uint8Array
+  salt: Uint8Array<ArrayBuffer>
 ): Promise<CryptoKey> {
   // Encode passphrase as UTF-8
   const encoder = new TextEncoder();

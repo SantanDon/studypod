@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import { useAuth } from '@/hooks/useAuth';
 import { motion, AnimatePresence } from 'framer-motion';
 import { 
   Activity, 
@@ -25,6 +26,7 @@ interface TelemetryPulse {
 }
 
 export const AntigravityTelemetry: React.FC<{ notebookId?: string }> = ({ notebookId: _notebookId }) => {
+  const { isAuthenticated } = useAuth();
   const [isOpen, setIsOpen] = useState(false);
   const [pulse, setPulse] = useState<TelemetryPulse>({
     status: 'idle',
@@ -35,6 +37,7 @@ export const AntigravityTelemetry: React.FC<{ notebookId?: string }> = ({ notebo
   });
 
   useEffect(() => {
+    if (!isAuthenticated) return;
     const fetchPulse = async () => {
       try {
         const res = await fetch('/api/agent/antigravity/pulse');
@@ -50,7 +53,9 @@ export const AntigravityTelemetry: React.FC<{ notebookId?: string }> = ({ notebo
     fetchPulse();
     const interval = setInterval(fetchPulse, 2000);
     return () => clearInterval(interval);
-  }, []);
+  }, [isAuthenticated]);
+
+  if (!isAuthenticated) return null;
 
   // Determine status dot color
   const getStatusColor = (status: string) => {

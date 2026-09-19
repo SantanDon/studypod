@@ -3,6 +3,7 @@
  * Standardizes all error responses to: { error, code }
  */
 
+import multer from "multer";
 import { logger } from "../utils/logger.js";
 
 /**
@@ -27,8 +28,13 @@ export function errorHandler(err, req, res, _next) {
     return _next(err);
   }
 
-  const statusCode = err.statusCode || 500;
-  const code = err.code || "INTERNAL_ERROR";
+  const isMulterError = err instanceof multer.MulterError;
+  const statusCode = isMulterError
+    ? err.code === "LIMIT_FILE_SIZE"
+      ? 413
+      : 400
+    : err.statusCode || 500;
+  const code = isMulterError ? err.code || "MULTIPART_ERROR" : err.code || "INTERNAL_ERROR";
   const isServerError = statusCode >= 500;
   const message =
     isServerError && process.env.NODE_ENV === "production"

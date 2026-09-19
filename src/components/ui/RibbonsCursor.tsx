@@ -35,7 +35,7 @@ const RibbonsCursor: React.FC<RibbonsCursorProps> = ({
   const animationRef = useRef<number | null>(null);
 
   const initRibbons = useCallback(() => {
-    pointsRef.current = Array.from({ length: ribbonCount }, () => []);
+    pointsRef.current = Array.from({ length: ribbonCount }, () => [] as Point[]);
   }, [ribbonCount]);
 
   useEffect(() => {

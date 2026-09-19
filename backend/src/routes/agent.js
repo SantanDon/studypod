@@ -6,6 +6,7 @@ import fsSync from "fs";
 import { v4 as uuidv4 } from "uuid";
 import { sql } from "drizzle-orm";
 import { authenticateToken, requireScope } from "../middleware/auth.js";
+import { singleFileUploadLimits } from "../middleware/uploadSecurity.js";
 import { dbHelpers, getDatabase } from "../db/database.js";
 import { logger } from "../utils/logger.js";
 
@@ -32,7 +33,7 @@ const storage = multer.diskStorage({
 
 const upload = multer({
   storage: storage,
-  limits: { fileSize: 50 * 1024 * 1024 }, // 50MB limit
+  limits: singleFileUploadLimits(50 * 1024 * 1024, { fields: 1 }), // file + notebookId
 });
 
 async function removeUploadedFile(file) {

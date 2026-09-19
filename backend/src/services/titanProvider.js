@@ -33,6 +33,7 @@ const MAX_CONCURRENCY = boundedInteger(
   20,
 );
 const RATE_LIMIT_COOLDOWN_MS = 30_000;
+const GROQ_FALLBACK_MODEL = "qwen/qwen3.8-27b";
 
 const providerConcurrency = new Map();
 const providerCooldowns = new Map();
@@ -64,7 +65,7 @@ const TITANS = {
   GROQ: {
     url: "https://api.groq.com/openai/v1/chat/completions",
     key: process.env.GROQ_API_KEY || process.env.VITE_GROQ_API_KEY,
-    model: process.env.GROQ_MODEL || "llama-3.3-70b-versatile",
+    model: process.env.GROQ_MODEL || GROQ_FALLBACK_MODEL,
     provider: "groq",
     protocol: "chat-completions",
     legacyKeyName:
@@ -557,24 +558,52 @@ export async function dispatchToTitan({
         logger.info(`[Titan] ${name} completed a request with ${titan.model}`);
         return result;
       } catch (error) {
-        const status = Number(error?.status || 0);
+        let handledError = error;
+
+        if (
+          name === "GROQ"
+          && Number(error?.status || 0) === 404
+          && titan.model !== GROQ_FALLBACK_MODEL
+        ) {
+          logger.warn(
+            `[Titan] GROQ model ${titan.model} is unavailable; retrying once with ${GROQ_FALLBACK_MODEL}`,
+          );
+          try {
+            const fallbackTitan = { ...titan, model: GROQ_FALLBACK_MODEL };
+            const result = await requestProvider(
+              fallbackTitan,
+              messages,
+              temperature,
+              priority,
+              requestTimeoutMs,
+            );
+            logger.info(
+              `[Titan] GROQ completed a request with fallback model ${GROQ_FALLBACK_MODEL}`,
+            );
+            return result;
+          } catch (fallbackError) {
+            handledError = fallbackError;
+          }
+        }
+
+        const status = Number(handledError?.status || 0);
         if (status === 429 || status === 413) {
           cooldownProvider(
             name,
-            Math.max(RATE_LIMIT_COOLDOWN_MS, Number(error?.retryAfterMs || 0)),
+            Math.max(RATE_LIMIT_COOLDOWN_MS, Number(handledError?.retryAfterMs || 0)),
           );
         }
         if (status === 401 || status === 403)
           cooldownProvider(name, 5 * 60_000);
 
-        if (error?.name === "AbortError") {
+        if (handledError?.name === "AbortError") {
           logger.warn(`[Titan] ${name} timed out after ${requestTimeoutMs}ms`);
         } else {
-          const providerDetail = error?.providerDetail
-            ? `: ${error.providerDetail}`
+          const providerDetail = handledError?.providerDetail
+            ? `: ${handledError.providerDetail}`
             : "";
-          const retryDetail = error?.retryAfterMs
-            ? ` (retry after ~${Math.ceil(error.retryAfterMs / 1_000)}s)`
+          const retryDetail = handledError?.retryAfterMs
+            ? ` (retry after ~${Math.ceil(handledError.retryAfterMs / 1_000)}s)`
             : "";
           logger.warn(
             `[Titan] ${name} failed${status ? ` with status ${status}` : ""}${retryDetail}${providerDetail}; trying the next configured provider`,

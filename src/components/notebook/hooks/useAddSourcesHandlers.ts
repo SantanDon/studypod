@@ -22,7 +22,7 @@ export function useAddSourcesHandlers(
   const [dragActive, setDragActive] = useState(false);
   const [pendingFileNames, setPendingFileNames] = useState<string[]>([]);
 
-  const { sources, addSourceAsync, updateSource } = useSources(notebookId);
+  const { sources, addSourceAsync, updateSourceAsync } = useSources(notebookId);
   const { uploadFile } = useFileUpload();
   const { processDocumentAsync } = useDocumentProcessing();
   const { generateNotebookContentAsync } = useNotebookGeneration();
@@ -111,7 +111,7 @@ export function useAddSourcesHandlers(
         try {
           const fileType = detectFileType(file);
 
-          updateSource({
+          await updateSourceAsync({
             sourceId,
             updates: { processing_status: "uploading" },
           });
@@ -129,7 +129,7 @@ export function useAddSourcesHandlers(
 
           const { filePath, content } = uploadResult;
 
-          updateSource({
+          await updateSourceAsync({
             sourceId,
             updates: {
               file_path: filePath,
@@ -146,7 +146,7 @@ export function useAddSourcesHandlers(
               console.info(`[SourcePipeline] Using EPUB title: "${epubTitle}"`);
               updateNotebook({ id: notebookId, updates: { title: epubTitle } });
               // Also update the source title to the book title
-              updateSource({ sourceId, updates: { title: epubTitle } });
+              await updateSourceAsync({ sourceId, updates: { title: epubTitle } });
             }
           }
 
@@ -161,7 +161,14 @@ export function useAddSourcesHandlers(
           return { filePath, sourceType: fileType };
         } catch (error) {
           console.error("File processing failed for:", file.name, error);
-          updateSource({ sourceId, updates: { processing_status: "failed" } });
+          try {
+            await updateSourceAsync({
+              sourceId,
+              updates: { processing_status: "failed" },
+            });
+          } catch (statusError) {
+            console.warn("Could not persist failed source status:", statusError);
+          }
           throw error;
         }
       };
@@ -214,11 +221,11 @@ export function useAddSourcesHandlers(
         onOpenChange(false);
 
         toast({
-          title: creationFailures > 0 ? "Some files added" : "Files added",
+          title: creationFailures > 0 ? "Some files queued" : "Files queued",
           description:
             creationFailures > 0
               ? `${createdSources.length} added; ${creationFailures} could not be created. You can retry the failed files.`
-              : `${createdSources.length} file${createdSources.length > 1 ? "s" : ""} added and processing started`,
+              : `${createdSources.length} file${createdSources.length > 1 ? "s" : ""} added. Chat unlocks as soon as text extraction finishes; indexing can continue in the background.`,
           variant: creationFailures > 0 ? "destructive" : "default",
         });
 
@@ -282,7 +289,7 @@ export function useAddSourcesHandlers(
       sources,
       toast,
       addSourceAsync,
-      updateSource,
+      updateSourceAsync,
       uploadFile,
       processDocumentAsync,
       generateNotebookContentAsync,

@@ -249,7 +249,9 @@ export const useFileUpload = () => {
         }
       }
 
-      // Store file content in localStorage with chunks
+      // Guest notebooks are local-first, so keep their extracted file payload
+      // in browser storage. Signed-in notebooks use the cloud source record as
+      // the source of truth and must not duplicate large documents in localStorage.
       const fileData = {
         path: filePath,
         content: content,
@@ -260,7 +262,9 @@ export const useFileUpload = () => {
         name: file.name,
       };
 
-      localStorage.setItem(`file_${filePath}`, JSON.stringify(fileData));
+      if (!session?.access_token) {
+        localStorage.setItem(`file_${filePath}`, JSON.stringify(fileData));
+      }
 
       // Update the source with content, chunks, and validation results immediately
       console.log(
@@ -270,6 +274,7 @@ export const useFileUpload = () => {
       const payload = {
         content: content,
         file_path: filePath,
+        processing_status: "processing" as const,
         metadata: {
           ...metadata,
           chunks: chunks,
@@ -284,10 +289,14 @@ export const useFileUpload = () => {
           console.log(`✅ Source updated in cloud: success`);
         } else {
           const updateResult = localStorageService.updateSource(sourceId, payload);
-          console.log(`✅ Source updated locally:`, updateResult ? "success" : "failed");
+          if (!updateResult) {
+            throw new Error("Extracted text could not be saved to this notebook. Please retry the upload.");
+          }
+          console.log(`✅ Source updated locally: success`);
         }
       } catch (err) {
-        console.error("Failed to update source post-upload", err);
+        console.error("Failed to persist extracted source text", err);
+        throw new Error("Extracted text could not be saved to your notebook. Please retry the upload.");
       }
 
       console.log("✅ File uploaded successfully with content:", {

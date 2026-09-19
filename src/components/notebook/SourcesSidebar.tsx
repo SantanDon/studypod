@@ -30,6 +30,7 @@ import { useDocuments } from "@/hooks/useDocuments";
 import { useToast } from "@/hooks/use-toast";
 import {
   getSourceProcessingStatus,
+  hasUsableSourceContent,
   parseSourceProcessingMetadata,
   type SourceProcessingError,
 } from "@/lib/sources/sourceProcessing";
@@ -266,9 +267,11 @@ const SourcesSidebar = ({
     }
 
     if (status === "extracting" || status === "processing" || status === "indexing" || status === "pending" || status === "uploading") {
+      const chatReady = hasUsableSourceContent(source)
+        && !(source.type === "youtube" && metadata.transcriptStatus === "metadata_only");
       return (
         <span className="text-[10px] font-medium rounded-full border border-blue-300 bg-blue-50 px-2 py-0.5 text-blue-700 dark:border-blue-900/60 dark:bg-blue-950/40 dark:text-blue-300">
-          Processing
+          {chatReady ? "Chat ready · indexing" : "Processing"}
         </span>
       );
     }

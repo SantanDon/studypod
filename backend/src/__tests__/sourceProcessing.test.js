@@ -32,6 +32,21 @@ describe('backend source processing contract', () => {
     });
   });
 
+  it('keeps extracted text chat-ready while indexing is still in progress', () => {
+    const source = {
+      id: 'source-processing',
+      type: 'pdf',
+      content: 'The text is persisted even though semantic indexing is unfinished.',
+      processing_status: 'processing',
+    };
+
+    expect(isSourceUsableForGroundedChat(source)).toBe(true);
+    expect(getSourceTrust(source)).toMatchObject({
+      status: 'processing',
+      usableForGroundedChat: true,
+    });
+  });
+
   it('turns oversized sources into stable keyword-only grounded sources', () => {
     expect(shouldSkipSemanticIndexing(757_010, 250_000)).toBe(true);
     const metadata = buildKeywordOnlySourceMetadata({ fileName: 'plain-english.txt' }, 757_010);

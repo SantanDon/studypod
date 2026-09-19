@@ -2,12 +2,13 @@ import express from "express";
 import multer from "multer";
 import mammoth from "mammoth";
 import { authenticateToken, requireScope } from "../middleware/auth.js";
+import { singleFileUploadLimits } from "../middleware/uploadSecurity.js";
 import { logger } from "../utils/logger.js";
 
 const router = express.Router();
 const upload = multer({
   storage: multer.memoryStorage(),
-  limits: { fileSize: 50 * 1024 * 1024 },
+  limits: singleFileUploadLimits(50 * 1024 * 1024),
 });
 
 // Middleware to protect all routes

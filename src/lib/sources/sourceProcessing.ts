@@ -88,7 +88,17 @@ export function isSourceUsableForGroundedWork(source: ProcessableSourceLike): bo
   return readyStatus && hasUsableSourceContent(source) && !isMetadataOnlyYoutube;
 }
 
-export const isSourceUsableForGroundedChat = isSourceUsableForGroundedWork;
+export function isSourceUsableForGroundedChat(source: ProcessableSourceLike): boolean {
+  const status = getSourceProcessingStatus(source);
+  const metadata = parseSourceProcessingMetadata(source.metadata);
+  const isMetadataOnlyYoutube = source.type === 'youtube' && metadata.transcriptStatus === 'metadata_only';
+  const terminalFailure = status === 'failed' || status === 'cancelled';
+
+  // Chat can safely use reliable extracted text before semantic indexing has
+  // finished. Keep richer study-generation workflows on the stricter
+  // isSourceUsableForGroundedWork contract above.
+  return !terminalFailure && hasUsableSourceContent(source) && !isMetadataOnlyYoutube;
+}
 
 export function shouldSkipClientSemanticIndexing(
   contentLength: number,

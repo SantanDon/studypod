@@ -3,16 +3,17 @@ import multer from "multer";
 import { AppError } from "../middleware/errorHandler.js";
 import { logger } from "../utils/logger.js";
 import { authenticateToken, requireScope } from "../middleware/auth.js";
+import { singleFileUploadLimits } from "../middleware/uploadSecurity.js";
 import geminiPool from "../services/geminiPool.js";
 
 const router = express.Router();
 const storage = multer.memoryStorage();
 const upload = multer({
   storage,
-  limits: { fileSize: 50 * 1024 * 1024 },
+  limits: singleFileUploadLimits(50 * 1024 * 1024),
   fileFilter: (_req, file, cb) => {
     if (file.mimetype === "application/pdf") cb(null, true);
-    else cb(new Error("Only PDF files are allowed"));
+    else cb(new AppError(415, "UNSUPPORTED_FILE_TYPE", "Only PDF files are allowed"));
   },
 });
 

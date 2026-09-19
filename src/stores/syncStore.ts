@@ -44,11 +44,11 @@ export const useSyncStore = create<SyncState>()(
       // Initial state
       isOnline: typeof navigator !== 'undefined' ? navigator.onLine : true,
       isSyncing: false,
-      lastSyncTime: null,
+      lastSyncTime: null as number | null,
       pendingOperations: 0,
       failedOperations: 0,
-      conflicts: [],
-      error: null,
+      conflicts: [] as ConflictInfo[],
+      error: null as string | null,
 
       // Actions
       setOnline: (online) => set({ isOnline: online }),
@@ -75,11 +75,11 @@ export const useSyncStore = create<SyncState>()(
       
       reset: () => set({
         isSyncing: false,
-        lastSyncTime: null,
+        lastSyncTime: null as number | null,
         pendingOperations: 0,
         failedOperations: 0,
-        conflicts: [],
-        error: null,
+        conflicts: [] as ConflictInfo[],
+        error: null as string | null,
       }),
     }),
     {

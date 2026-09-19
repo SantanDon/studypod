@@ -266,6 +266,7 @@ export const useSources = (notebookId?: string) => {
     addSourceAsync: addSource.mutateAsync,
     isAdding: addSource.isPending,
     updateSource: updateSource.mutate,
+    updateSourceAsync: updateSource.mutateAsync,
     isUpdating: updateSource.isPending,
   };
 };
