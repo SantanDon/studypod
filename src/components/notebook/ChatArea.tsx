@@ -1,4 +1,4 @@
-import { lazy, Suspense, useState, useEffect, useRef } from 'react';
+import { lazy, Suspense, useState, useEffect, useRef, useCallback } from 'react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 // import { Send, Upload, FileText, Loader2, RefreshCw } from 'lucide-react'; // Removed Lucide imports
@@ -20,6 +20,13 @@ import {
   isSourceUsableForGroundedChat,
   parseSourceProcessingMetadata,
 } from '@/lib/sources/sourceProcessing';
+import {
+  AUDIO_LISTENING_QUESTION_EVENT,
+  buildAudioListeningQuestionMessage,
+  clearQueuedAudioListeningQuestion,
+  consumeQueuedAudioListeningQuestion,
+  type AudioListeningQuestionRequest,
+} from '@/lib/audio/listeningQuestion';
 const AddSourcesDialog = lazy(() => import('./AddSourcesDialog'));
 const ResearchFurtherDialog = lazy(() => import('./ResearchFurtherDialog'));
 
@@ -174,7 +181,7 @@ const ChatArea = ({
       }
     }
   }, [pendingUserMessage, messages.length, showAiLoading]);
-  const handleSendMessage = async (messageText?: string) => {
+  const handleSendMessage = useCallback(async (messageText?: string, sourceIdsOverride?: string[]) => {
     const textToSend = messageText || message.trim();
     if (textToSend && notebookId) {
       // Check guest message limit
@@ -200,7 +207,7 @@ const ChatArea = ({
           role: 'user',
           content: textToSend,
           responseStyle,
-          sourceIds: chatScope === 'active' && activeSourceId ? [activeSourceId] : undefined,
+          sourceIds: sourceIdsOverride ?? (chatScope === 'active' && activeSourceId ? [activeSourceId] : undefined),
         });
 
         // Track guest usage
@@ -223,7 +230,55 @@ const ChatArea = ({
         setShowAiLoading(false);
       }
     }
-  };
+  }, [
+    activeSourceId,
+    canSendMessage,
+    chatScope,
+    incrementUsage,
+    isGuest,
+    message,
+    notebookId,
+    responseStyle,
+    sendMessageAsync,
+    showAuthPrompt,
+  ]);
+
+  const handleAudioListeningQuestion = useCallback((request: AudioListeningQuestionRequest) => {
+    if (!notebookId || request.notebookId !== notebookId) return;
+    const requestedSource = sources?.find((source) => source.id === request.sourceId);
+    const questionMessage = buildAudioListeningQuestionMessage(request);
+    clearQueuedAudioListeningQuestion(notebookId);
+    setChatMode('study');
+    setChatScope('all');
+
+    if (!requestedSource || !isSourceUsableForGroundedChat(requestedSource)) {
+      setMessage(questionMessage);
+      toast({
+        title: 'Audio question is ready',
+        description: 'The source is still processing, so StudyPod kept your question as a draft instead of sending it ungrounded.',
+      });
+      return;
+    }
+
+    void handleSendMessage(questionMessage, [request.sourceId]);
+  }, [handleSendMessage, notebookId, sources, toast]);
+
+  useEffect(() => {
+    if (!notebookId) return;
+
+    const queued = consumeQueuedAudioListeningQuestion(notebookId);
+    if (queued) handleAudioListeningQuestion(queued);
+
+    const onAudioQuestion = (event: Event) => {
+      const request = (event as CustomEvent<AudioListeningQuestionRequest>).detail;
+      if (!request || request.notebookId !== notebookId) return;
+      handleAudioListeningQuestion(request);
+    };
+
+    window.addEventListener(AUDIO_LISTENING_QUESTION_EVENT, onAudioQuestion);
+    return () => window.removeEventListener(AUDIO_LISTENING_QUESTION_EVENT, onAudioQuestion);
+  }, [handleAudioListeningQuestion, notebookId]);
+
   const handleRefreshChat = () => {
     if (notebookId) {
       console.log('Refresh button clicked for notebook:', notebookId);

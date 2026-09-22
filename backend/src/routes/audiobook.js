@@ -20,7 +20,7 @@ import {
   buildNarrationSegments,
   createNarrationSignature,
   extractPronunciationCandidates,
-  normalizePronunciationEntries,
+  resolvePronunciationEntries,
   resolveLiteraryPreset,
 } from "../services/audiobookDirectionService.js";
 import {
@@ -39,8 +39,11 @@ import {
 } from "../services/audiobookBookService.js";
 import { prepareNarrationText } from "../services/audiobookNarrationTextService.js";
 import {
+  canonicalAudiobookWavArgs,
   chapterCacheKeyFor,
   createBookContentSignature,
+  finalAudiobookEncodingArgs,
+  isCanonicalAudiobookWav,
   isUsableAudioFile,
   probeAudioDurationSeconds,
 } from "../services/audiobookMediaService.js";
@@ -303,6 +306,7 @@ const NARRATION_PROFILES = {
 
 const DEFAULT_NARRATION_STYLE = "auto";
 const AUDIOBOOK_PIPELINE_VERSION = "v2";
+const AUDIOBOOK_EXPORT_VERSION = "e2";
 const CHATTERBOX_BASE_URL = String(
   process.env.AUDIOBOOK_CHATTERBOX_URL || "",
 ).replace(/\/+$/, "");
@@ -836,108 +840,82 @@ const encodeFullAudiobook = async ({
 }) => {
   if (chapterPaths.length === 0)
     throw new Error("No chapter audio available for encoding");
-  const listPath = path.join(TEMP_DIR, `audiobook_concat_${Date.now()}.txt`);
-  const silencePath = path.join(
-    TEMP_DIR,
-    `audiobook_silence_${Date.now()}.wav`,
-  );
-  const firstBuffer = fs.readFileSync(chapterPaths[0]);
-  const sampleRate = firstBuffer.readUInt32LE(24);
-  const channels = firstBuffer.readUInt16LE(22);
-  const bitsPerSample = firstBuffer.readUInt16LE(34);
-  const bytesPerSecond = sampleRate * channels * (bitsPerSample / 8);
-  const silenceBytes = Math.max(
-    0,
-    Math.round((bytesPerSecond * chapterPauseMs) / 1000),
-  );
-  fs.writeFileSync(
-    silencePath,
-    Buffer.concat([
-      buildWavHeader({
-        dataSize: silenceBytes,
-        sampleRate,
-        channels,
-        bitsPerSample,
-      }),
-      Buffer.alloc(silenceBytes),
-    ]),
-  );
-
-  const entries = [];
-  chapterPaths.forEach((chapterPath, index) => {
-    entries.push(`file '${escapeFfmpegConcatPath(path.resolve(chapterPath))}'`);
-    if (chapterPauseMs > 0 && index < chapterPaths.length - 1) {
-      entries.push(
-        `file '${escapeFfmpegConcatPath(path.resolve(silencePath))}'`,
-      );
-    }
-  });
-  fs.writeFileSync(listPath, `${entries.join("\n")}\n`, "utf8");
+  const suffix = `${Date.now()}_${process.pid}`;
+  const listPath = path.join(TEMP_DIR, `audiobook_concat_${suffix}.txt`);
+  const silencePath = path.join(TEMP_DIR, `audiobook_silence_${suffix}.wav`);
+  const temporaryNormalizedPaths = [];
+  const normalizedChapterPaths = [];
 
   try {
+    for (let index = 0; index < chapterPaths.length; index += 1) {
+      const chapterPath = chapterPaths[index];
+      if (isCanonicalAudiobookWav(chapterPath)) {
+        normalizedChapterPaths.push(chapterPath);
+        continue;
+      }
+
+      const normalizedPath = path.join(
+        TEMP_DIR,
+        `audiobook_chapter_${suffix}_${index}.wav`,
+      );
+      await execFileAsync(
+        "ffmpeg",
+        canonicalAudiobookWavArgs({
+          inputPath: chapterPath,
+          outputPath: normalizedPath,
+        }),
+        { windowsHide: true, maxBuffer: 4 * 1024 * 1024 },
+      );
+      temporaryNormalizedPaths.push(normalizedPath);
+      normalizedChapterPaths.push(normalizedPath);
+    }
+
+    const sampleRate = 24_000;
+    const channels = 1;
+    const bitsPerSample = 16;
+    const bytesPerSecond = sampleRate * channels * (bitsPerSample / 8);
+    const silenceBytes = Math.max(
+      0,
+      Math.round((bytesPerSecond * chapterPauseMs) / 1000),
+    );
+    fs.writeFileSync(
+      silencePath,
+      Buffer.concat([
+        buildWavHeader({
+          dataSize: silenceBytes,
+          sampleRate,
+          channels,
+          bitsPerSample,
+        }),
+        Buffer.alloc(silenceBytes),
+      ]),
+    );
+
+    const entries = [];
+    normalizedChapterPaths.forEach((chapterPath, index) => {
+      entries.push(
+        `file '${escapeFfmpegConcatPath(path.resolve(chapterPath))}'`,
+      );
+      if (chapterPauseMs > 0 && index < normalizedChapterPaths.length - 1) {
+        entries.push(
+          `file '${escapeFfmpegConcatPath(path.resolve(silencePath))}'`,
+        );
+      }
+    });
+    fs.writeFileSync(listPath, `${entries.join("\n")}\n`, "utf8");
+
     const normalizedFormat = ["mp3", "m4b", "wav"].includes(format)
       ? format
       : "mp3";
-    if (normalizedFormat === "wav") {
-      await execFileAsync(
-        "ffmpeg",
-        [
-          "-y",
-          "-f",
-          "concat",
-          "-safe",
-          "0",
-          "-i",
-          listPath,
-          "-c:a",
-          "pcm_s16le",
-          outputPath,
-        ],
-        { windowsHide: true },
-      );
-    } else if (normalizedFormat === "m4b") {
-      await execFileAsync(
-        "ffmpeg",
-        [
-          "-y",
-          "-f",
-          "concat",
-          "-safe",
-          "0",
-          "-i",
-          listPath,
-          "-c:a",
-          "aac",
-          "-b:a",
-          "64k",
-          "-movflags",
-          "+faststart",
-          outputPath,
-        ],
-        { windowsHide: true },
-      );
-    } else {
-      await execFileAsync(
-        "ffmpeg",
-        [
-          "-y",
-          "-f",
-          "concat",
-          "-safe",
-          "0",
-          "-i",
-          listPath,
-          "-c:a",
-          "libmp3lame",
-          "-b:a",
-          "64k",
-          "-write_xing",
-          "1",
-          outputPath,
-        ],
-        { windowsHide: true },
-      );
-    }
+    await execFileAsync(
+      "ffmpeg",
+      finalAudiobookEncodingArgs({
+        listPath,
+        outputPath,
+        format: normalizedFormat,
+      }),
+      { windowsHide: true },
+    );
     return normalizedFormat;
   } finally {
     try {
@@ -946,6 +924,11 @@ const encodeFullAudiobook = async ({
     try {
       fs.unlinkSync(silencePath);
     } catch (_) {}
+    for (const normalizedPath of temporaryNormalizedPaths) {
+      try {
+        fs.unlinkSync(normalizedPath);
+      } catch (_) {}
+    }
   }
 };
 
@@ -1085,7 +1068,22 @@ const generateChunkedAudio = async ({
 
   if (segments.length === 1) {
     if (!fs.existsSync(cachePath) || fs.statSync(cachePath).size < 44) {
-      await generateSegment(segments[0], cachePath);
+      const rawPath = cachePath.replace(".wav", "_raw.wav");
+      try {
+        await generateSegment(segments[0], rawPath);
+        await execFileAsync(
+          "ffmpeg",
+          canonicalAudiobookWavArgs({
+            inputPath: rawPath,
+            outputPath: cachePath,
+          }),
+          { windowsHide: true, maxBuffer: 4 * 1024 * 1024 },
+        );
+      } finally {
+        try {
+          fs.unlinkSync(rawPath);
+        } catch (_) {}
+      }
     }
     await onProgress?.({
       completedChunks: 1,
@@ -1674,9 +1672,11 @@ router.get(
       const analysis = chapter.manifest?.narrationDirection || null;
       const style = resolveLiteraryPreset(requestedStyle, analysis);
       const voice = resolveVoiceForProvider(requestedVoice, provider, style, 0);
+      const pronunciations = resolvePronunciationEntries(chapter.text, []);
       const narrationSignature = createNarrationSignature({
         requestedPreset: requestedStyle,
         analysis,
+        pronunciations,
         voice,
         provider,
       });
@@ -1704,6 +1704,7 @@ router.get(
           provider,
           style,
           analysis,
+          pronunciations,
         });
         logger.info(`  ✅ Chapter audio saved: ${cacheKey}`);
       }
@@ -1753,7 +1754,8 @@ router.post(
       const analysis = chapter.manifest?.narrationDirection || null;
       const style = resolveLiteraryPreset(requestedStyle, analysis);
       const voice = resolveVoiceForProvider(requestedVoice, provider, style, 0);
-      const pronunciations = normalizePronunciationEntries(
+      const pronunciations = resolvePronunciationEntries(
+        chapter.text,
         req.body.pronunciations,
       );
       const narrationSignature = createNarrationSignature({
@@ -1819,6 +1821,7 @@ export const runFullAudiobookJob = async ({
   style,
   analysis,
   pronunciations,
+  userPronunciations = [],
   narrationSignature,
   contentSignature,
   outputFormat,
@@ -1858,13 +1861,24 @@ export const runFullAudiobookJob = async ({
         i,
       );
       const chapter = await getChapterText(fileName, cid, ownerId);
+      const chapterPronunciations = resolvePronunciationEntries(
+        chapter.text,
+        userPronunciations,
+      );
+      const chapterNarrationSignature = createNarrationSignature({
+        requestedPreset: requestedStyle,
+        analysis,
+        pronunciations: chapterPronunciations,
+        voice,
+        provider: normalizedProvider,
+      });
       const cacheKey = chapterCacheKeyFor({
         fileName,
         pipelineVersion: AUDIOBOOK_PIPELINE_VERSION,
         chapterId: cid,
         voice,
         provider: normalizedProvider,
-        narrationSignature,
+        narrationSignature: chapterNarrationSignature,
         contentHash: chapter.chapter?.contentHash,
       });
       const cachePath = path.join(AUDIO_CACHE_DIR, cacheKey);
@@ -1936,7 +1950,7 @@ export const runFullAudiobookJob = async ({
             provider: normalizedProvider,
             style,
             analysis,
-            pronunciations,
+            pronunciations: chapterPronunciations,
             onProgress: async ({
               completedChunks,
               totalChunks,
@@ -2022,7 +2036,7 @@ export const runFullAudiobookJob = async ({
       throw new Error("No chapters had extractable text");
     }
 
-    const finalFileName = `${safeName}_${AUDIOBOOK_PIPELINE_VERSION}_full_${safeCachePart(renderId)}.${outputFormat}`;
+    const finalFileName = `${safeName}_${AUDIOBOOK_PIPELINE_VERSION}_${AUDIOBOOK_EXPORT_VERSION}_full_${safeCachePart(renderId)}.${outputFormat}`;
     const finalPath = path.join(AUDIO_CACHE_DIR, finalFileName);
     const finalAlreadyExists = isUsableAudioFile(finalPath);
 
@@ -2348,8 +2362,16 @@ router.post(
       const profile = getNarrationProfile(style);
       const normalizedProvider = normalizeTtsProvider(provider, requestedVoice);
       await assertProviderAvailable(normalizedProvider);
-      const pronunciations = normalizePronunciationEntries(
-        requestedPronunciations,
+      const selectedNarrationText = manifest.chapters
+        .filter((chapter) => chapterIds.includes(String(chapter.id)))
+        .map((chapter) => chapter.narrationText || chapter.text || "")
+        .join("\n\n");
+      const userPronunciations = Array.isArray(requestedPronunciations)
+        ? requestedPronunciations
+        : [];
+      const pronunciations = resolvePronunciationEntries(
+        selectedNarrationText,
+        userPronunciations,
       );
       const resolvedVoice = resolveVoiceForProvider(
         requestedVoice,
@@ -2375,6 +2397,7 @@ router.post(
       const renderId = createAudiobookRenderId({
         fileName,
         pipelineVersion: AUDIOBOOK_PIPELINE_VERSION,
+        exportVersion: AUDIOBOOK_EXPORT_VERSION,
         chapterIds,
         provider: normalizedProvider,
         voice: renderVoiceSignature,
@@ -2549,6 +2572,7 @@ router.post(
         style,
         analysis,
         pronunciations,
+        userPronunciations,
         narrationSignature,
         contentSignature,
         outputFormat,

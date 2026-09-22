@@ -40,6 +40,7 @@ export type ProviderDetail = {
 type PronunciationCandidate = {
   term: string;
   occurrences?: number;
+  suggestedPronunciation?: string;
 };
 
 interface AudiobookDirectionPanelProps {
@@ -288,10 +289,18 @@ export default function AudiobookDirectionPanel({
                   <button
                     key={candidate.term}
                     type="button"
-                    onClick={() => setNewTerm(candidate.term)}
+                    onClick={() => {
+                      setNewTerm(candidate.term);
+                      if (candidate.suggestedPronunciation) {
+                        setNewPronunciation(candidate.suggestedPronunciation);
+                      }
+                    }}
                     className="rounded-full border border-border bg-background px-2.5 py-1 text-[10px] text-foreground hover:border-primary/40 hover:text-primary"
                   >
                     {candidate.term}
+                    {candidate.suggestedPronunciation
+                      ? ` · ${candidate.suggestedPronunciation}`
+                      : ''}
                   </button>
                 ))}
               </div>

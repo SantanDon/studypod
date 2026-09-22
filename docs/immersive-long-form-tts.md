@@ -82,6 +82,10 @@ The Audiobook Studio voice-engine selector enables **Chatterbox expressive** onl
 
 ## Synchronization roadmap
 
+StudyPod now has a deterministic listening-context handoff from audiobook playback into grounded notebook chat. **Ask about this point** pauses playback and carries the audiobook source ID, chapter title, current timestamp, page range, and listener question into chat. Until sentence-level timing exists, the system deliberately grounds to chapter/page context instead of claiming that a playback timestamp identifies an exact sentence. On mobile, the request is queued while the interface switches from Studio back to Chat.
+
+A probabilistic reranker such as Jev should only be evaluated after sentence candidates exist, and only in shadow mode for genuinely ambiguous bindings. Chapter IDs, page ranges, timestamps, source ownership, playback state, and fallback grounding remain deterministic.
+
 The next quality layer should follow a Calliope-style approach:
 
 1. Preserve exact text-to-audio timing returned by the TTS engine when available.

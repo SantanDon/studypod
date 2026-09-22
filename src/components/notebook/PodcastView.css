@@ -1,7 +1,7 @@
 /* Podcast Player - Luxurious Office Theme */
 
 .podcast-card {
-  background: linear-gradient(145deg, #1a1a2e 0%, #16213e 50%, #0f0f23 100%);
+  background: #111827;
   border: 1px solid rgba(255, 255, 255, 0.08);
   border-radius: 16px;
   padding: 20px;
@@ -33,12 +33,12 @@
 .podcast-icon {
   width: 48px;
   height: 48px;
-  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  background: hsl(var(--primary));
   border-radius: 12px;
   display: flex;
   align-items: center;
   justify-content: center;
-  box-shadow: 0 4px 12px rgba(102, 126, 234, 0.3);
+  box-shadow: 0 4px 12px hsl(var(--primary) / 0.3);
 }
 
 .podcast-icon svg {
@@ -94,7 +94,7 @@
 .podcast-generate-btn {
   width: 100%;
   padding: 14px 20px;
-  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  background: hsl(var(--primary));
   border: none;
   border-radius: 10px;
   color: white;
@@ -106,12 +106,12 @@
   justify-content: center;
   gap: 10px;
   transition: all 0.2s ease;
-  box-shadow: 0 4px 14px rgba(102, 126, 234, 0.35);
+  box-shadow: 0 4px 14px hsl(var(--primary) / 0.35);
 }
 
 .podcast-generate-btn:hover:not(:disabled) {
   transform: translateY(-1px);
-  box-shadow: 0 6px 20px rgba(102, 126, 234, 0.45);
+  box-shadow: 0 6px 20px hsl(var(--primary) / 0.45);
 }
 
 .podcast-generate-btn:active:not(:disabled) {
@@ -180,7 +180,7 @@
 
 .wave-bar {
   width: 6px;
-  background: linear-gradient(180deg, #667eea 0%, #764ba2 100%);
+  background: hsl(var(--primary));
   border-radius: 3px;
   animation: wave 1s ease-in-out infinite;
 }
@@ -214,7 +214,7 @@
 
 .generating-progress-fill {
   height: 100%;
-  background: linear-gradient(90deg, #667eea, #764ba2);
+  background: hsl(var(--primary));
   border-radius: 2px;
   transition: width 0.3s ease;
 }
@@ -239,7 +239,7 @@
 .player-artwork {
   width: 56px;
   height: 56px;
-  background: linear-gradient(135deg, #1e3a5f 0%, #0d1b2a 100%);
+  background: #0f172a;
   border-radius: 12px;
   display: flex;
   align-items: center;
@@ -250,7 +250,7 @@
 .player-artwork svg {
   width: 24px;
   height: 24px;
-  color: #667eea;
+  color: hsl(var(--primary));
 }
 
 .player-info {
@@ -290,7 +290,7 @@
 
 .player-progress-fill {
   height: 100%;
-  background: linear-gradient(90deg, #667eea, #764ba2);
+  background: hsl(var(--primary));
   border-radius: 3px;
   transition: width 0.1s linear;
 }
@@ -371,7 +371,7 @@
 .play-btn {
   width: 56px;
   height: 56px;
-  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  background: hsl(var(--primary));
   border: none;
   border-radius: 50%;
   color: white;
@@ -379,13 +379,13 @@
   display: flex;
   align-items: center;
   justify-content: center;
-  box-shadow: 0 4px 20px rgba(102, 126, 234, 0.4);
+  box-shadow: 0 4px 20px hsl(var(--primary) / 0.4);
   transition: all 0.2s ease;
 }
 
 .play-btn:hover:not(:disabled) {
   transform: scale(1.05);
-  box-shadow: 0 6px 24px rgba(102, 126, 234, 0.5);
+  box-shadow: 0 6px 24px hsl(var(--primary) / 0.5);
 }
 
 .play-btn:active:not(:disabled) {
@@ -584,7 +584,7 @@
 
 :root:not(.dark) .podcast-card,
 .light .podcast-card {
-  background: linear-gradient(145deg, #ffffff 0%, #f8fafc 50%, #f1f5f9 100%);
+  background: #ffffff;
   border-color: rgba(0, 0, 0, 0.08);
   box-shadow: 
     0 4px 24px rgba(0, 0, 0, 0.08),
@@ -664,8 +664,8 @@
 
 :root:not(.dark) .generating-hint,
 .light .generating-hint {
-  background: rgba(102, 126, 234, 0.08);
-  border-color: rgba(102, 126, 234, 0.15);
+  background: hsl(var(--primary) / 0.08);
+  border-color: hsl(var(--primary) / 0.15);
   color: #4f46e5;
 }
 
@@ -721,7 +721,7 @@
 /* Light mode player state */
 :root:not(.dark) .player-artwork,
 .light .player-artwork {
-  background: linear-gradient(135deg, #e0e7ff 0%, #c7d2fe 100%);
+  background: #e2e8f0;
   border-color: rgba(0, 0, 0, 0.08);
 }
 
@@ -783,7 +783,7 @@
 
 :root:not(.dark) .transcript-line.current,
 .light .transcript-line.current {
-  background: rgba(102, 126, 234, 0.1);
+  background: hsl(var(--primary) / 0.1);
 }
 
 :root:not(.dark) .transcript-line:hover,
@@ -801,8 +801,8 @@
   padding: 24px;
   display: flex;
   flex-direction: column;
-  background: rgba(15, 23, 42, 0.4);
-  backdrop-filter: blur(8px);
+  background: #0f172a;
+  backdrop-filter: none;
   border: 1px solid rgba(255, 255, 255, 0.1);
   border-radius: 12px;
   margin-top: 10px;
@@ -833,7 +833,7 @@
 }
 
 .audio-lab-header h4 svg {
-  color: #818cf8;
+  color: hsl(var(--primary));
 }
 
 .close-lab {
@@ -887,8 +887,8 @@
 }
 
 .lab-input:focus {
-  border-color: #818cf8 !important;
-  box-shadow: 0 0 0 2px rgba(129, 140, 248, 0.2) !important;
+  border-color: hsl(var(--primary)) !important;
+  box-shadow: 0 0 0 2px hsl(var(--primary) / 0.2) !important;
 }
 
 .lab-length-selector {
@@ -909,17 +909,17 @@
 .audio-lab-overlay .podcast-generate-btn {
   margin-top: 16px;
   height: 52px;
-  background: linear-gradient(135deg, #818cf8 0%, #6366f1 100%);
+  background: hsl(var(--primary));
   font-size: 15px;
   width: 100%;
 }
 
-/* Glassmorphism utility for the lab */
+/* Legacy class name retained for compatibility; surface is intentionally solid. */
 .glassmorphism {
-  background: rgba(15, 23, 42, 0.9);
-  backdrop-filter: blur(12px);
+  background: #0f172a;
+  backdrop-filter: none;
   border: 1px solid rgba(255, 255, 255, 0.1);
-  box-shadow: 0 8px 32px 0 rgba(0, 0, 0, 0.37);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.24);
 }
 
 :root:not(.dark) .footer-btn:hover,
@@ -956,7 +956,7 @@
 
 :root:not(.dark) .segment-dot.played,
 .light .segment-dot.played {
-  background: rgba(102, 126, 234, 0.4);
+  background: hsl(var(--primary) / 0.4);
 }
 
 :root:not(.dark) .current-text-preview,
@@ -971,8 +971,8 @@
 
 :root:not(.dark) .partial-audio-section,
 .light .partial-audio-section {
-  background: rgba(102, 126, 234, 0.06);
-  border-color: rgba(102, 126, 234, 0.15);
+  background: hsl(var(--primary) / 0.06);
+  border-color: hsl(var(--primary) / 0.15);
 }
 
 :root:not(.dark) .partial-audio-label,
@@ -989,8 +989,8 @@
 
 :root:not(.dark) .segment-btn:hover,
 .light .segment-btn:hover {
-  background: rgba(102, 126, 234, 0.15);
-  border-color: rgba(102, 126, 234, 0.3);
+  background: hsl(var(--primary) / 0.15);
+  border-color: hsl(var(--primary) / 0.3);
 }
 
 :root:not(.dark) .volume-slider,
@@ -1085,9 +1085,9 @@
   text-align: center;
   margin-top: 16px;
   padding: 10px 16px;
-  background: rgba(102, 126, 234, 0.1);
+  background: hsl(var(--primary) / 0.1);
   border-radius: 8px;
-  border: 1px solid rgba(102, 126, 234, 0.2);
+  border: 1px solid hsl(var(--primary) / 0.2);
 }
 
 /* ============================================
@@ -1114,7 +1114,7 @@
 
 .mini-wave {
   width: 3px;
-  background: linear-gradient(180deg, #667eea 0%, #764ba2 100%);
+  background: hsl(var(--primary));
   border-radius: 2px;
   animation: miniWave 0.8s ease-in-out infinite;
 }
@@ -1191,7 +1191,7 @@
 
 .minimized-progress-fill {
   height: 100%;
-  background: linear-gradient(90deg, #667eea, #764ba2);
+  background: hsl(var(--primary));
   border-radius: 2px;
   transition: width 0.3s ease;
 }
@@ -1238,10 +1238,10 @@
   width: 100%;
   padding: 12px 16px;
   margin-top: 16px;
-  background: linear-gradient(135deg, rgba(102, 126, 234, 0.2) 0%, rgba(118, 75, 162, 0.2) 100%);
-  border: 1px solid rgba(102, 126, 234, 0.3);
+  background: hsl(var(--primary) / 0.2);
+  border: 1px solid hsl(var(--primary) / 0.3);
   border-radius: 10px;
-  color: #a5b4fc;
+  color: hsl(var(--primary-foreground));
   font-size: 13px;
   font-weight: 500;
   cursor: pointer;
@@ -1253,9 +1253,9 @@
 }
 
 .play-partial-btn:hover {
-  background: linear-gradient(135deg, rgba(102, 126, 234, 0.3) 0%, rgba(118, 75, 162, 0.3) 100%);
-  border-color: rgba(102, 126, 234, 0.5);
-  color: #c4b5fd;
+  background: hsl(var(--primary) / 0.3);
+  border-color: hsl(var(--primary) / 0.5);
+  color: hsl(var(--primary-foreground));
 }
 
 .play-partial-btn svg {
@@ -1264,20 +1264,20 @@
 }
 
 .minimized-btn.play {
-  background: rgba(102, 126, 234, 0.2);
-  border-color: rgba(102, 126, 234, 0.3);
-  color: #a5b4fc;
+  background: hsl(var(--primary) / 0.2);
+  border-color: hsl(var(--primary) / 0.3);
+  color: hsl(var(--primary-foreground));
 }
 
 .minimized-btn.play:hover {
-  background: rgba(102, 126, 234, 0.3);
-  color: #c4b5fd;
+  background: hsl(var(--primary) / 0.3);
+  color: hsl(var(--primary-foreground));
 }
 
 
 /* Loading state for generate button */
 .podcast-generate-btn.loading {
-  background: linear-gradient(135deg, #4a5568 0%, #2d3748 100%);
+  background: #334155;
   cursor: wait;
   box-shadow: 0 4px 14px rgba(74, 85, 104, 0.35);
 }
@@ -1292,8 +1292,8 @@
 .partial-audio-section {
   margin-top: 16px;
   padding: 14px;
-  background: rgba(102, 126, 234, 0.1);
-  border: 1px solid rgba(102, 126, 234, 0.2);
+  background: hsl(var(--primary) / 0.1);
+  border: 1px solid hsl(var(--primary) / 0.2);
   border-radius: 10px;
 }
 
@@ -1331,8 +1331,8 @@
 }
 
 .segment-btn:hover {
-  background: rgba(102, 126, 234, 0.3);
-  border-color: rgba(102, 126, 234, 0.5);
+  background: hsl(var(--primary) / 0.3);
+  border-color: hsl(var(--primary) / 0.5);
   transform: scale(1.05);
 }
 
@@ -1416,13 +1416,13 @@
 }
 
 .segment-dot.active {
-  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  background: hsl(var(--primary));
   transform: scale(1.3);
-  box-shadow: 0 0 8px rgba(102, 126, 234, 0.5);
+  box-shadow: 0 0 8px hsl(var(--primary) / 0.5);
 }
 
 .segment-dot.played {
-  background: rgba(102, 126, 234, 0.5);
+  background: hsl(var(--primary) / 0.5);
 }
 
 /* Current Text Preview */
@@ -1455,8 +1455,8 @@
 
 /* Transcript line current highlight */
 .transcript-line.current {
-  background: rgba(102, 126, 234, 0.15);
-  border-left: 3px solid #667eea;
+  background: hsl(var(--primary) / 0.15);
+  border-left: 3px solid hsl(var(--primary));
   padding-left: 10px;
   margin-left: -3px;
 }
@@ -1492,7 +1492,7 @@
 
 :root:not(.dark) .audio-lab-header h4 svg,
 .light .audio-lab-header h4 svg {
-  color: #6366f1;
+  color: hsl(var(--primary));
 }
 
 :root:not(.dark) .close-lab,
@@ -1523,8 +1523,8 @@
 
 :root:not(.dark) .lab-input:focus,
 .light .lab-input:focus {
-  border-color: #6366f1 !important;
-  box-shadow: 0 0 0 2px rgba(99, 102, 241, 0.2) !important;
+  border-color: hsl(var(--primary)) !important;
+  box-shadow: 0 0 0 2px hsl(var(--primary) / 0.2) !important;
 }
 
 :root:not(.dark) .lab-hint,
@@ -1536,7 +1536,7 @@
 .light .glassmorphism {
   background: rgba(255, 255, 255, 0.95);
   border-color: rgba(0, 0, 0, 0.1);
-  box-shadow: 0 8px 32px 0 rgba(0, 0, 0, 0.1);
+  box-shadow: 0 8px 20px rgba(0, 0, 0, 0.08);
 }
 
 /* Light mode Tabs styling inside Audio Lab */
@@ -1561,6 +1561,20 @@
 :root:not(.dark) .audio-lab-overlay [role="tab"][data-state="active"],
 .light .audio-lab-overlay [role="tab"][data-state="active"] {
   background-color: #ffffff !important;
-  color: #6366f1 !important;
+  color: hsl(var(--primary)) !important;
   box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1) !important;
+}
+
+
+@media (prefers-reduced-motion: reduce) {
+  .wave-bar,
+  .audio-lab-overlay,
+  .podcast-generate-btn,
+  .play-btn,
+  .player-progress-fill,
+  .generating-progress-fill {
+    animation: none !important;
+    transition: none !important;
+    transform: none !important;
+  }
 }

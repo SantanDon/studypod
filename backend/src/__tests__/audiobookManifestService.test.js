@@ -86,6 +86,9 @@ describe("audiobookManifestService", () => {
     expect(createAudiobookRenderId(config)).not.toBe(
       createAudiobookRenderId({ ...config, voice: "af_heart" }),
     );
+    expect(createAudiobookRenderId(config)).not.toBe(
+      createAudiobookRenderId({ ...config, exportVersion: "e2" }),
+    );
   });
 
   it("publishes only completed chapter media while generation is still running", () => {

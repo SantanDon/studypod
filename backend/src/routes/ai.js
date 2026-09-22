@@ -70,5 +70,23 @@ router.post('/generate', requireScope('chat:all'), async (req, res) => {
   }
 });
 
+router.get('/health', async (req, res) => {
+  try {
+    const { getAvailableProviders } = await import('../services/titanProvider.js');
+    const providers = getAvailableProviders();
+    // Sanitize: only expose configured/available status, never keys
+    const sanitized = Object.fromEntries(
+      Object.entries(providers).map(([name, info]) => [
+        name,
+        { configured: info.configured, available: info.available, model: info.model }
+      ])
+    );
+    const anyAvailable = Object.values(sanitized).some(p => p.configured && p.available);
+    res.json({ status: anyAvailable ? 'ok' : 'degraded', providers: sanitized });
+  } catch (error) {
+    res.status(500).json({ status: 'error', error: 'Health check failed' });
+  }
+});
+
 export { normalizeMessages };
 export default router;

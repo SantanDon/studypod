@@ -1,10 +1,14 @@
 
-import { lazy, Suspense } from 'react';
+import { lazy, Suspense, useEffect, useState } from 'react';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 // import { FileText, MessageCircle, NotebookPen } from 'lucide-react'; // Removed Lucide imports
 import SourcesSidebar from './SourcesSidebar';
 import ChatArea from './ChatArea';
 import { Citation } from '@/types/message';
+import {
+  AUDIO_LISTENING_QUESTION_EVENT,
+  type AudioListeningQuestionRequest,
+} from '@/lib/audio/listeningQuestion';
 
 const StudioSidebar = lazy(() => import('./StudioSidebar'));
 
@@ -45,8 +49,18 @@ const MobileNotebookTabs = ({
   activeSourceId,
   onActiveSourceChange,
 }: MobileNotebookTabsProps) => {
+  const [activeTab, setActiveTab] = useState('chat');
+
+  useEffect(() => {
+    const onAudioQuestion = (event: Event) => {
+      const request = (event as CustomEvent<AudioListeningQuestionRequest>).detail;
+      if (request?.notebookId === notebookId) setActiveTab('chat');
+    };
+    window.addEventListener(AUDIO_LISTENING_QUESTION_EVENT, onAudioQuestion);
+    return () => window.removeEventListener(AUDIO_LISTENING_QUESTION_EVENT, onAudioQuestion);
+  }, [notebookId]);
   return (
-    <Tabs defaultValue="chat" className="flex-1 flex flex-col overflow-hidden">
+    <Tabs value={activeTab} onValueChange={setActiveTab} className="flex-1 flex flex-col overflow-hidden">
       <TabsList className="grid w-full grid-cols-3 bg-gray-100 dark:bg-muted p-1 h-12 rounded-none border-b border-gray-200 dark:border-border">
         <TabsTrigger 
           value="sources" 

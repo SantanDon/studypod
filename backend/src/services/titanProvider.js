@@ -57,10 +57,12 @@ const TITANS = {
   },
   TOKENLLM7: {
     url: "https://api.llm7.io/v1/chat/completions",
-    key: process.env.TOKENLLM7_KEY,
-    model: process.env.TOKENLLM7_MODEL || "codestral-latest",
+    key: process.env.TOKENLLM7_KEY || null,
+    model: process.env.TOKENLLM7_MODEL || "mistralai/mistral-small-3.2-24b-instruct:free",
     provider: "tokenllm7",
     protocol: "chat-completions",
+    auth: !process.env.TOKENLLM7_KEY, // no-auth when no key configured (free public tier)
+    enabled: process.env.TOKENLLM7_ENABLED !== "false", // opt-out via env
   },
   GROQ: {
     url: "https://api.groq.com/openai/v1/chat/completions",
@@ -119,9 +121,9 @@ const TITANS = {
 const PRIORITY_CHAINS = {
   context: [
     "OPENAI",
+    "GROQ",
     "TOKENLLM7",
     "NVIDIA",
-    "GROQ",
     "GEMINI",
     "ANTHROPIC",
     "OVHCLOUD",
@@ -130,18 +132,18 @@ const PRIORITY_CHAINS = {
   reasoning: [
     "OPENAI",
     "GROQ",
+    "TOKENLLM7",
     "NVIDIA",
     "GEMINI",
     "ANTHROPIC",
-    "TOKENLLM7",
     "OVHCLOUD",
     "OLLAMA",
   ],
   performance: [
     "GROQ",
     "OPENAI",
-    "NVIDIA",
     "TOKENLLM7",
+    "NVIDIA",
     "GEMINI",
     "OVHCLOUD",
     "OLLAMA",
@@ -164,7 +166,8 @@ function hasValidKey(key, allowNoAuth = false) {
 
 function isConfigured(titan) {
   if (!titan || titan.enabled === false || !titan.url) return false;
-  return titan.auth === false || hasValidKey(titan.key);
+  // auth===false: legacy no-auth (e.g. OVHCLOUD); auth===true: public-tier no-key (e.g. TOKENLLM7)
+  return typeof titan.auth === "boolean" || hasValidKey(titan.key);
 }
 
 function isProviderAvailable(name) {

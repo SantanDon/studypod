@@ -13,6 +13,7 @@ import {
   Play,
   Plus,
   RefreshCcw,
+  Share2,
   ShieldCheck,
   Upload,
 } from "lucide-react";
@@ -32,6 +33,7 @@ import {
   formatChapterTitle,
   formatDisplayTitle,
 } from "@/lib/utils/displayTitle";
+import { shareAudioFile } from "@/lib/audio/shareAudioFile";
 import { shouldReportNetworkError } from "@/lib/utils/networkError";
 import AudiobookDirectionPanel, {
   type LiteraryPresetDetail,
@@ -90,6 +92,7 @@ type BookMetadata = {
   pronunciationCandidates?: Array<{
     term: string;
     occurrences?: number;
+    suggestedPronunciation?: string;
   }>;
 };
 
@@ -819,6 +822,34 @@ export default function AudiobookView({
     downloadAudio(job.url, `${safeTitle || "audiobook"}.${job.outputFormat}`);
   };
 
+  const shareJob = async (job: AudiobookJob) => {
+    if (!job.url) return;
+    const title = formatDisplayTitle(job.bookTitle, "Audiobook");
+    const safeTitle = title
+      .replace(/[^a-z0-9]+/gi, "-")
+      .replace(/^-|-$/g, "");
+    const fileName = `${safeTitle || "audiobook"}.${job.outputFormat}`;
+
+    try {
+      const outcome = await shareAudioFile({
+        url: resolveDownloadUrl(job.url),
+        fileName,
+        title,
+        headers: authHeaders(),
+      });
+
+      if (outcome === "unsupported") {
+        await downloadAudio(job.url, fileName);
+        toast.success(
+          "Your browser cannot share audio files directly, so StudyPod downloaded it for sharing instead.",
+        );
+      }
+    } catch (error) {
+      console.error("Audiobook share failed", error);
+      toast.error("Could not share this audiobook");
+    }
+  };
+
   const estimatedBookMinutes = selectedBookMetadata.stats?.wordCount
     ? Math.max(1, Math.round(selectedBookMetadata.stats.wordCount / 155))
     : selectedBookJob?.estimatedDurationMinutes;
@@ -1256,6 +1287,16 @@ export default function AudiobookView({
                         Download full {selectedBookJob.outputFormat.toUpperCase()}
                       </Button>
                       <Button
+                        className="w-full"
+                        variant="outline"
+                        onClick={() => void shareJob(selectedBookJob)}
+                        disabled={!selectedBookJob.url}
+                        data-testid="audiobook-share"
+                      >
+                        <Share2 />
+                        Share audiobook
+                      </Button>
+                      <Button
                         variant="ghost"
                         size="sm"
                         className="w-full"
@@ -1312,6 +1353,8 @@ export default function AudiobookView({
                   selectedBookJob.playbackManifestUrl) && (
                   <AudiobookChapterPlayer
                     key={`${selectedBook.id}:${selectedBookJob.renderId || selectedBookJob.jobId}`}
+                    notebookId={notebookId}
+                    sourceId={selectedBook.id}
                     fileName={selectedBookJob.bookFileName}
                     renderId={selectedBookJob.renderId}
                     title={selectedBookTitle}

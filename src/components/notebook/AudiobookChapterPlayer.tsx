@@ -16,6 +16,7 @@ import {
   Clock3,
   ListMusic,
   Loader2,
+  MessageCircle,
   Pause,
   Play,
   RotateCcw,
@@ -27,7 +28,9 @@ import { API_BASE_URL } from "@/config/api";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Slider } from "@/components/ui/slider";
+import { Input } from "@/components/ui/input";
 import { formatChapterTitle, formatDisplayTitle } from "@/lib/utils/displayTitle";
+import { queueAudioListeningQuestion } from "@/lib/audio/listeningQuestion";
 import {
   adjacentPlayableAudiobookChapter,
   calculateAudiobookProgress,
@@ -44,6 +47,8 @@ import {
 } from "@/lib/audio/audiobookPlayback";
 
 interface AudiobookChapterPlayerProps {
+  notebookId: string;
+  sourceId: string;
   fileName: string;
   renderId?: string;
   title: string;
@@ -98,6 +103,8 @@ const nextNarratableChapter = (
 };
 
 export default function AudiobookChapterPlayer({
+  notebookId,
+  sourceId,
   fileName,
   renderId,
   title,
@@ -125,6 +132,8 @@ export default function AudiobookChapterPlayer({
   const [waitingAfterChapterId, setWaitingAfterChapterId] = useState<
     string | null
   >(null);
+  const [askOpen, setAskOpen] = useState(false);
+  const [askQuestion, setAskQuestion] = useState("");
 
   const audioRef = useRef<HTMLAudioElement>(null);
   const manifestRef = useRef<AudiobookPlaybackManifest | null>(null);
@@ -381,6 +390,39 @@ export default function AudiobookChapterPlayer({
       });
     }, [applyListenerState, authHeaders, fileName, renderId],
   );
+
+  const openListeningQuestion = useCallback(() => {
+    if (!selectedChapterIdRef.current) return;
+    audioRef.current?.pause();
+    setIsPlaying(false);
+    persistProgress({}, { forceRemote: true });
+    setAskOpen(true);
+  }, [persistProgress]);
+
+  const submitListeningQuestion = useCallback(() => {
+    const question = askQuestion.trim();
+    const currentManifest = manifestRef.current;
+    const chapterId = selectedChapterIdRef.current;
+    if (!question || !currentManifest || !chapterId) return;
+    const chapter = currentManifest.chapters.find((item) => item.id === chapterId);
+    if (!chapter) return;
+
+    queueAudioListeningQuestion({
+      notebookId,
+      sourceId,
+      sourceTitle: formatDisplayTitle(title, currentManifest.title || "Audiobook"),
+      chapterId: chapter.id,
+      chapterTitle: formatChapterTitle(chapter.title),
+      pageStart: chapter.pageStart,
+      pageEnd: chapter.pageEnd,
+      timeSeconds: currentTimeRef.current,
+      durationSeconds: durationRef.current || chapter.durationSeconds || 0,
+      question,
+    });
+    setAskQuestion("");
+    setAskOpen(false);
+    toast.success("Question sent to StudyPod chat");
+  }, [askQuestion, notebookId, sourceId, title]);
 
   useEffect(() => {
     const persistBeforeLeaving = () => {
@@ -872,7 +914,7 @@ export default function AudiobookChapterPlayer({
             </Button>
           </div>
 
-          <div className="mt-3 flex justify-center">
+          <div className="mt-3 flex flex-wrap justify-center gap-2">
             <Button
               variant="outline"
               size="sm"
@@ -886,7 +928,67 @@ export default function AudiobookChapterPlayer({
               )}
               Bookmark {formatTime(currentTime)}
             </Button>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={openListeningQuestion}
+              disabled={!selectedChapter || !audioBlobUrl}
+            >
+              <MessageCircle />
+              Ask about this point
+            </Button>
           </div>
+
+          {askOpen && selectedChapter && (
+            <form
+              className="mt-3 rounded-xl border border-border bg-muted/25 p-3"
+              onSubmit={(event) => {
+                event.preventDefault();
+                submitListeningQuestion();
+              }}
+            >
+              <div className="mb-2 flex items-center justify-between gap-3">
+                <div className="min-w-0">
+                  <p className="text-xs font-medium">
+                    Ask at {formatTime(currentTime)}
+                  </p>
+                  <p className="truncate text-[11px] text-muted-foreground">
+                    {formatChapterTitle(selectedChapter.title)}
+                    {selectedChapter.pageStart
+                      ? ` · Page ${selectedChapter.pageStart}${selectedChapter.pageEnd && selectedChapter.pageEnd !== selectedChapter.pageStart ? `–${selectedChapter.pageEnd}` : ""}`
+                      : ""}
+                  </p>
+                </div>
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="sm"
+                  onClick={() => {
+                    setAskOpen(false);
+                    setAskQuestion("");
+                  }}
+                >
+                  Cancel
+                </Button>
+              </div>
+              <div className="flex gap-2">
+                <Input
+                  value={askQuestion}
+                  onChange={(event) => setAskQuestion(event.target.value)}
+                  placeholder="What does this mean?"
+                  autoFocus
+                  aria-label="Question about the current audiobook point"
+                />
+                <Button type="submit" disabled={!askQuestion.trim()}>
+                  Ask
+                </Button>
+              </div>
+              <p className="mt-2 text-[10px] leading-4 text-muted-foreground">
+                StudyPod will ground the answer to this book and use the current
+                chapter/page range until sentence-level audio timing is available.
+              </p>
+            </form>
+          )}
 
           {waitingAfterChapterId && (
             <p className="mt-3 rounded-lg bg-primary/5 px-3 py-2 text-center text-[11px] leading-5 text-muted-foreground">

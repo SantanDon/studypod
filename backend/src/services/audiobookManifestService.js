@@ -230,6 +230,7 @@ export function normalizeAudiobookManifest(manifest = {}) {
 export function createAudiobookRenderId({
   fileName,
   pipelineVersion,
+  exportVersion = "",
   chapterIds,
   provider,
   voice,
@@ -243,6 +244,7 @@ export function createAudiobookRenderId({
       JSON.stringify({
         fileName: String(fileName || ""),
         pipelineVersion: String(pipelineVersion || ""),
+        exportVersion: String(exportVersion || ""),
         chapterIds: [...(chapterIds || [])].map(String),
         provider: String(provider || ""),
         voice: String(voice || ""),

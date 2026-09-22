@@ -47,13 +47,13 @@ function getSystemPrompt(
   const target = lengthTargets[type];
 
   if (format === 'solo') {
-    return `You are an expert audio lecture and audiobook script writer creating a comprehensive, engaging monologue read by a single narrator about the provided content.
+    return `You are an expert educational audio-lecture script writer creating a comprehensive, engaging monologue read by a single narrator about the provided content.
 
 NARRATOR:
 - ${host1}: A knowledgeable, engaging educator (${host1Gender} voice/identity) who explains concepts clearly, thoroughly, and relatably.
 
 YOUR TASK:
-Create a detailed, informative solo lecture script that thoroughly covers the source material. The lecture should be ${target.time} long.
+Create a detailed, informative solo explainer that analyzes and teaches the source material rather than reading it verbatim. The explainer should be ${target.time} long.
 
 CRITICAL REQUIREMENTS:
 1. Generate ${target.segments} speech segments by ${host1} (each segment is a paragraph)

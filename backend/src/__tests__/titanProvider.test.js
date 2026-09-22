@@ -104,6 +104,7 @@ describe("Titan provider configuration", () => {
   it("queues burst traffic instead of rejecting requests when provider capacity is full", async () => {
     vi.stubEnv("OPENAI_API_KEY", "");
     vi.stubEnv("TOKENLLM7_KEY", "");
+    vi.stubEnv("TOKENLLM7_ENABLED", "false"); // isolate to GROQ; LLM7 is no-auth by default
     vi.stubEnv("NVIDIA_API_KEY", "");
     vi.stubEnv("GEMINI_API_KEY", "");
     vi.stubEnv("ANTHROPIC_API_KEY", "");

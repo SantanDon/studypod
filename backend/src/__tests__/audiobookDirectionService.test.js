@@ -52,6 +52,9 @@ describe('audiobook literary direction', () => {
     const terms = candidates.map((candidate) => candidate.term);
 
     expect(terms).toContain('Plato');
+    expect(
+      candidates.find((candidate) => candidate.term === 'Plato')?.suggestedPronunciation,
+    ).toBe('Play-toe');
     expect(terms.some((term) => term.includes('Socrates'))).toBe(true);
     expect(terms).not.toContain('Book');
   });
@@ -74,6 +77,18 @@ describe('audiobook literary direction', () => {
     );
 
     expect(output).toBe('The A I-driven leader discusses A I leadership.');
+  });
+
+  it('automatically corrects known names while preserving user overrides', () => {
+    expect(
+      applyPronunciationLexicon('Plato speaks through Socrates about justice.'),
+    ).toBe('Play-toe speaks through Sock-ruh-teez about justice.');
+
+    expect(
+      applyPronunciationLexicon('Plato discusses justice.', [
+        { term: 'Plato', pronunciation: 'PLAH-toh' },
+      ]),
+    ).toBe('PLAH-toh discusses justice.');
   });
 
   it('builds semantic narration segments with distinct pacing and pronunciation', () => {

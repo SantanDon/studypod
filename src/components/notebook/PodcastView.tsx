@@ -18,6 +18,7 @@ import { Label } from "@/components/ui/label";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { useSources } from "@/hooks/useSources";
 import { generatePodcastScript } from "@/lib/podcastGenerator";
+import { buildPodcastSourceContext } from "@/lib/podcastSourceContext";
 import { useToast } from "@/hooks/use-toast";
 import TTSProviderSettings from "./TTSProviderSettings";
 import TTSSettingsDialog from "./TTSSettingsDialog";
@@ -113,6 +114,7 @@ const PodcastView: React.FC<PodcastViewProps> = ({ notebookId }) => {
   const [podcastFormat, setPodcastFormat] = useState<"dialogue" | "solo">(
     "dialogue",
   );
+  const [podcastFocus, setPodcastFocus] = useState("");
 
   const { savePodcast, podcasts } = usePodcastHistory(safeNotebookId);
 
@@ -403,14 +405,18 @@ const PodcastView: React.FC<PodcastViewProps> = ({ notebookId }) => {
         return (voice?.gender as "male" | "female") || "female";
       };
 
-      const combinedContent = usableSources
-        .map((s) => s.content || "")
-        .filter((c) => c.length > 0)
-        .join("\n\n")
-        .substring(0, 15000);
+      const combinedContent = buildPodcastSourceContext(usableSources, {
+        focus: podcastFocus,
+        maxChars: 12000,
+      });
 
-      const combinedNotes = (notes || [])
-        .map((n) => n.content)
+      const combinedNotes = [
+        podcastFocus.trim()
+          ? `USER-SELECTED EPISODE FOCUS: ${podcastFocus.trim()}`
+          : "",
+        ...(notes || []).map((n) => n.content),
+      ]
+        .filter(Boolean)
         .join("\n\n")
         .substring(0, 3000);
 
@@ -599,7 +605,7 @@ const PodcastView: React.FC<PodcastViewProps> = ({ notebookId }) => {
               >
                 <TabsList className="grid w-full grid-cols-2">
                   <TabsTrigger value="dialogue">Podcast (Dialogue)</TabsTrigger>
-                  <TabsTrigger value="solo">Audiobook (Solo Host)</TabsTrigger>
+                  <TabsTrigger value="solo">Solo Explainer</TabsTrigger>
                 </TabsList>
               </Tabs>
             </div>
@@ -728,6 +734,28 @@ const PodcastView: React.FC<PodcastViewProps> = ({ notebookId }) => {
                   </div>
                 </div>
               )}
+            </div>
+
+            <div
+              className="lab-input-group"
+              style={{ marginBottom: "16px" }}
+            >
+              <Label htmlFor="podcastFocus">
+                <FontAwesomeIcon icon={faKeyboard} /> Episode Focus
+              </Label>
+              <Input
+                id="podcastFocus"
+                value={podcastFocus}
+                onChange={(event) => setPodcastFocus(event.target.value)}
+                placeholder="e.g. Book VII: the cave, education, and philosopher-rulers"
+                className="lab-input"
+                maxLength={500}
+              />
+              <p className="lab-hint">
+                Optional. Leave blank for a balanced overview across a long book,
+                or name a book, chapter, concept, or question for the hosts to
+                explore.
+              </p>
             </div>
 
             <div className="lab-length-selector">

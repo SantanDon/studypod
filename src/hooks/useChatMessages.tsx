@@ -5,6 +5,7 @@ import { useAuth } from "@/hooks/useAuth";
 import { useGuest } from "@/hooks/useGuest";
 import { EnhancedChatMessage } from "@/types/message";
 import { useToast } from "@/hooks/use-toast";
+import { ToastAction } from "@/components/ui/toast";
 import { shouldReportNetworkError } from "@/lib/utils/networkError";
 import {
   localStorageService,
@@ -13,6 +14,7 @@ import {
 import { ApiService } from "@/services/apiService";
 import { generateAIResponse } from "@/services/chatAiService";
 import { validateCitations, validateAIResponse } from "@/lib/extraction/contentValidator";
+
 
 export const useChatMessages = (notebookId?: string) => {
   const { user } = useAuthState();
@@ -161,20 +163,45 @@ export const useChatMessages = (notebookId?: string) => {
     onSuccess: (data) => {
       queryClient.invalidateQueries({ queryKey: ["chat-messages", data.notebookId] });
     },
-    onError: (error) => {
+    onError: (error, variables) => {
       console.error("❌ Chat message error:", error);
       const msg = error instanceof Error ? error.message : "Failed to send message";
-      // Show a helpful message based on the error type
-      const isOffline = msg.includes('503') || msg.includes('unavailable') || msg.includes('offline');
+      const httpStatus = (error as Error & { status?: number })?.status;
+      // True offline: no network connectivity
+      const isTrueOffline = typeof navigator !== "undefined" && !navigator.onLine;
+      // Provider unavailable: explicit 503 from backend titan provider chain
+      const isProviderUnavailable = httpStatus === 503 || msg.includes('503') || msg.includes('PROVIDER_UNAVAILABLE');
+      const isOffline = isTrueOffline || isProviderUnavailable;
       const isImageBlock = msg.includes('image') || msg.includes('attachment');
-      toast({
-        title: isOffline ? "AI Temporarily Unavailable" : isImageBlock ? "Attachment Not Supported" : "Error",
-        description: isOffline
+
+      const description = isTrueOffline
+        ? "You appear to be offline. Your draft is saved — retry when your connection is restored."
+        : isProviderUnavailable
           ? "AI providers are currently unreachable. Your draft is still available, so you can retry when the connection recovers."
           : isImageBlock
             ? "This AI model processes text only. Images and files cannot be read."
-            : msg,
+            : msg;
+
+      toast({
+        title: isOffline
+          ? (isTrueOffline ? "You're Offline" : "AI Temporarily Unavailable")
+          : isImageBlock
+            ? "Attachment Not Supported"
+            : "Error",
+        description,
         variant: "destructive",
+        action: isOffline
+          ? (
+              <ToastAction
+                altText="Retry sending message"
+                onClick={() => {
+                  if (variables) sendMessage.mutate(variables);
+                }}
+              >
+                Retry
+              </ToastAction>
+            )
+          : undefined,
       });
     },
   });

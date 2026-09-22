@@ -1,6 +1,10 @@
 import crypto from 'node:crypto';
 
 export const AUDIOBOOK_DIRECTION_VERSION = 'v1';
+export const AUTOMATIC_PRONUNCIATION_LEXICON = [
+  { term: 'Plato', pronunciation: 'Play-toe' },
+  { term: 'Socrates', pronunciation: 'Sock-ruh-teez' },
+];
 
 export const LITERARY_PRESETS = {
   auto: {
@@ -206,7 +210,14 @@ export const extractPronunciationCandidates = ({ title = '', author = '', chapte
     })
     .sort((a, b) => b.score - a.score || a.term.localeCompare(b.term))
     .slice(0, 24)
-    .map(({ term, score }) => ({ term, occurrences: score }));
+    .map(({ term, score }) => ({
+      term,
+      occurrences: score,
+      suggestedPronunciation:
+        AUTOMATIC_PRONUNCIATION_LEXICON.find(
+          (entry) => entry.term.toLocaleLowerCase() === term.toLocaleLowerCase(),
+        )?.pronunciation || undefined,
+    }));
 };
 
 export const normalizePronunciationEntries = (entries = []) => {
@@ -227,11 +238,32 @@ export const normalizePronunciationEntries = (entries = []) => {
   return normalized;
 };
 
-const escapeRegExp = (value) => String(value).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+const escapeRegExp = (value) => String(value).replace(/[.*+?^${}()|[\]\\]/g, (match) => '\\' + match);
+
+export const resolvePronunciationEntries = (text, entries = []) => {
+  const userEntries = normalizePronunciationEntries(entries);
+  const userTerms = new Set(
+    userEntries.map((entry) => entry.term.toLocaleLowerCase()),
+  );
+  const source = String(text || '');
+  const automaticEntries = AUTOMATIC_PRONUNCIATION_LEXICON.filter((entry) => {
+    if (userTerms.has(entry.term.toLocaleLowerCase())) return false;
+    return new RegExp('\\b' + escapeRegExp(entry.term) + '\\b', 'i').test(source);
+  });
+  return [...automaticEntries, ...userEntries];
+};
 
 export const applyPronunciationLexicon = (text, entries = []) => {
   let output = String(text || '');
-  const normalized = normalizePronunciationEntries(entries)
+  const userEntries = normalizePronunciationEntries(entries);
+  const userTerms = new Set(
+    userEntries.map((entry) => entry.term.toLocaleLowerCase()),
+  );
+  const automaticEntries = AUTOMATIC_PRONUNCIATION_LEXICON.filter((entry) => {
+    if (userTerms.has(entry.term.toLocaleLowerCase())) return false;
+    return new RegExp('\\b' + escapeRegExp(entry.term) + '\\b', 'i').test(output);
+  });
+  const normalized = [...automaticEntries, ...userEntries]
     .sort((a, b) => b.term.length - a.term.length);
 
   for (const { term, pronunciation } of normalized) {
@@ -349,6 +381,7 @@ export const createNarrationSignature = ({
   .createHash('sha256')
   .update(JSON.stringify({
     version: AUDIOBOOK_DIRECTION_VERSION,
+
     requestedPreset,
     resolvedPreset: resolveLiteraryPreset(requestedPreset, analysis),
     pronunciations: normalizePronunciationEntries(pronunciations),
