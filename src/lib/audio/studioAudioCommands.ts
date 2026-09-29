@@ -17,6 +17,17 @@ export interface StudioAudioRequest extends StudioAudioIntent {
     result?: string;
 }
 export const OPEN_STUDIO_AUDIO_EVENT = 'studypod:open-studio-audio';
+/**
+ * Conservative bounded routing for read-aloud scope. Enumerating chapter names and
+ * ordinals is not safe: an unrecognised one silently escalates to full-book narration.
+ * So we route on the *presence of a part reference*, not on recognising its value.
+ * Any part reference (page/chapter/section/part/volume/named back-matter/remainder)
+ * opens Studio for explicit selection. Only an unambiguous whole-document instruction
+ * with no part reference at all may start full narration.
+ */
+const PART_REFERENCE = /\b(?:pages?|chapters?|sections?|parts?|volumes?|appendi(?:x|ces)|excerpts?|preface|foreword|afterword|prologue|epilogue|introduction|conclusion|glossary|index)\b/i;
+const REMAINDER_REFERENCE = /\b(?:rest|remainder)\s+of\b/i;
+const EXPLICIT_WHOLE = /\b(?:whole|entire|full|complete(?:ly)?|everything|all)\b/i;
 /** Only explicit user commands are offered as actions. Never run document text or an AI reply. */
 export function parseStudioAudioIntent(input: string): StudioAudioIntent | null {
     const message = input.trim();
@@ -29,14 +40,18 @@ export function parseStudioAudioIntent(input: string): StudioAudioIntent | null 
     if (!/^(?:make|create|generate|turn|convert|read|narrate|resume|continue|retry|cancel|stop|open|show|check|download)\b/i.test(text))
         return null;
     const podcast = /\bpodcast\b/i.test(text);
-    const audiobook = /\baudio\s?book\b|\bread[- ]aloud\b|\baloud\b|^narrate\b/i.test(text);
+    const audiobook = /\baudio\s?book\b|\bread[- ]aloud\b|\baloud\b|\bout\s+loud\b|^narrate\b/i.test(text);
     if (podcast === audiobook)
         return null; // Both/neither need an ordinary clarification.
     let operation: StudioAudioOperation = /^(?:resume|continue|retry)\b/i.test(text) ? 'resume'
         : /^(?:cancel|stop)\b/i.test(text) ? 'cancel'
             : /^(?:check|show)\b.*\b(?:status|progress)\b/i.test(text) ? 'status'
                 : /^(?:open|show|download)\b/i.test(text) ? 'open' : 'generate';
-    const chapterSelection = audiobook && /\b(?:chapter|section|pages?)\s+(?:\d|[ivxlcdm]+\b|one\b|two\b|three\b)/i.test(text);
+    // A part reference wins even alongside "everything": "read everything from chapter 2"
+    // is a range, not the whole book. Only a whole-document instruction free of any
+    // part reference may start full narration.
+    const chapterSelection = audiobook
+        && (PART_REFERENCE.test(text) || REMAINDER_REFERENCE.test(text) || !EXPLICIT_WHOLE.test(text));
     if (chapterSelection && operation === 'generate')
         operation = 'open';
     const focus = podcast ? text.match(/\b(?:about|focusing on|focus on)\s+(.+?)[.!?]*$/i)?.[1]?.trim() : undefined;
@@ -89,6 +104,11 @@ export const useStudioAudioCommands = create<AudioCommandStore>((set, get) => ({
         if (sourceIds.some((sourceId) => typeof sourceId !== 'string' || !sourceId.trim()))
             return false;
         if (['generate', 'resume'].includes(request.operation) && sourceIds.length === 0)
+            return false;
+        // An audiobook command addresses ONE book. Cancelling or reporting on "whichever
+        // book happens to be open" is a destructive surprise, so require exactly one
+        // explicitly chosen source for every operation that acts on a book job.
+        if (request.kind === 'audiobook' && ['generate', 'resume', 'cancel', 'status'].includes(request.operation) && sourceIds.length !== 1)
             return false;
         set((state) => ({ requests: { ...state.requests, [notebookId]: { ...request, sourceIds: [...new Set(sourceIds)], phase: 'queued', queuedAt: Date.now() } } }));
         if (typeof window !== 'undefined')

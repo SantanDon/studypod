@@ -40,7 +40,23 @@ describe('audiobook worker result contract', () => {
 
   // These are defensive cases: the current normal failure path throws rather
   // than resolving to these values. Do not report them as a reproduced outage.
-  it.each(['failed', 'paused', 'processing', 'cancelled'])('rejects an unexpected fulfilled %s state', async (status) => {
+  it('acknowledges an owner-cancelled fulfilled result without a failure exit', async () => {
+    mocks.generate.mockResolvedValue({ status: 'cancelled' });
+    await runWrapper();
+    expect(mocks.postMessage).toHaveBeenCalledExactlyOnceWith({ status: 'cancelled', jobId: 'worker-contract-fixture' });
+    expect(process.exitCode).toBeUndefined();
+  });
+
+  it('acknowledges a cancellation thrown at a bounded checkpoint without a failure exit', async () => {
+    const error = new Error('Audiobook job was cancelled by the owner');
+    error.code = 'AUDIOBOOK_JOB_CANCELLED';
+    mocks.generate.mockRejectedValue(error);
+    await runWrapper();
+    expect(mocks.postMessage).toHaveBeenCalledExactlyOnceWith({ status: 'cancelled', jobId: 'worker-contract-fixture' });
+    expect(process.exitCode).toBeUndefined();
+  });
+
+  it.each(['failed', 'paused', 'processing'])('rejects an unexpected fulfilled %s state', async (status) => {
     mocks.generate.mockResolvedValue({ status });
     await runWrapper();
     expect(mocks.postMessage).toHaveBeenCalledOnce();

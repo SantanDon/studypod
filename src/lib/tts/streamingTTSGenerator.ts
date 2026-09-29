@@ -84,6 +84,15 @@ interface GeneratedAudio {
 class StreamingTTSGenerator {
   private isGenerating = false;
   private shouldCancel = false;
+  /**
+   * Execution identity for the current run. `shouldCancel` alone is not enough: it is a
+   * single shared boolean that a new start resets, so a superseded run that is still
+   * inside an `await` can wake up believing it is still the active run and write its
+   * late audio/progress into the new one. Every run takes a new id; `cancel()` and a
+   * new start both invalidate the previous one, and callbacks tagged with a stale id
+   * are dropped.
+   */
+  private runId = 0;
   private generatedAudios: GeneratedAudio[] = [];
   private currentScript: PodcastScript | null = null;
   private currentConfig: StreamingConfig = { ...DEFAULT_CONFIG };
@@ -136,9 +145,28 @@ class StreamingTTSGenerator {
     onAudioReady: AudioReadyCallback,
   ): Promise<void> {
     if (this.isGenerating) {
-      console.warn("Generation already in progress");
-      return;
+      // Silently returning here leaves the store already switched to the new script
+      // and `isGenerating: true` with no generator actually running, so the UI spins
+      // forever. Fail loudly so the caller can surface it.
+      throw new Error(
+        "Podcast audio generation is already running. Cancel or finish it first.",
+      );
     }
+
+    // Take a fresh execution identity. Anything still in flight from a previous run is
+    // now stale and must not report into this one.
+    const runId = ++this.runId;
+    const isCurrentRun = () => this.runId === runId;
+    const tagRun = <T extends unknown[]>(
+      callback: (...args: T) => void,
+    ): ((...args: T) => void) => {
+      return (...args: T) => {
+        if (!isCurrentRun()) return;
+        callback(...args);
+      };
+    };
+    onProgress = tagRun(onProgress);
+    onAudioReady = tagRun(onAudioReady);
 
     this.isGenerating = true;
     this.shouldCancel = false;
@@ -309,6 +337,14 @@ class StreamingTTSGenerator {
             },
           );
 
+          if (this.shouldCancel) {
+            if (result.audioUrl?.startsWith('blob:') && typeof URL.revokeObjectURL === 'function') {
+              URL.revokeObjectURL(result.audioUrl);
+            }
+            this.discardGeneratedAudio();
+            this.cleanup('cancelled', onProgress);
+            return;
+          }
           // Store the generated audio
           this.generatedAudios.push({
             url: result.audioUrl,
@@ -526,6 +562,9 @@ class StreamingTTSGenerator {
    */
   cancel(): void {
     this.shouldCancel = true;
+    // Invalidate the current run's execution identity so a result that is already
+    // inside an `await` cannot resume and report into a later run.
+    this.runId++;
 
     if (this.workerManager) {
       this.workerManager.cancel();
@@ -1102,10 +1141,12 @@ class StreamingTTSGenerator {
   }
 
   reset(): void {
-    this.stopPlayback();
-    this.generatedAudios = [];
+    // A reset requests cancellation but does not release the one-run guard
+    // until the outstanding provider promise has actually settled.
+    if (this.isGenerating) this.cancel();
+    else this.stopPlayback();
+    this.discardGeneratedAudio();
     this.currentScript = null;
-    this.isGenerating = false;
   }
 
   private optimizeSegments(segments: PodcastSegment[]): PodcastSegment[] {
@@ -1200,6 +1241,7 @@ class StreamingTTSGenerator {
     reason: "cancelled" | "error",
     onProgress: ProgressCallback,
   ): void {
+    if (reason === "cancelled") this.discardGeneratedAudio();
     this.isGenerating = false;
     onProgress({
       phase: reason,

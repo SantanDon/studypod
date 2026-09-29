@@ -77,9 +77,14 @@ const normalizeRenderChapter = (chapterId, chapter, sourceChapter) => ({
   chapterId,
   title: String(chapter?.title || sourceChapter?.title || chapterId),
   order: finiteNumber(chapter?.order, finiteNumber(sourceChapter?.order, 0)),
-  status: ["pending", "processing", "completed", "failed", "skipped"].includes(
-    chapter?.status,
-  )
+  status: [
+    "pending",
+    "processing",
+    "completed",
+    "failed",
+    "skipped",
+    "cancelled",
+  ].includes(chapter?.status)
     ? chapter.status
     : "pending",
   attempts: Math.max(0, Math.floor(finiteNumber(chapter?.attempts, 0))),
@@ -123,9 +128,14 @@ const normalizeRender = (renderId, render, manifestChapters) => {
 
   return {
     id: renderId,
-    status: ["pending", "processing", "paused", "completed", "failed"].includes(
-      render?.status,
-    )
+    status: [
+      "pending",
+      "processing",
+      "paused",
+      "completed",
+      "failed",
+      "cancelled",
+    ].includes(render?.status)
       ? render.status
       : "pending",
     pipelineVersion: String(render?.pipelineVersion || "v2"),
@@ -148,12 +158,17 @@ const normalizeRender = (renderId, render, manifestChapters) => {
     updatedAt: render?.updatedAt || nowIso(),
     completedAt: render?.completedAt || null,
     failedAt: render?.failedAt || null,
+    cancelledAt: render?.cancelledAt || null,
     error: render?.error ? String(render.error).slice(0, 300) : null,
     final: render?.final
       ? {
-          status: ["pending", "processing", "completed", "failed"].includes(
-            render.final.status,
-          )
+          status: [
+            "pending",
+            "processing",
+            "completed",
+            "failed",
+            "cancelled",
+          ].includes(render.final.status)
             ? render.final.status
             : "pending",
           fileName: render.final.fileName
@@ -327,6 +342,75 @@ export function patchAudiobookRenderChapter(
   normalized.activeRenderId = renderId;
   normalized.updatedAt = nowIso();
   return normalized;
+}
+
+/**
+ * Owner-requested cancellation. Completed chapters (valid audio) are preserved
+ * so an explicit retry can resume; in-flight processing chapters become
+ * cancelled rather than failed; pending chapters stay pending. A completed
+ * final export is never rewritten by cancellation.
+ */
+export function cancelAudiobookRender(manifest, renderId, { jobId = null, reason = "Cancelled by owner" } = {}) {
+  const normalized = normalizeAudiobookManifest(manifest);
+  const render = normalized.renders[renderId];
+  if (!render) throw new Error(`Audiobook render not found: ${renderId}`);
+  if (render.status === "completed") {
+    const error = new Error("Audiobook render is already completed");
+    error.code = "AUDIOBOOK_RENDER_ALREADY_COMPLETED";
+    throw error;
+  }
+  const cancelledAt = nowIso();
+  const nextChapters = {};
+  for (const [chapterId, chapter] of Object.entries(render.chapters || {})) {
+    if (chapter?.status === "processing") {
+      nextChapters[chapterId] = {
+        ...chapter,
+        status: "cancelled",
+        error: String(reason).slice(0, 300),
+      };
+    } else {
+      nextChapters[chapterId] = chapter;
+    }
+  }
+  const final = render.final
+    ? {
+        ...render.final,
+        status:
+          render.final.status === "processing" ||
+          render.final.status === "pending"
+            ? "cancelled"
+            : render.final.status,
+        error:
+          render.final.status === "processing" ||
+          render.final.status === "pending"
+            ? String(reason).slice(0, 300)
+            : render.final.error || null,
+      }
+    : render.final;
+  normalized.renders[renderId] = {
+    ...render,
+    status: "cancelled",
+    chapters: nextChapters,
+    final,
+    activeJobId: jobId || render.activeJobId || null,
+    activeChapterId: null,
+    cancelledAt,
+    failedAt: null,
+    error: String(reason).slice(0, 300),
+    updatedAt: cancelledAt,
+  };
+  // Do not switch the active view away from a newer render.
+  normalized.updatedAt = cancelledAt;
+  return normalized;
+}
+
+export function isCancelledAudiobookRender(manifest, renderId) {
+  try {
+    const normalized = normalizeAudiobookManifest(manifest);
+    return normalized.renders?.[renderId]?.status === "cancelled";
+  } catch {
+    return false;
+  }
 }
 
 const manifestLockPath = (manifestDir, fileName) =>

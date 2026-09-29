@@ -23,7 +23,11 @@ export default function StudioAudioCommandCard({ notebookId, sources }: {
     if (!request)
         return null;
     const busy = request.phase === 'queued' || request.phase === 'executing';
-    const requiresSource = ['generate', 'resume'].includes(request.operation) || (request.kind === 'audiobook' && request.operation === 'status');
+    // An audiobook command addresses one specific book. Status, cancel, generate and
+    // resume all need the source chosen explicitly so an ambiguous command can never
+    // act on whichever book happens to be open.
+    const requiresSource = ['generate', 'resume'].includes(request.operation) || (request.kind === 'audiobook' && ['status', 'cancel'].includes(request.operation));
+    const singleBookOnly = request.kind === 'audiobook' && ['generate', 'resume', 'cancel', 'status'].includes(request.operation);
     const chosenIds = selection === '*' ? eligible.map((source) => source.id) : eligible.filter((source) => source.id === selection).map((source) => source.id);
     const activeBook = bookJob?.notebookId === notebookId ? bookJob : undefined;
     const activePodcast = request.kind === 'podcast' && podcast.notebookId === notebookId;
@@ -49,9 +53,10 @@ export default function StudioAudioCommandCard({ notebookId, sources }: {
           </select>
         </label>}
         {request.kind === 'audiobook' && requiresSource && <p className="text-xs text-muted-foreground">Full narration uses the original book's chapter manifest, not a chat summary. A PDF or document without that manifest must first be imported through Audiobook Studio.</p>}
+        {request.kind === 'audiobook' && singleBookOnly && <p className="text-xs text-muted-foreground">Choose exactly one book above. {request.operation === 'cancel' ? 'Cancelling without a chosen book is refused so the wrong job is never stopped.' : 'This command applies to that one book only.'}</p>}
         {request.kind === 'podcast' && requiresSource && <p className="text-xs text-muted-foreground">A source-grounded discussion, not verbatim narration. Uses your Studio voices and episode settings.{request.focus ? ` Focus: ${request.focus}` : ''}</p>}
         {request.chapterSelection && <p className="text-xs text-muted-foreground">Choose the requested chapter in Studio. This command will not start full-book narration.</p>}
-        <div className="flex flex-wrap gap-2"><Button size="sm" onClick={queuedAction} disabled={requiresSource && chosenIds.length === 0}>
+        <div className="flex flex-wrap gap-2"><Button size="sm" onClick={queuedAction} disabled={singleBookOnly ? chosenIds.length !== 1 : requiresSource && chosenIds.length === 0}>
           {request.operation === 'generate' ? 'Confirm generation' : request.operation === 'resume' ? 'Confirm retry / resume' : request.operation === 'cancel' ? 'Cancel generation' : request.operation === 'status' ? 'Check audio status' : 'Open in Studio'}
         </Button>{requiresSource && eligible.length === 0 && <Button size="sm" variant="outline" onClick={openStudio}>Open audio import</Button>}</div>
       </div>}

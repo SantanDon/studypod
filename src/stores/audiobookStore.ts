@@ -1,7 +1,7 @@
 import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
 
-export type AudiobookJobStatus = 'processing' | 'paused' | 'completed' | 'failed';
+export type AudiobookJobStatus = 'processing' | 'paused' | 'completed' | 'failed' | 'cancelled';
 
 export interface PronunciationEntry {
   term: string;
@@ -17,6 +17,8 @@ export interface AudiobookJob {
   bookFileName: string;
   status: AudiobookJobStatus;
   renderStatus?: string;
+  cancelling?: boolean;
+  workerActive?: boolean;
   phase?: string;
   progress: number;
   url?: string;
@@ -76,8 +78,8 @@ interface AudiobookState {
   setNotebookId: (id: string | null) => void;
   setPronunciations: (bookId: string, entries: PronunciationEntry[]) => void;
   upsertJob: (job: AudiobookJob) => void;
-  updateJob: (bookId: string, updates: Partial<AudiobookJob>) => void;
-  clearJob: (bookId: string) => void;
+  updateJob: (bookId: string, updates: Partial<AudiobookJob>, expectedJobId?: string) => void;
+  clearJob: (bookId: string, expectedJobId?: string) => void;
 }
 
 export const useAudiobookStore = create<AudiobookState>()(
@@ -108,12 +110,13 @@ export const useAudiobookStore = create<AudiobookState>()(
         pronunciationsByBook: { ...state.pronunciationsByBook, [bookId]: entries },
       })),
       upsertJob: (job) => set((state) => ({ jobs: { ...state.jobs, [job.bookId]: job } })),
-      updateJob: (bookId, updates) => set((state) => {
+      updateJob: (bookId, updates, expectedJobId) => set((state) => {
         const existing = state.jobs[bookId];
-        if (!existing) return state;
+        if (!existing || (expectedJobId !== undefined && existing.jobId !== expectedJobId)) return state;
         return { jobs: { ...state.jobs, [bookId]: { ...existing, ...updates } } };
       }),
-      clearJob: (bookId) => set((state) => {
+      clearJob: (bookId, expectedJobId) => set((state) => {
+        if (expectedJobId !== undefined && state.jobs[bookId]?.jobId !== expectedJobId) return state;
         const jobs = { ...state.jobs };
         delete jobs[bookId];
         return { jobs };

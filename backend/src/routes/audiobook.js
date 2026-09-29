@@ -50,6 +50,7 @@ import {
 import {
   addAudiobookBookmark,
   buildPublicPlaybackManifest,
+  cancelAudiobookRender,
   createAudiobookRenderId,
   initializeAudiobookRender,
   mutateAudiobookManifest,
@@ -87,6 +88,67 @@ const MANIFEST_DIR = path.join(UPLOADS_DIR, "audiobook_manifests");
 const JOB_DIR = path.join(UPLOADS_DIR, "audiobook_jobs");
 const TEMP_DIR = path.join(UPLOADS_DIR, "temp");
 const execFileAsync = promisify(execFile);
+
+/**
+ * Deliberate AbortSignal wiring for long ffmpeg runs. While the child runs, a
+ * short-interval poll rechecks the authoritative cancel tombstone (the only
+ * cross-thread signal available to the worker); on cancellation the child is
+ * aborted and its partial output removed, and the coded cancellation error is
+ * raised so the job resolves as cancelled, never completed. Without a jobId
+ * this behaves exactly like the plain promisified execFile. Provider
+ * synthesis (Kokoro/Chatterbox) offers no abort hook and stays on bounded
+ * chunk checkpoints — cancellation there is cooperative, not instant.
+ */
+const execFileCancellable = (
+  file,
+  args,
+  { jobId = null, cleanupPath = null, pollMs = 250 } = {},
+) => {
+  if (!jobId) {
+    return execFileAsync(file, args, {
+      windowsHide: true,
+      maxBuffer: 4 * 1024 * 1024,
+    });
+  }
+  return new Promise((resolve, reject) => {
+    const controller = new AbortController();
+    const timer = setInterval(() => {
+      if (readAudiobookCancelMarker(jobId).present) {
+        clearInterval(timer);
+        try {
+          controller.abort();
+        } catch {}
+      }
+    }, pollMs);
+    if (timer.unref) timer.unref();
+    execFile(
+      file,
+      args,
+      {
+        windowsHide: true,
+        maxBuffer: 4 * 1024 * 1024,
+        signal: controller.signal,
+      },
+      (error, stdout, stderr) => {
+        clearInterval(timer);
+        if (error && readAudiobookCancelMarker(jobId).present) {
+          if (cleanupPath) {
+            try {
+              fs.unlinkSync(cleanupPath);
+            } catch {}
+          }
+          reject(createJobCancelledError());
+          return;
+        }
+        if (error) {
+          reject(error);
+          return;
+        }
+        resolve({ stdout, stderr });
+      },
+    );
+  });
+};
 const MAX_BOOK_UPLOAD_BYTES = Number(
   process.env.AUDIOBOOK_MAX_UPLOAD_BYTES || 80 * 1024 * 1024,
 );
@@ -405,6 +467,177 @@ let tts = null;
 const generationJobs = new Map();
 const activeWorkerJobs = new Set();
 
+export const AUDIOBOOK_JOB_CANCELLED = "cancelled";
+export const AUDIOBOOK_CANCEL_MARKER_VERSION = 1;
+
+export const isCancelledAudiobookJob = (job) =>
+  job?.status === AUDIOBOOK_JOB_CANCELLED;
+
+const cancelMarkerPathFor = (jobId) =>
+  path.join(JOB_DIR, `${safeCachePart(jobId)}.cancelled.json`);
+
+/**
+ * Authoritative persistent cancellation tombstone. Written atomically
+ * (tmp+rename, no copy-over fallback); any write failure is returned to the
+ * caller and must block the success acknowledgment. Reads fail closed: a
+ * missing marker means "not cancelled", any other marker problem means
+ * "cancelled".
+ */
+export const writeAudiobookCancelMarker = (
+  jobId, ownerId, { renderId = null, bookFileName = null } = {},
+) => {
+  const marker = { version: AUDIOBOOK_CANCEL_MARKER_VERSION, jobId, ownerId,
+    renderId, bookFileName, cancelledAt: new Date().toISOString() };
+  const target = cancelMarkerPathFor(jobId);
+  const temporary = `${target}.${process.pid}.${randomUUID()}.tmp`;
+  try {
+    fs.writeFileSync(temporary, JSON.stringify(marker, null, 2), { encoding: 'utf8', flag: 'wx' });
+    fs.renameSync(temporary, target);
+    return { ok: true, marker };
+  } catch (error) {
+    try { fs.unlinkSync(temporary); } catch { /* Preserve the original storage failure. */ }
+    return { ok: false, error };
+  }
+};
+
+export const readAudiobookCancelMarker = (jobId) => {
+  try {
+    const marker = JSON.parse(fs.readFileSync(cancelMarkerPathFor(jobId), 'utf8').replace(/^\uFEFF/, ''));
+    if (marker?.version !== AUDIOBOOK_CANCEL_MARKER_VERSION || marker.jobId !== jobId || typeof marker.ownerId !== 'string' || !marker.ownerId) {
+      return { present: true, corrupt: true };
+    }
+    return { present: true, marker };
+  } catch (error) {
+    if (error?.code === 'ENOENT') return { present: false };
+    logger.warn(`Unreadable cancellation marker for ${jobId}; withholding job output`);
+    return { present: true, unreadable: true };
+  }
+};
+
+const readJobStatus = (jobId) => {
+  try {
+    return readJob(jobId)?.status || null;
+  } catch {
+    return null;
+  }
+};
+
+const createJobCancelledError = () => {
+  const error = new Error("Audiobook job was cancelled by the owner");
+  error.code = "AUDIOBOOK_JOB_CANCELLED";
+  return error;
+};
+
+const createRenderSupersededError = (jobId, activeJobId) => {
+  const error = new Error(
+    `Audiobook render is now owned by another execution (job ${activeJobId}, this job ${jobId})`,
+  );
+  error.code = "AUDIOBOOK_RENDER_SUPERSEDED";
+  return error;
+};
+
+const throwIfJobCancelled = (jobId) => {
+  if (readJobStatus(jobId) === AUDIOBOOK_JOB_CANCELLED) {
+    throw createJobCancelledError();
+  }
+};
+
+/**
+ * Worker-issued manifest mutations go through this wrapper so the tombstone
+ * is rechecked INSIDE the serialized per-book lock: a cancellation filed
+ * while the worker was yielding aborts the write instead of regressing a
+ * cancelled render back to processing/completed. The final publication
+ * additionally verifies execution ownership so an older worker can never
+ * publish into a render claimed by an explicit retry.
+ */
+export const mutateOwnedManifestForJob = ({
+  fileName,
+  ownerId,
+  jobId,
+  renderId = null,
+  checkOwnership: _checkOwnership = true,
+  mutate,
+}) =>
+  mutateOwnedManifest({
+    fileName,
+    ownerId,
+    mutate: (current) => {
+      if (readAudiobookCancelMarker(jobId).present) {
+        throw createJobCancelledError();
+      }
+      const targetRenderId = renderId || readJob(jobId)?.renderId;
+      if (targetRenderId) {
+        const activeJobId = current.renders?.[targetRenderId]?.activeJobId;
+        if (activeJobId && activeJobId !== jobId) {
+          throw createRenderSupersededError(jobId, activeJobId);
+        }
+      }
+      return mutate(current);
+    },
+  });
+
+/**
+ * Shared worker-side cancellation persistence: render back to cancelled
+ * (never over a legitimately committed completion) plus the cancelled job.
+ */
+const persistWorkerCancellation = async ({
+  fileName,
+  ownerId,
+  renderId,
+  jobId,
+}) => {
+  const cancelledAt = new Date().toISOString();
+  logger.info(`Audiobook job ${jobId} cancelled; fencing late completion`);
+  try {
+    await mutateOwnedManifest({
+      fileName,
+      ownerId,
+      mutate: (current) => {
+        const active = current.renders?.[renderId];
+        if (active?.status === 'completed' || (active?.activeJobId && active.activeJobId !== jobId)) return current;
+        try {
+          return cancelAudiobookRender(current, renderId, {
+            jobId,
+            reason: "Cancelled by owner",
+          });
+        } catch {
+          return current;
+        }
+      },
+    });
+  } catch (manifestError) {
+    logger.error(
+      "Could not persist cancelled audiobook render:",
+      manifestError,
+    );
+  }
+  return persistJob(jobId, {
+    ...readJob(jobId),
+    status: AUDIOBOOK_JOB_CANCELLED,
+    phase: AUDIOBOOK_JOB_CANCELLED,
+    renderId,
+    activeChapterId: null,
+    playbackManifestUrl: playbackManifestUrlFor(fileName, renderId),
+    error: null,
+    cancelledAt,
+  });
+};
+
+/**
+ * Pure retry-race rule, unit-testable: while the render's previous execution
+ * is still alive in this process, a retry must wait instead of sharing cache
+ * output paths with the old worker.
+ */
+export const selectAudiobookRetryBlock = ({
+  renderActiveJobId,
+  isWorkerActive,
+}) => {
+  if (renderActiveJobId && isWorkerActive) {
+    return "AUDIOBOOK_PREVIOUS_EXECUTION_ACTIVE";
+  }
+  return null;
+};
+
 const requestUserId = (req) => String(req.user?.userId || req.user?.id || "");
 const isForeignManifest = (manifest, userId) =>
   !isOwnedAudiobookManifest(manifest, userId);
@@ -434,18 +667,39 @@ const persistJob = (jobId, job) => {
 
 const readJob = (jobId) => {
   const jobPath = jobPathFor(jobId);
+  let job = null;
   if (fs.existsSync(jobPath)) {
     try {
-      const job = JSON.parse(
+      job = JSON.parse(
         fs.readFileSync(jobPath, "utf8").replace(/^\uFEFF/, ""),
       );
       generationJobs.set(jobId, job);
-      return job;
     } catch {
       // Fall through to the in-memory copy when a worker is replacing the file.
+      job = generationJobs.get(jobId) || null;
     }
+  } else {
+    job = generationJobs.get(jobId) || null;
   }
-  return generationJobs.get(jobId) || null;
+  return applyAudiobookCancelMarker(jobId, job);
+};
+
+/**
+ * Overlay the authoritative cancellation tombstone on every job read, so a
+ * stale processing/completed job JSON written later by a worker can never be
+ * observed as active or complete. Markers are never removed by normal retry.
+ */
+const applyAudiobookCancelMarker = (jobId, job) => {
+  const state = readAudiobookCancelMarker(jobId);
+  if (!state.present) return job;
+  if (!job && !state.marker) return null;
+  const base = job || { jobId, ownerId: state.marker.ownerId,
+    renderId: state.marker.renderId, bookFileName: state.marker.bookFileName };
+  // An execution-specific marker remains authoritative even if another retry
+  // completes the same render later. Never resurrect this cancelled job.
+  return { ...base, status: AUDIOBOOK_JOB_CANCELLED, phase: AUDIOBOOK_JOB_CANCELLED,
+    url: undefined, legacyDownloadUrl: undefined,
+    cancelledAt: state.marker?.cancelledAt || base.cancelledAt || null };
 };
 
 const getTTS = async () => {
@@ -717,7 +971,7 @@ const writeMockWav = async (text, outputPath) => {
 export const concatWavFiles = async (
   inputPaths,
   outputPath,
-  { silenceMs = 0, silenceAfterMs = [] } = {},
+  { silenceMs = 0, silenceAfterMs = [], cancelJobId = null } = {},
 ) => {
   const normalizedPaths = inputPaths.map((input) =>
     typeof input === "string" ? input : input.path,
@@ -802,7 +1056,7 @@ export const concatWavFiles = async (
     });
     fs.writeFileSync(listPath, `${entries.join("\n")}\n`, "utf8");
 
-    await execFileAsync(
+    await execFileCancellable(
       "ffmpeg",
       [
         "-y",
@@ -818,7 +1072,7 @@ export const concatWavFiles = async (
         "auto",
         outputPath,
       ],
-      { windowsHide: true, maxBuffer: 4 * 1024 * 1024 },
+      { jobId: cancelJobId, cleanupPath: outputPath },
     );
   } finally {
     try {
@@ -840,6 +1094,7 @@ const encodeFullAudiobook = async ({
   outputPath,
   format = "mp3",
   chapterPauseMs = 1_000,
+  cancelJobId = null,
 }) => {
   if (chapterPaths.length === 0)
     throw new Error("No chapter audio available for encoding");
@@ -861,13 +1116,13 @@ const encodeFullAudiobook = async ({
         TEMP_DIR,
         `audiobook_chapter_${suffix}_${index}.wav`,
       );
-      await execFileAsync(
+      await execFileCancellable(
         "ffmpeg",
         canonicalAudiobookWavArgs({
           inputPath: chapterPath,
           outputPath: normalizedPath,
         }),
-        { windowsHide: true, maxBuffer: 4 * 1024 * 1024 },
+        { jobId: cancelJobId, cleanupPath: normalizedPath },
       );
       temporaryNormalizedPaths.push(normalizedPath);
       normalizedChapterPaths.push(normalizedPath);
@@ -910,14 +1165,14 @@ const encodeFullAudiobook = async ({
     const normalizedFormat = ["mp3", "m4b", "wav"].includes(format)
       ? format
       : "mp3";
-    await execFileAsync(
+    await execFileCancellable(
       "ffmpeg",
       finalAudiobookEncodingArgs({
         listPath,
         outputPath,
         format: normalizedFormat,
       }),
-      { windowsHide: true },
+      { jobId: cancelJobId, cleanupPath: outputPath },
     );
     return normalizedFormat;
   } finally {
@@ -1019,6 +1274,7 @@ const generateChunkedAudio = async ({
   analysis = null,
   pronunciations = [],
   onProgress,
+  cancelJobId = null,
 }) => {
   const resolvedStyle = resolveLiteraryPreset(style, analysis);
   const profile = getNarrationProfile(resolvedStyle);
@@ -1074,13 +1330,13 @@ const generateChunkedAudio = async ({
       const rawPath = cachePath.replace(".wav", "_raw.wav");
       try {
         await generateSegment(segments[0], rawPath);
-        await execFileAsync(
+        await execFileCancellable(
           "ffmpeg",
           canonicalAudiobookWavArgs({
             inputPath: rawPath,
             outputPath: cachePath,
           }),
-          { windowsHide: true, maxBuffer: 4 * 1024 * 1024 },
+          { jobId: cancelJobId, cleanupPath: cachePath },
         );
       } finally {
         try {
@@ -1124,6 +1380,7 @@ const generateChunkedAudio = async ({
   try {
     await concatWavFiles(chunkPaths, cachePath, {
       silenceAfterMs: segments.map((segment) => segment.pauseAfterMs),
+      cancelJobId,
     });
     assembled = true;
   } finally {
@@ -1808,9 +2065,11 @@ export const runFullAudiobookJob = async ({
     let cachedChapters = 0;
     let availableChapterCount = 0;
 
-    await mutateOwnedManifest({
+    await mutateOwnedManifestForJob({
       fileName,
       ownerId,
+      jobId,
+      renderId,
       mutate: (current) =>
         patchAudiobookRender(current, renderId, {
           status: "processing",
@@ -1824,6 +2083,9 @@ export const runFullAudiobookJob = async ({
     });
 
     for (let i = 0; i < chapterIds.length; i += 1) {
+      // Bounded cancellation point: check between chapters so an owner
+      // cancel stops the job without killing the process.
+      throwIfJobCancelled(jobId);
       const cid = chapterIds[i];
       activeChapterId = cid;
       const voice = resolveVoiceForProvider(
@@ -1856,9 +2118,11 @@ export const runFullAudiobookJob = async ({
       const cachePath = path.join(AUDIO_CACHE_DIR, cacheKey);
       const hasCachedChapter = isUsableAudioFile(cachePath);
 
-      await mutateOwnedManifest({
+      await mutateOwnedManifestForJob({
         fileName,
         ownerId,
+        jobId,
+      renderId,
         mutate: (current) => {
           let next = patchAudiobookRender(current, renderId, {
             status: "processing",
@@ -1912,12 +2176,15 @@ export const runFullAudiobookJob = async ({
             style,
             analysis,
             pronunciations: chapterPronunciations,
+            cancelJobId: jobId,
             onProgress: async ({
               completedChunks,
               totalChunks,
               cachedChunks: cachedAudioChunks,
               activeSegmentKind,
             }) => {
+              // Fence late progress: never publish progress over a cancellation.
+              throwIfJobCancelled(jobId);
               const chapterFraction =
                 totalChunks > 0 ? completedChunks / totalChunks : 0;
               persistJob(jobId, {
@@ -1939,9 +2206,11 @@ export const runFullAudiobookJob = async ({
             },
           });
         } catch (error) {
-          await mutateOwnedManifest({
+          await mutateOwnedManifestForJob({
             fileName,
             ownerId,
+            jobId,
+      renderId,
             mutate: (current) =>
               patchAudiobookRenderChapter(current, renderId, cid, {
                 status: "failed",
@@ -1966,9 +2235,11 @@ export const runFullAudiobookJob = async ({
       chapterDurations.push(durationSeconds);
       availableChapterCount += 1;
 
-      await mutateOwnedManifest({
+      await mutateOwnedManifestForJob({
         fileName,
         ownerId,
+        jobId,
+      renderId,
         mutate: (current) =>
           patchAudiobookRenderChapter(current, renderId, cid, {
             status: "completed",
@@ -2001,14 +2272,19 @@ export const runFullAudiobookJob = async ({
       throw new Error("Full narration did not produce every selected chapter");
     }
 
+    // Bounded cancellation point before the long ffmpeg encode.
+    throwIfJobCancelled(jobId);
+
     const finalFileName = `${safeName}_${AUDIOBOOK_PIPELINE_VERSION}_${AUDIOBOOK_EXPORT_VERSION}_full_${safeCachePart(renderId)}.${outputFormat}`;
     const finalPath = path.join(AUDIO_CACHE_DIR, finalFileName);
     const finalAlreadyExists = isUsableAudioFile(finalPath) &&
       hasCompleteChapterDuration(await probeAudioDurationSeconds(finalPath), chapterDurations);
 
-    await mutateOwnedManifest({
+    await mutateOwnedManifestForJob({
       fileName,
       ownerId,
+      jobId,
+      renderId,
       mutate: (current) =>
         patchAudiobookRender(current, renderId, {
           status: "processing",
@@ -2048,18 +2324,26 @@ export const runFullAudiobookJob = async ({
         outputPath: finalPath,
         format: outputFormat,
         chapterPauseMs: profile.chapterPauseMs || 1_000,
+        cancelJobId: jobId,
       });
     }
 
+    // Fence late completion: a cancel during encoding must win over export.
+    throwIfJobCancelled(jobId);
     const fileSizeBytes = fs.statSync(finalPath).size;
     const durationSeconds = await probeAudioDurationSeconds(finalPath);
     if (!hasCompleteChapterDuration(durationSeconds, chapterDurations)) {
       throw new Error("Exported audio is incomplete or has an invalid duration");
     }
+    // Final fence immediately before publishing completion.
+    throwIfJobCancelled(jobId);
     const completedAt = new Date().toISOString();
-    await mutateOwnedManifest({
+    await mutateOwnedManifestForJob({
       fileName,
       ownerId,
+      jobId,
+      renderId,
+      checkOwnership: true,
       mutate: (current) =>
         patchAudiobookRender(current, renderId, {
           status: "completed",
@@ -2102,11 +2386,20 @@ export const runFullAudiobookJob = async ({
       completedAt,
     });
   } catch (err) {
+    const cancelled =
+      err?.code === "AUDIOBOOK_JOB_CANCELLED" ||
+      readAudiobookCancelMarker(jobId).present ||
+      readJobStatus(jobId) === AUDIOBOOK_JOB_CANCELLED;
+    if (cancelled) {
+      return persistWorkerCancellation({ fileName, ownerId, renderId, jobId });
+    }
     logger.error("Full generation failed:", err);
     try {
-      await mutateOwnedManifest({
+      await mutateOwnedManifestForJob({
         fileName,
         ownerId,
+        jobId,
+      renderId,
         mutate: (current) => {
           let next = current;
           if (
@@ -2134,6 +2427,9 @@ export const runFullAudiobookJob = async ({
         },
       });
     } catch (manifestError) {
+      if (manifestError?.code === "AUDIOBOOK_JOB_CANCELLED") {
+        return persistWorkerCancellation({ fileName, ownerId, renderId, jobId });
+      }
       logger.error("Could not persist paused audiobook render:", manifestError);
     }
     persistJob(jobId, {
@@ -2151,6 +2447,15 @@ export const runFullAudiobookJob = async ({
 
 const pauseRenderAfterWorkerFailure = async (payload, errorMessage) => {
   if (!payload?.fileName || !payload?.renderId) return;
+  if (
+    payload?.jobId &&
+    readAudiobookCancelMarker(payload.jobId).present
+  ) {
+    logger.info(
+      `Not pausing cancelled audiobook render for job ${payload.jobId}`,
+    );
+    return;
+  }
   try {
     await mutateOwnedManifest({
       fileName: payload.fileName,
@@ -2176,24 +2481,54 @@ const launchFullAudiobookWorker = (payload) => {
       workerData: payload,
     },
   );
+  // Cooperative cancellation only: the worker is never terminated from here
+  // (it may hold the manifest lock or own an ffmpeg child). It observes the
+  // tombstone at bounded checkpoints and reports back; active tracking is
+  // released only on its terminal receipt or exit.
   activeWorkerJobs.add(payload.jobId);
 
   worker.on("message", (message) => {
     if (message?.status === "completed") {
+      activeWorkerJobs.delete(payload.jobId);
+      const current = readJob(payload.jobId);
+      if (isCancelledAudiobookJob(current)) {
+        logger.info(
+          `Audiobook worker late completion for cancelled job ${payload.jobId} ignored`,
+        );
+        return;
+      }
       logger.info(`  ✅ Audiobook worker completed job ${payload.jobId}`);
+    } else if (message?.status === "cancelled") {
+      activeWorkerJobs.delete(payload.jobId);
+      logger.info(`Audiobook worker acknowledged cancellation ${payload.jobId}`);
+      return;
     } else if (message?.status === "failed") {
+      activeWorkerJobs.delete(payload.jobId);
+      const current = readJob(payload.jobId);
+      if (isCancelledAudiobookJob(current)) {
+        logger.info(
+          `Audiobook worker late failure for cancelled job ${payload.jobId} ignored`,
+        );
+        return;
+      }
       logger.error(
         `Audiobook worker reported failure for ${payload.jobId}: ${message.error || "unknown error"}`,
       );
     }
   });
   worker.on("error", (error) => {
+    const current = readJob(payload.jobId);
+    if (isCancelledAudiobookJob(current)) {
+      logger.info(
+        `Audiobook worker error after cancellation ${payload.jobId} ignored`,
+      );
+      return;
+    }
     logger.error(`Audiobook worker error for ${payload.jobId}:`, error);
     void pauseRenderAfterWorkerFailure(
       payload,
       String(error?.message || "Audiobook rendering worker failed"),
     );
-    const current = readJob(payload.jobId);
     if (current?.status === "processing") {
       persistJob(payload.jobId, {
         ...current,
@@ -2207,11 +2542,17 @@ const launchFullAudiobookWorker = (payload) => {
   worker.on("exit", (code) => {
     activeWorkerJobs.delete(payload.jobId);
     if (code === 0) return;
+    const current = readJob(payload.jobId);
+    if (isCancelledAudiobookJob(current)) {
+      logger.info(
+        `Audiobook worker exit ${code} after cancellation ${payload.jobId} ignored`,
+      );
+      return;
+    }
     void pauseRenderAfterWorkerFailure(
       payload,
       `Audiobook worker exited with code ${code}`,
     );
-    const current = readJob(payload.jobId);
     if (current?.status === "processing") {
       persistJob(payload.jobId, {
         ...current,
@@ -2421,6 +2762,24 @@ router.post(
         });
       }
 
+      // Never let a retry share chapter-cache output paths with the previous
+      // execution while it is still alive: the old worker observes the
+      // tombstone at its next checkpoint and exits, then the retry may start
+      // and safely reuse the valid completed chunk caches it leaves behind.
+      const retryBlock = selectAudiobookRetryBlock({
+        renderActiveJobId: existingRender?.activeJobId || null,
+        isWorkerActive: activeWorkerJobs.has(existingRender?.activeJobId),
+      });
+      if (retryBlock) {
+        return res.status(409).json({
+          error:
+            "The previous audiobook execution is still stopping. Wait for it to finish cancelling, then retry; completed chapters remain reusable.",
+          code: retryBlock,
+          renderId,
+          previousJobId: existingRender?.activeJobId || null,
+        });
+      }
+
       const jobId = `full_${randomUUID()}`;
       manifest = await mutateOwnedManifest({
         fileName,
@@ -2547,11 +2906,20 @@ router.get("/job-status/:id", requireRuntime, (req, res) => {
     render?.activeJobId === jobId &&
     render?.status === "processing";
   const { ownerId: _privateOwnerId, ...publicJob } = job;
+  const isCancelled = publicJob.status === AUDIOBOOK_JOB_CANCELLED;
+  if (isCancelled) {
+    // Never expose a full-download URL for a cancelled job, even if a stale
+    // worker write left one behind in the job JSON.
+    delete publicJob.url;
+    delete publicJob.legacyDownloadUrl;
+  }
   res.setHeader("Cache-Control", "no-store");
   res.json({
     ...publicJob,
     status: staleProcessingJob ? "paused" : publicJob.status,
     phase: staleProcessingJob ? "paused" : publicJob.phase,
+    cancelling: isCancelled && workerIsActive,
+    workerActive: workerIsActive,
     renderStatus: staleProcessingJob ? "paused" : render?.status,
     availableChapterCount:
       playback?.availableChapterCount ?? publicJob.availableChapterCount ?? 0,
@@ -2563,6 +2931,61 @@ router.get("/job-status/:id", requireRuntime, (req, res) => {
         : null),
   });
 });
+
+router.post(
+  '/job-status/:id/cancel', requireAudiobookWrite, requireRuntime,
+  async (req, res) => {
+    const ownerId = requestUserId(req);
+    const jobId = String(req.params.id || '');
+    const job = readJob(jobId);
+    if (!job || job.ownerId !== ownerId) return res.status(404).json({ error: 'Job not found' });
+    const respond = (value, extra = {}) => {
+      const { ownerId: _owner, url: _url, legacyDownloadUrl: _legacy, ...publicJob } = value;
+      const workerActive = activeWorkerJobs.has(jobId);
+      res.setHeader('Cache-Control', 'no-store');
+      return res.json({ ...publicJob, cancelled: true, cancelling: workerActive, workerActive, ...extra });
+    };
+    if (job.status === AUDIOBOOK_JOB_CANCELLED) return respond(job, { alreadyCancelled: true });
+    if (job.status === 'completed') return res.status(409).json({ error: 'Job is already completed', code: 'AUDIOBOOK_JOB_ALREADY_COMPLETED', status: 'completed' });
+    const fileName = job.bookFileName;
+    const renderId = job.renderId;
+    if (!fileName || !renderId) return res.status(409).json({ error: 'Job context is missing; cancellation cannot be safely serialized', code: 'AUDIOBOOK_JOB_CONTEXT_MISSING' });
+    let marker;
+    try {
+      await mutateOwnedManifest({ fileName, ownerId, mutate: (current) => {
+        const render = current.renders?.[renderId];
+        if (current.ownerId !== ownerId || !render) {
+          throw Object.assign(new Error('Job context is unavailable'), { code: 'AUDIOBOOK_JOB_CONTEXT_MISSING' });
+        }
+        if (render.status === 'completed') {
+          throw Object.assign(new Error('Job completed before cancellation'), { code: 'AUDIOBOOK_JOB_ALREADY_COMPLETED' });
+        }
+        if (render.activeJobId && render.activeJobId !== jobId) {
+          throw createRenderSupersededError(jobId, render.activeJobId);
+        }
+        // Cancellation and final publication linearize under the SAME lock.
+        // A losing cancel never creates a marker or rolls back completed work.
+        const written = writeAudiobookCancelMarker(jobId, ownerId, { renderId, bookFileName: fileName });
+        if (!written.ok) throw Object.assign(new Error('Cancellation could not be recorded'), { code: 'AUDIOBOOK_CANCEL_NOT_DURABLE', cause: written.error });
+        marker = written.marker;
+        return cancelAudiobookRender(current, renderId, { jobId, reason: 'Cancelled by owner' });
+      } });
+    } catch (error) {
+      if (!marker) {
+        const conflict = ['AUDIOBOOK_JOB_ALREADY_COMPLETED', 'AUDIOBOOK_RENDER_SUPERSEDED', 'AUDIOBOOK_JOB_CONTEXT_MISSING'].includes(error?.code);
+        logger.warn(`Audiobook cancel rejected for ${jobId}: ${error?.code || 'storage failure'}`);
+        return res.status(conflict ? 409 : 503).json({ error: conflict ? error.message : 'Cancellation was not recorded; retry the request', code: error?.code || 'AUDIOBOOK_CANCEL_NOT_DURABLE' });
+      }
+      // The authoritative marker is already durable. A failed manifest mirror
+      // does not undo cancellation or justify claiming that no cancel happened.
+      logger.error('Cancellation recorded, but its manifest mirror needs recovery', error);
+    }
+    const cancelled = persistJob(jobId, { ...job, status: AUDIOBOOK_JOB_CANCELLED,
+      phase: AUDIOBOOK_JOB_CANCELLED, activeChapterId: null, activeChunk: null,
+      error: null, url: undefined, legacyDownloadUrl: undefined, cancelledAt: marker.cancelledAt });
+    return respond(cancelled);
+  },
+);
 
 router.get("/download/:jobId/:filename", requireRuntime, (req, res) => {
   const ownerId = requestUserId(req);

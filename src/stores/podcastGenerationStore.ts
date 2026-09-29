@@ -58,9 +58,41 @@ interface PodcastGenerationState {
   reset: () => void;
 }
 
+/**
+ * Segment URLs are live `blob:` handles. Clearing the array without revoking them leaks
+ * every generated segment and leaves the UI offering playback of audio it can no longer read.
+ * Revoking an already-revoked URL is a no-op, so this is safe to repeat.
+ */
+function revokeAudioUrls(urls: readonly string[]): void {
+  if (typeof URL === "undefined" || typeof URL.revokeObjectURL !== "function")
+    return;
+  for (const url of urls)
+    if (typeof url === "string" && url.startsWith("blob:"))
+      URL.revokeObjectURL(url);
+}
+
+function isRestorableScript(value: unknown): value is PodcastScript {
+  if (!value || typeof value !== 'object') return false;
+  const script = value as Record<string, unknown>;
+  const metadata = script.metadata;
+  if (metadata !== undefined) {
+    if (!metadata || typeof metadata !== 'object' || Array.isArray(metadata)) return false;
+    const details = metadata as Record<string, unknown>;
+    if (typeof details.host1Name !== 'string' || typeof details.host2Name !== 'string' ||
+      !['brief', 'standard', 'deep-dive'].includes(String(details.type)) ||
+      (details.format !== undefined && details.format !== 'dialogue' && details.format !== 'solo')) return false;
+  }
+  if (script.estimatedDuration !== undefined &&
+    (typeof script.estimatedDuration !== 'number' || !Number.isFinite(script.estimatedDuration) || script.estimatedDuration < 0)) return false;
+  return typeof script.title === 'string' && script.title.length <= 1000 &&
+    Array.isArray(script.segments) && script.segments.length > 0 && script.segments.length <= 10000 &&
+    script.segments.every(segment => segment && typeof segment === 'object' &&
+      typeof segment.speaker === 'string' && segment.speaker.length <= 256 && typeof segment.text === 'string' &&
+      segment.text.length <= 100000);
+}
+
 export const usePodcastGenerationStore = create<PodcastGenerationState>(
   (set, get) => ({
-    // Initial state
     isGenerating: false,
     progress: null,
     script: null,
@@ -76,6 +108,7 @@ export const usePodcastGenerationStore = create<PodcastGenerationState>(
 
     // Start generation
     startGeneration: (notebookId, script, options) => {
+      revokeAudioUrls(get().partialAudioUrls);
       set({
         isGenerating: true,
         notebookId,
@@ -139,55 +172,109 @@ export const usePodcastGenerationStore = create<PodcastGenerationState>(
     },
 
     // Rehydrate state from localStorage
+    /**
+     * Rehydrate from localStorage.
+     *
+     * Cross-reload durable resume is NOT implemented: `partialAudioUrls` are `blob:`
+     * handles that die with the document, and the TTS generator is an in-memory
+     * singleton that does not survive a reload. So we only reattach to a run that is
+     * still genuinely alive in this page. Otherwise the script and settings are
+     * restored as an INTERRUPTED DRAFT: not generating, not playable, restartable by
+     * the user, with stale audio handles dropped rather than offered as working audio.
+     * Returns true only when a live run was actually reattached.
+     */
     rehydrateState: (notebookId) => {
+      if (!notebookId) return false;
       const saved = localStorage.getItem(`active_podcast_${notebookId}`);
       if (!saved) return false;
 
+      let data: Record<string, unknown>;
       try {
-        const data = JSON.parse(saved);
-        // Only rehydrate if it was recent (within 30 mins)
-        if (Date.now() - data.timestamp > 30 * 60 * 1000) {
-          localStorage.removeItem(`active_podcast_${notebookId}`);
-          return false;
-        }
-
-        // Check if generator is actually running
-        const generator = getStreamingTTSGenerator();
-        if (!generator.isRunning()) {
-          console.log(
-            "🎙️ Stale podcast session found in localStorage, clearing.",
-          );
-          localStorage.removeItem(`active_podcast_${notebookId}`);
-          return false;
-        }
-
-        set({
-          isGenerating: true,
-          notebookId: data.notebookId,
-          script: data.script,
-          host1Name: data.host1Name || "Alex",
-          host2Name: data.host2Name || "Sarah",
-          podcastType: data.podcastType || "standard",
-          podcastFormat: data.podcastFormat || "dialogue",
-          partialAudioUrls: data.partialAudioUrls || [],
-          progress: {
-            phase: "generating",
-            currentSegment: data.partialAudioUrls?.length || 0,
-            totalSegments: data.script?.segments.length || 0,
-            percentage: Math.round(
-              ((data.partialAudioUrls?.length || 0) /
-                (data.script?.segments.length || 1)) *
-                100,
-            ),
-            message: "Recovering session...",
-            canPlay: data.partialAudioUrls?.length > 0,
-          },
-        });
-        return true;
-      } catch (e) {
-        console.error("Failed to rehydrate podcast state:", e);
+        const parsed: unknown = JSON.parse(saved);
+        if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return false;
+        data = parsed as Record<string, unknown>;
+      } catch {
+        localStorage.removeItem(`active_podcast_${notebookId}`);
         return false;
       }
+
+      const timestamp = data.timestamp;
+      if (typeof timestamp !== "number" || !Number.isFinite(timestamp)) {
+        localStorage.removeItem(`active_podcast_${notebookId}`);
+        return false;
+      }
+      // Only rehydrate if it was recent (within 30 mins)
+      if (timestamp > Date.now() + 60_000 || Date.now() - timestamp > 30 * 60 * 1000) {
+        localStorage.removeItem(`active_podcast_${notebookId}`);
+        return false;
+      }
+      // Never adopt a payload that belongs to another notebook.
+      if (data.notebookId !== notebookId) {
+        localStorage.removeItem(`active_podcast_${notebookId}`);
+        return false;
+      }
+      const script = data.script;
+      if (!isRestorableScript(script)) {
+        localStorage.removeItem(`active_podcast_${notebookId}`);
+        return false;
+      }
+
+      const generator = getStreamingTTSGenerator();
+      const current = get();
+      // A reattach is only honest when THIS notebook's own run is still executing here.
+      const isLiveReattach =
+        generator.isRunning() &&
+        current.isGenerating &&
+        current.notebookId === notebookId;
+
+      if (isLiveReattach) {
+        set({
+          progress: {
+            phase: "generating",
+            currentSegment: current.progress?.currentSegment ?? 0,
+            totalSegments: current.script?.segments.length || script.segments.length,
+            percentage: Math.min(100, current.progress?.percentage ?? 0),
+            message: "Recovering session...",
+            // Live in-memory handles only; persisted blob strings are not trusted.
+            canPlay: current.partialAudioUrls.length > 0,
+          },
+          canPlayPartial: current.partialAudioUrls.length > 0,
+        });
+        return true;
+      }
+
+      if (current.isGenerating && current.notebookId !== notebookId) {
+        // Another notebook owns the live run: do not replace it with a foreign draft.
+        return false;
+      }
+
+      // Interrupted draft. Keep the script and settings, drop the unusable audio.
+      console.info(
+        "🎙️ Restoring an interrupted podcast draft; cross-reload durable resume is not implemented.",
+      );
+      set({
+        isGenerating: false,
+        notebookId,
+        script,
+        audioUrl: null,
+        podcastId: null,
+        host1Name: typeof data.host1Name === "string" ? data.host1Name : "Alex",
+        host2Name: typeof data.host2Name === "string" ? data.host2Name : "Sarah",
+        podcastType: data.podcastType === "brief" || data.podcastType === "deep-dive" ? data.podcastType : "standard",
+        podcastFormat: data.podcastFormat === "solo" ? "solo" : "dialogue",
+        partialAudioUrls: [],
+        canPlayPartial: false,
+        progress: {
+          phase: "error",
+          currentSegment: 0,
+          totalSegments: script.segments.length,
+          percentage: 0,
+          message:
+            "This podcast was interrupted. Its audio was not saved, so start it again.",
+          canPlay: false,
+        },
+      });
+      return false;
     },
 
     // Save state to localStorage for persistence across reloads/crashes
@@ -202,7 +289,9 @@ export const usePodcastGenerationStore = create<PodcastGenerationState>(
         host2Name: state.host2Name,
         podcastType: state.podcastType,
         podcastFormat: state.podcastFormat,
-        partialAudioUrls: state.partialAudioUrls,
+        // `partialAudioUrls` are deliberately NOT persisted: `blob:` handles do not
+        // survive a reload, so writing them would only produce dead audio on return.
+        // Only a live in-memory run can supply working audio.
         timestamp: Date.now(),
       };
 
@@ -220,15 +309,20 @@ export const usePodcastGenerationStore = create<PodcastGenerationState>(
       if (currentNotebookId) {
         localStorage.removeItem(`active_podcast_${currentNotebookId}`);
       }
+      // The user abandoned this run: drop its segments instead of leaving a cancelled
+      // session's audio offered for playback.
+      revokeAudioUrls(get().partialAudioUrls);
       set({
         isGenerating: false,
+        partialAudioUrls: [],
+        canPlayPartial: false,
         progress: {
           phase: "cancelled",
           currentSegment: 0,
           totalSegments: 0,
           percentage: 0,
           message: "Generation cancelled",
-          canPlay: get().partialAudioUrls.length > 0,
+          canPlay: false,
         },
       });
     },
@@ -239,6 +333,7 @@ export const usePodcastGenerationStore = create<PodcastGenerationState>(
       if (currentNotebookId) {
         localStorage.removeItem(`active_podcast_${currentNotebookId}`);
       }
+      revokeAudioUrls(get().partialAudioUrls);
       set({
         isGenerating: false,
         progress: null,

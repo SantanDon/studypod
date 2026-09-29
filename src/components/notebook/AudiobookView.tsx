@@ -142,9 +142,14 @@ type AudiobookRuntimeCapabilities = {
 };
 
 type FullBookJobStatus = {
-  status?: "processing" | "paused" | "completed" | "failed";
+  status?: "processing" | "paused" | "completed" | "failed" | "cancelled";
   renderId?: string;
   renderStatus?: string;
+  cancelled?: boolean;
+  cancelling?: boolean;
+  workerActive?: boolean;
+  alreadyCancelled?: boolean;
+  code?: string;
   phase?: string;
   progress?: number;
   url?: string;
@@ -429,8 +434,10 @@ export default function AudiobookView({
   );
 
   useEffect(() => {
+    // Poll active jobs plus cancelling ones until the truthful terminal
+    // state (worker reported stopped) arrives; never infer completion locally.
     const processingJobs = notebookJobs.filter(
-      (job) => job.status === "processing",
+      (job) => job.status === "processing" || job.workerActive,
     );
     if (processingJobs.length === 0) return undefined;
 
@@ -446,7 +453,7 @@ export default function AudiobookView({
               },
             );
             if (response.status === 404) {
-              if (!cancelled) clearJob(job.bookId);
+              if (!cancelled) clearJob(job.bookId, job.jobId);
               return;
             }
             if (!response.ok) {
@@ -456,14 +463,18 @@ export default function AudiobookView({
             }
             const data = (await response.json()) as FullBookJobStatus;
             if (cancelled || !data.status) return;
+            const currentJob = useAudiobookStore.getState().jobs[job.bookId];
+            if (currentJob?.jobId !== job.jobId || currentJob.notebookId !== job.notebookId) return;
 
             updateJob(job.bookId, {
               status: data.status,
               renderId: data.renderId || job.renderId,
               renderStatus: data.renderStatus || job.renderStatus,
+              cancelling: data.cancelling ?? job.cancelling,
+              workerActive: data.workerActive ?? job.workerActive,
               phase: data.phase,
               progress: data.progress ?? job.progress,
-              url: data.url || job.url,
+              url: data.status === "cancelled" ? undefined : data.url || job.url,
               playbackManifestUrl:
                 data.playbackManifestUrl || job.playbackManifestUrl,
               error: data.error,
@@ -493,8 +504,11 @@ export default function AudiobookView({
               fileSizeBytes: data.fileSizeBytes,
               startedAt: data.startedAt || job.startedAt,
               completedAt: data.completedAt,
-            });
+            }, job.jobId);
 
+            const statusChanged = data.status !== currentJob.status ||
+              Boolean(data.workerActive) !== Boolean(currentJob.workerActive);
+            if (!statusChanged) return;
             if (data.status === "completed") {
               toast.success(`${job.bookTitle} is ready to download`);
             } else if (data.status === "paused") {
@@ -503,6 +517,16 @@ export default function AudiobookView({
               );
             } else if (data.status === "failed") {
               toast.error(data.error || `Could not create ${job.bookTitle}`);
+            } else if (data.status === "cancelled") {
+              if (data.cancelling || data.workerActive) {
+                toast.message(
+                  `${job.bookTitle}: cancellation recorded, worker stopping at a safe point.`,
+                );
+              } else {
+                toast.message(
+                  `${job.bookTitle} was cancelled. Finished chapters stay playable.`,
+                );
+              }
             }
           } catch (error) {
             console.error("Audiobook status check failed", error);
@@ -748,7 +772,8 @@ export default function AudiobookView({
       const status =
         data.status === "completed" ||
         data.status === "paused" ||
-        data.status === "failed"
+        data.status === "failed" ||
+        data.status === "cancelled"
           ? data.status
           : "processing";
       upsertJob({
@@ -812,7 +837,50 @@ export default function AudiobookView({
     if (!command) return;
     const finish = (ok: boolean, message: string) => useStudioAudioCommands.getState().finish(notebookId, command.id, ok, message);
     if (command.operation === 'open') { finish(true, 'Audiobook Studio is open. Use its chapter player and download controls.'); return; }
-    if (command.operation === 'cancel') { finish(false, 'This runtime does not expose a safe audiobook cancellation command. No worker was stopped.'); return; }
+    if (command.operation === 'cancel') {
+      // Explicit source choice is required: exactly one selected source, and
+      // only that source's job may be cancelled. A cancel request without an
+      // unambiguous current source/job never touches a different book.
+      const targetBook = command.sourceIds.length === 1 ? ebooks.find((item) => item.id === command.sourceIds[0]) : undefined;
+      if (!targetBook) { finish(false, 'To cancel, first select exactly one imported document from this notebook. Without an unambiguous source nothing is cancelled.'); return; }
+      const targetExisting = useAudiobookStore.getState().jobs[targetBook.id];
+      if (!targetExisting || targetExisting.notebookId !== notebookId || targetExisting.status !== 'processing') { finish(false, 'There is no active audiobook job for the selected source to cancel.'); return; }
+      const targetJobId = targetExisting.jobId;
+      const targetTitle = targetExisting.bookTitle;
+      void (async () => {
+        try {
+          const response = await fetch(`${API_BASE_URL}/audiobook/job-status/${targetJobId}/cancel`, {
+            method: 'POST',
+            headers: jsonHeaders(),
+          });
+          const raw = await response.text();
+          let data = {} as FullBookJobStatus;
+          try { data = JSON.parse(raw) as FullBookJobStatus; } catch { /* non-JSON error body */ }
+          if (!response.ok) throw new Error(data.error || raw || `Cancel failed (${response.status})`);
+          if (useAudiobookStore.getState().jobs[targetBook.id]?.jobId !== targetJobId) {
+            finish(true, 'The earlier cancellation request returned. A newer audiobook job was left unchanged.');
+            return;
+          }
+          useAudiobookStore.getState().updateJob(targetBook.id, {
+            status: 'cancelled',
+            phase: data.phase || 'cancelled',
+            cancelling: data.cancelling,
+            workerActive: data.workerActive,
+            error: undefined,
+            completedAt: undefined,
+            url: undefined,
+          }, targetJobId);
+          finish(true, data.cancelling
+            ? `Cancellation for "${targetTitle}" is recorded and the worker is stopping at the next safe point (not instantly). Studio keeps polling until it reports stopped; finished chapters stay playable.`
+            : `Cancellation for "${targetTitle}" is recorded and the worker has stopped. Finished chapters stay playable and a retry reuses them.`);
+        } catch (error) {
+          finish(false, error instanceof Error && /durably|persist/i.test(error.message)
+            ? 'The cancellation was NOT recorded (the server could not persist it). Nothing was cancelled; try again.'
+            : 'The audiobook cancellation did not complete. No worker state was invented.');
+        }
+      })();
+      return;
+    }
     const book = command.sourceIds.length === 1 ? ebooks.find((item) => item.id === command.sourceIds[0]) : undefined;
     if (!book) { finish(false, 'Choose one imported document from this notebook. A chat summary cannot stand in for the full book.'); return; }
     setCurrentBookId(book.id);
@@ -821,9 +889,9 @@ export default function AudiobookView({
       finish(Boolean(existing && existing.notebookId === notebookId), existing?.notebookId === notebookId ? 'Last reported audiobook status: ' + existing.status + '. Studio is refreshing the job.' : 'No audiobook job exists for this source.');
       return;
     }
-    if (command.operation === 'resume' && (!existing || existing.notebookId !== notebookId || !['paused', 'failed'].includes(existing.status))) { finish(false, 'There is no paused or failed audiobook for this source to retry.'); return; }
+    if (command.operation === 'resume' && (!existing || existing.notebookId !== notebookId || !['paused', 'failed', 'cancelled'].includes(existing.status))) { finish(false, 'There is no paused, failed or cancelled audiobook for this source to retry.'); return; }
     void generateFullBook(book).then((ok) => finish(ok, ok ? 'Audio request accepted. Follow the chapter progress in chat or Studio; a full download is available only after completion.' : 'The audiobook did not start. Check the local runtime, source and Studio error message.')).catch(() => finish(false, 'The audiobook request failed. No completion is claimed.'));
-  }, [audioCommand, ebooks, sources, notebookId, setCurrentBookId, generateFullBook]);
+  }, [audioCommand, ebooks, sources, notebookId, setCurrentBookId, generateFullBook, jsonHeaders]);
 
   const downloadAudio = async (url: string, fileName: string) => {
     try {
@@ -882,6 +950,43 @@ export default function AudiobookView({
     } catch (error) {
       console.error("Audiobook share failed", error);
       toast.error("Could not share this audiobook");
+    }
+  };
+
+  const cancelJob = async (job: AudiobookJob) => {
+    // Never cancel a different book: the job must belong to the selected book.
+    if (!selectedBook || job.bookId !== selectedBook.id) {
+      toast.error("Select the book first, then cancel its own job.");
+      return;
+    }
+    try {
+      const response = await fetch(
+        `${API_BASE_URL}/audiobook/job-status/${job.jobId}/cancel`,
+        { method: "POST", headers: jsonHeaders() },
+      );
+      const raw = await response.text();
+      let data = {} as FullBookJobStatus;
+      try { data = JSON.parse(raw) as FullBookJobStatus; } catch { /* non-JSON error body */ }
+      if (!response.ok) throw new Error(data.error || raw || `Cancel failed (${response.status})`);
+      if (useAudiobookStore.getState().jobs[job.bookId]?.jobId !== job.jobId) return;
+      updateJob(job.bookId, {
+        status: "cancelled",
+        phase: data.phase || "cancelled",
+        cancelling: data.cancelling,
+        workerActive: data.workerActive,
+        error: undefined,
+        url: undefined,
+      }, job.jobId);
+      toast.message(
+        data.cancelling
+          ? "Cancellation recorded. The worker stops at the next safe point — Studio keeps checking until it reports stopped."
+          : "Audiobook cancellation recorded. Finished chapters stay playable.",
+      );
+    } catch (error) {
+      console.error("Audiobook cancel failed", error);
+      toast.error(
+        error instanceof Error ? error.message : "Could not cancel this audiobook",
+      );
     }
   };
 
@@ -1279,6 +1384,17 @@ export default function AudiobookView({
                         state are saved durably, so a retry continues instead of
                         starting over.
                       </p>
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        className="w-full"
+                        onClick={() =>
+                          selectedBookJob && void cancelJob(selectedBookJob)
+                        }
+                        data-testid="audiobook-cancel"
+                      >
+                        Cancel generation
+                      </Button>
                     </div>
                   )}
 
@@ -1376,6 +1492,45 @@ export default function AudiobookView({
                       >
                         <RefreshCcw />
                         Resume generation
+                      </Button>
+                    </div>
+                  )}
+
+                  {selectedBookJob?.status === "cancelled" && (
+                    <div className="space-y-3" data-testid="audiobook-job-cancelled">
+                      <div>
+                        <h3 className="text-sm font-semibold">
+                          {selectedBookJob.cancelling || selectedBookJob.workerActive
+                            ? "Cancelling audiobook generation…"
+                            : "Audiobook generation cancelled"}
+                        </h3>
+                        <p className="mt-1 text-xs leading-5 text-muted-foreground">
+                          {selectedBookJob.cancelling || selectedBookJob.workerActive
+                            ? "The cancellation is recorded and the worker is stopping at the next safe point — this is cooperative, not instant, and can take a while during encoding. Studio keeps checking until it reports stopped."
+                            : "Cancellation is saved. Finished chapters remain playable below and a retry reuses them instead of starting over. Nothing cancelled will be published as complete."}
+                        </p>
+                        {(selectedBookJob.availableChapterCount || 0) > 0 && (
+                          <p className="mt-2 text-[11px] leading-5 text-muted-foreground">
+                            {selectedBookJob.availableChapterCount} completed
+                            chapters remain playable while generation is
+                            retried.
+                          </p>
+                        )}
+                      </div>
+                      <Button
+                        className="w-full"
+                        onClick={() => generateFullBook(selectedBook)}
+                        disabled={Boolean(selectedBookJob.workerActive)}
+                        title={
+                          selectedBookJob.workerActive
+                            ? "Wait until the previous execution reports stopped, then retry"
+                            : undefined
+                        }
+                      >
+                        <RefreshCcw />
+                        {selectedBookJob.workerActive
+                          ? "Waiting for worker to stop…"
+                          : "Retry generation"}
                       </Button>
                     </div>
                   )}

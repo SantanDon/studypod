@@ -31,7 +31,7 @@ These checks establish container integrity and planned chapter accounting, not p
 ## Limits that must remain visible
 
 - Podcast generation remains browser-based. Closing/reloading the page does not have a new durable resume mechanism; chat reports that limitation instead of claiming a resumed job.
-- Audiobook generation has no new safe cancellation endpoint. Chat rejects that command rather than pretending a worker was stopped. Existing paused/failed audiobook retries still require explicit user confirmation.
+- Audiobook cancellation uses the owned `POST /api/audiobook/job-status/:id/cancel` endpoint and requires exactly one selected book. Recording cancellation and final publication are serialized under the same book lock. `cancelling` and `workerActive` distinguish a recorded request from a stopped worker; speech inference stops cooperatively at a checkpoint, not necessarily instantly. Explicit retries wait for the previous worker to finish and use a new job identity. This remains a single-coordinator, same-host runtime, not a distributed queue.
 - Full-document extraction, actual narration, voice naturalness, accessibility in real browsers, long-duration resource use, playback and authenticated downloads still need the corresponding end-to-end acceptance evidence.
 - No speech engine was replaced or trained by this patch. The paused Plato run was not resumed.
 
