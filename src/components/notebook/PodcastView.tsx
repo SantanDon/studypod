@@ -1,3 +1,4 @@
+import { useStudioAudioCommands } from '@/lib/audio/studioAudioCommands';
 import React, { useState, useEffect, useCallback, useRef } from "react";
 import { FontAwesomeIcon } from "@fortawesome/react-fontawesome";
 import {
@@ -63,14 +64,17 @@ import {
 import { indexedDBService } from "@/services/indexedDBService";
 import { isSourceUsableForGroundedWork } from "@/lib/sources/sourceProcessing";
 
+let podcastPreparation: { notebookId: string; cancelled: boolean } | null = null;
+
 interface PodcastViewProps {
   notebookId?: string;
 }
 
 const PodcastView: React.FC<PodcastViewProps> = ({ notebookId }) => {
   const safeNotebookId = notebookId || "";
+  const audioCommand = useStudioAudioCommands((state) => state.requests[safeNotebookId]);
   const { sources } = useSources(safeNotebookId);
-  const usableSources = (sources || []).filter(isSourceUsableForGroundedWork);
+  const usableSources = React.useMemo(() => (sources || []).filter(isSourceUsableForGroundedWork), [sources]);
   const { notes } = useNotes(safeNotebookId);
   const { toast } = useToast();
 
@@ -102,6 +106,7 @@ const PodcastView: React.FC<PodcastViewProps> = ({ notebookId }) => {
     useState<AudioValidationResult | null>(null);
   const restoredAudioUrlRef = useRef<string | null>(null);
   const restoredPodcastRef = useRef<string | null>(null);
+  const finalizingScriptRef = useRef<unknown>(null);
 
   // Customization state
   const [host1, setHost1] = useState("Alex");
@@ -225,8 +230,8 @@ const PodcastView: React.FC<PodcastViewProps> = ({ notebookId }) => {
 
       if (prog.phase === "complete") {
         toast({
-          title: "Podcast Ready",
-          description: "Audio generated successfully.",
+          title: "Finishing podcast",
+          description: "Speech segments are ready. Preparing playback and download...",
         });
       } else if (prog.phase === "error") {
         toast({
@@ -242,6 +247,13 @@ const PodcastView: React.FC<PodcastViewProps> = ({ notebookId }) => {
   // Handle audio ready - called after each segment AND at completion
   const handleAudioReady = useCallback(
     (result: StreamingResult) => {
+      const started = usePodcastGenerationStore.getState();
+      if (started.notebookId !== safeNotebookId || !started.isGenerating || !started.script) return;
+      const ownedScript = started.script;
+      const isCurrent = () => {
+        const state = usePodcastGenerationStore.getState();
+        return state.notebookId === safeNotebookId && state.script === ownedScript && state.isGenerating;
+      };
       setAudioReady(result.audioUrls);
 
       // Only combine and save when generation is complete
@@ -258,6 +270,8 @@ const PodcastView: React.FC<PodcastViewProps> = ({ notebookId }) => {
       });
 
       if (isComplete && result.audioUrls.length > 0) {
+        if (finalizingScriptRef.current === ownedScript) return;
+        finalizingScriptRef.current = ownedScript;
         console.log("[PodcastView] Generation complete, combining audio...");
 
         const audioConfig = getPodcastAudioConfig();
@@ -266,6 +280,7 @@ const PodcastView: React.FC<PodcastViewProps> = ({ notebookId }) => {
         generator
           .combineAudios(enableStudioEQ)
           .then(async (combined) => {
+            if (!isCurrent()) { if (combined?.startsWith('blob:')) URL.revokeObjectURL(combined); return; }
             console.log(
               "[PodcastView] combineAudios result:",
               combined ? "success" : "null (Web Speech mode)",
@@ -279,6 +294,7 @@ const PodcastView: React.FC<PodcastViewProps> = ({ notebookId }) => {
                 await fetch(combined).then((r) => r.blob()),
               )
                 .then((v) => {
+                  if (usePodcastGenerationStore.getState().notebookId !== safeNotebookId) return;
                   setAudioValidation(v);
                   if (!v.hasSpeech) {
                     console.warn(
@@ -301,13 +317,13 @@ const PodcastView: React.FC<PodcastViewProps> = ({ notebookId }) => {
                 );
 
               // AUTO-SAVE to History (only for Kokoro which produces actual audio files)
-              const currentScript = usePodcastGenerationStore.getState().script;
-              const scriptTitle = currentScript?.title || "Audio Overview";
+              const scriptTitle = ownedScript.title || "Audio Overview";
 
               try {
                 // Fetch the blob from the URL
                 const response = await fetch(combined);
                 const blob = await response.blob();
+                if (!isCurrent()) { URL.revokeObjectURL(combined); return; }
 
                 console.log("[PodcastView] Auto-save check:", {
                   scriptTitle,
@@ -323,6 +339,7 @@ const PodcastView: React.FC<PodcastViewProps> = ({ notebookId }) => {
                     blob,
                     duration: result.totalDuration,
                   });
+                  if (!isCurrent()) { URL.revokeObjectURL(combined); return; }
                   setFinalAudio(
                     combined,
                     safeNotebookId,
@@ -338,6 +355,7 @@ const PodcastView: React.FC<PodcastViewProps> = ({ notebookId }) => {
                   );
                 }
               } catch (e) {
+                if (!isCurrent()) { URL.revokeObjectURL(combined); return; }
                 setFinalAudio(combined, safeNotebookId, scriptTitle);
                 console.error("[PodcastView] Auto-save failed:", e);
                 toast({
@@ -362,6 +380,7 @@ const PodcastView: React.FC<PodcastViewProps> = ({ notebookId }) => {
             }
           })
           .catch((err) => {
+            if (!isCurrent()) return;
             console.error("[PodcastView] combineAudios error:", err);
             // Reset generating state to prevent UI freeze
             usePodcastGenerationStore.getState().cancelGeneration();
@@ -378,16 +397,28 @@ const PodcastView: React.FC<PodcastViewProps> = ({ notebookId }) => {
   );
 
   // Generate podcast
-  const handleGenerate = async () => {
-    if (usableSources.length === 0) {
+  const handleGenerate = useCallback(async (options?: { sourceIds?: string[]; focus?: string }): Promise<boolean> => {
+    if (!safeNotebookId || podcastPreparation || usePodcastGenerationStore.getState().isGenerating || getStreamingTTSGenerator().isRunning()) {
+      toast({ title: 'Audio is already preparing or generating', description: 'Finish or cancel the current podcast first.' });
+      return false;
+    }
+    const generationSources = options?.sourceIds ? usableSources.filter((source) => options.sourceIds?.includes(source.id)) : usableSources;
+    if (options?.sourceIds && (options.sourceIds.length === 0 || generationSources.length !== new Set(options.sourceIds).size)) {
+      toast({ title: 'Source selection changed', description: 'Choose ready sources from this notebook again.', variant: 'destructive' });
+      return false;
+    }
+    const generationFocus = options?.focus ?? podcastFocus;
+    if (generationSources.length === 0) {
       toast({
         title: "No ready sources",
         description: "Add a source or wait for processing to finish before generating audio.",
         variant: "destructive",
       });
-      return;
+      return false;
     }
 
+    const preparation = { notebookId: safeNotebookId, cancelled: false };
+    podcastPreparation = preparation;
     setIsStarting(true);
     toast({
       title: "Starting Generation",
@@ -405,16 +436,16 @@ const PodcastView: React.FC<PodcastViewProps> = ({ notebookId }) => {
         return (voice?.gender as "male" | "female") || "female";
       };
 
-      const combinedContent = buildPodcastSourceContext(usableSources, {
-        focus: podcastFocus,
+      const combinedContent = buildPodcastSourceContext(generationSources, {
+        focus: generationFocus,
         maxChars: 12000,
       });
 
       const combinedNotes = [
-        podcastFocus.trim()
-          ? `USER-SELECTED EPISODE FOCUS: ${podcastFocus.trim()}`
+        generationFocus.trim()
+          ? `USER-SELECTED EPISODE FOCUS: ${generationFocus.trim()}`
           : "",
-        ...(notes || []).map((n) => n.content),
+        ...(options?.sourceIds ? [] : notes || []).map((n) => n.content),
       ]
         .filter(Boolean)
         .join("\n\n")
@@ -427,7 +458,7 @@ const PodcastView: React.FC<PodcastViewProps> = ({ notebookId }) => {
           description: "Your sources don't have enough text content.",
           variant: "destructive",
         });
-        return;
+        return false;
       }
 
       const generatedScript = await generatePodcastScript(combinedContent, {
@@ -440,6 +471,8 @@ const PodcastView: React.FC<PodcastViewProps> = ({ notebookId }) => {
         format: podcastFormat,
       });
 
+      if (preparation.cancelled) return false;
+      if (!generatedScript.segments?.length) throw new Error('The podcast script has no spoken segments');
       // Inject our custom names and metadata into the script before starting
       generatedScript.metadata = {
         host1Name: host1,
@@ -473,7 +506,11 @@ const PodcastView: React.FC<PodcastViewProps> = ({ notebookId }) => {
       }
 
       const generator = getStreamingTTSGenerator();
-      generator.startStreaming(
+      const isCurrent = () => {
+        const state = usePodcastGenerationStore.getState();
+        return state.notebookId === safeNotebookId && state.script === generatedScript && state.isGenerating;
+      };
+      void generator.startStreaming(
         generatedScript,
         {
           speed: audioConfig.speed,
@@ -482,9 +519,15 @@ const PodcastView: React.FC<PodcastViewProps> = ({ notebookId }) => {
           pauseBetweenSegments: audioConfig.pauseBetweenSegments,
           speakerVoiceMap,
         },
-        handleProgress,
-        handleAudioReady,
-      );
+        (next) => { if (isCurrent()) handleProgress(next); },
+        (next) => { if (isCurrent()) handleAudioReady(next); },
+      ).catch((error) => {
+        if (!isCurrent()) return;
+        cancelGeneration();
+        updateProgress({ phase: 'error', currentSegment: 0, totalSegments: generatedScript.segments.length, percentage: 0, message: 'Podcast audio generation failed', canPlay: false, usingKokoro: false });
+        toast({ title: 'Audio generation failed', description: error instanceof Error ? error.message : 'Try again from Studio.', variant: 'destructive' });
+      });
+      return true;
     } catch (error) {
       console.error("Generation failed:", error);
       setIsStarting(false);
@@ -494,14 +537,38 @@ const PodcastView: React.FC<PodcastViewProps> = ({ notebookId }) => {
           error instanceof Error ? error.message : "An error occurred",
         variant: "destructive",
       });
+      return false;
+    } finally {
+      setIsStarting(false);
+      if (podcastPreparation === preparation) podcastPreparation = null;
     }
-  };
+  }, [safeNotebookId, toast, usableSources, podcastFocus, host1Voice, host2Voice, notes, host1, host2, podcastType, podcastFormat, startGeneration, handleProgress, handleAudioReady, cancelGeneration, updateProgress]);
 
-  const handleCancel = () => {
-    cancelGeneration();
-    speechSynthesis?.cancel();
+  const handleCancel = useCallback(() => {
+    if (podcastPreparation?.notebookId === safeNotebookId) podcastPreparation.cancelled = true;
+    setIsStarting(false);
+    if (usePodcastGenerationStore.getState().notebookId === safeNotebookId) cancelGeneration();
+    if (typeof speechSynthesis !== 'undefined') speechSynthesis.cancel();
     toast({ title: "Cancelled", description: "Generation was cancelled" });
-  };
+  }, [safeNotebookId, cancelGeneration, toast]);
+
+  useEffect(() => {
+    if (audioCommand?.kind !== 'podcast' || audioCommand.phase !== 'queued' || !sources) return;
+    const command = useStudioAudioCommands.getState().claim(safeNotebookId, 'podcast');
+    if (!command) return;
+    const finish = (ok: boolean, message: string) => useStudioAudioCommands.getState().finish(safeNotebookId, command.id, ok, message);
+    setIsMinimized(false);
+    if (command.operation === 'open') { finish(true, 'Podcast Studio is open with its playback and download controls.'); return; }
+    const current = usePodcastGenerationStore.getState();
+    const belongsHere = current.notebookId === safeNotebookId;
+    if (command.operation === 'status') { finish(belongsHere, belongsHere ? current.progress?.message || (current.audioUrl ? 'Podcast playback is available in Studio.' : 'No active podcast generation.') : 'There is no podcast job in this notebook.'); return; }
+    if (command.operation === 'cancel') {
+      if (podcastPreparation?.notebookId !== safeNotebookId && !(belongsHere && current.isGenerating)) { finish(false, 'There is no active podcast in this notebook to cancel.'); return; }
+      handleCancel(); finish(true, 'Podcast generation was cancelled. No completed download is claimed.'); return;
+    }
+    if (command.operation === 'resume') { finish(false, 'Browser podcast generation cannot resume across a page reload yet. Confirm a new generation in Studio instead.'); return; }
+    void handleGenerate({ sourceIds: command.sourceIds, focus: command.focus }).then((ok) => finish(ok, ok ? 'Podcast generation has started using the selected sources. Follow its progress here or in Studio.' : 'Podcast generation did not start. Check the selected sources or active generation.')).catch(() => finish(false, 'Podcast generation could not start.'));
+  }, [audioCommand, sources, safeNotebookId, handleGenerate, handleCancel]);
 
   const formatETA = (seconds?: number): string => {
     if (!seconds) return "";
@@ -787,7 +854,7 @@ const PodcastView: React.FC<PodcastViewProps> = ({ notebookId }) => {
 
             <button
               className={`podcast-generate-btn ${isStarting ? "loading" : ""}`}
-              onClick={handleGenerate}
+              onClick={() => { void handleGenerate(); }}
               disabled={usableSources.length === 0 || isStarting}
               data-testid="btn-start-production"
             >
@@ -938,7 +1005,7 @@ const PodcastView: React.FC<PodcastViewProps> = ({ notebookId }) => {
       />
 
       <div className="player-footer">
-        <button className="footer-btn" onClick={handleGenerate}>
+        <button className="footer-btn" onClick={() => { void handleGenerate(); }}>
           <FontAwesomeIcon icon={faArrowsRotate} /> Regenerate
         </button>
         <button className="footer-btn" onClick={() => setIsSettingsOpen(true)}>

@@ -1,3 +1,4 @@
+import { useStudioAudioCommands } from '@/lib/audio/studioAudioCommands';
 import React from 'react';
 import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
@@ -178,6 +179,16 @@ const StudioSidebar = ({
   const hasOnlyTweets = sources && sources.length > 0 && sources.every(s => s.type === 'tweet');
   const { isLoading, isCreating, isUpdating, isDeleting, isGenerating, isGeneratingMap, isDeletingMap, isEditingMode, isQuizActive, isQuizCompleted } = flags;
   const { generationError, generatingProgress } = misc;
+  const audioCommand = useStudioAudioCommands((store) => notebookId ? store.requests[notebookId] : undefined);
+  React.useEffect(() => {
+    if (!notebookId || audioCommand?.phase !== 'queued') return;
+    if (isEditingMode || isQuizActive) {
+      const command = useStudioAudioCommands.getState().claim(notebookId, audioCommand.kind);
+      if (command) useStudioAudioCommands.getState().finish(notebookId, command.id, false, 'Close the current Studio editor or quiz before opening an audio task. Your work was not changed.');
+      return;
+    }
+    setActiveWorkspace(audioCommand.kind === 'audiobook' ? 'audiobook' : 'studio');
+  }, [notebookId, audioCommand, isEditingMode, isQuizActive]);
   const {
     handleGenerateConceptMap, handleCreateNote, handleEditNote, handleSaveNote, handleDeleteNote, handleCancel,
     handleStartQuiz, handleQuizComplete, handleQuizRetry, handleQuizClose,
@@ -281,7 +292,7 @@ const StudioSidebar = ({
               description="Turn notebook evidence into durable outputs without leaving the research context."
             />
 
-            {!hasOnlyTweets && notebookId && (
+            {(!hasOnlyTweets || audioCommand?.kind === 'podcast') && notebookId && (
               <div data-testid="audio-overview-studio-card">
                 <PodcastView notebookId={notebookId} />
               </div>

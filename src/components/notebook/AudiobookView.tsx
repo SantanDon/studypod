@@ -1,3 +1,4 @@
+import { hasNarrationManifest, useStudioAudioCommands } from '@/lib/audio/studioAudioCommands';
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   ArrowLeft,
@@ -40,6 +41,8 @@ import AudiobookDirectionPanel, {
 } from "./AudiobookDirectionPanel";
 import AudioPlayer from "./AudioPlayer";
 import AudiobookChapterPlayer from "./AudiobookChapterPlayer";
+
+const pendingFullBookStarts = new Set<string>();
 
 interface AudiobookViewProps {
   notebookId: string;
@@ -265,6 +268,7 @@ export default function AudiobookView({
   const [playbackMediaId, setPlaybackMediaId] = useState<string | null>(null);
   const [playbackTitle, setPlaybackTitle] = useState("Audiobook");
   const bookUploadRef = useRef<HTMLInputElement>(null);
+  const audioCommand = useStudioAudioCommands((state) => state.requests[notebookId]);
 
   const ebooks = useMemo(
     () =>
@@ -276,7 +280,7 @@ export default function AudiobookView({
           ),
         }))
         .filter(
-          (source) => String(source.type) === "ebook",
+          (source) => hasNarrationManifest(source),
         ) as AudiobookSource[],
     [sources],
   );
@@ -705,7 +709,7 @@ export default function AudiobookView({
     }
   };
 
-  const generateFullBook = async (book: AudiobookSource) => {
+  const generateFullBook = useCallback(async (book: AudiobookSource): Promise<boolean> => {
     const metadata = parseMetadata(book.metadata);
     const chapters = metadata.chapters || [];
     const narratableChapters = chapters.filter(
@@ -713,8 +717,15 @@ export default function AudiobookView({
     );
     const title = formatDisplayTitle(book.title, "Imported book");
     const fileName = metadata.fileName || book.title || "book.epub";
-    const existingJob = jobs[book.id];
-    if (existingJob?.status === "processing") return;
+    const existingJob = useAudiobookStore.getState().jobs[book.id];
+    if (existingJob?.notebookId === notebookId && existingJob.status === 'processing') return true;
+    if (!audiobookRuntimeAvailable || !metadata.fileName || narratableChapters.length === 0) {
+      toast.error('Full narration needs the local audiobook runtime and an imported document with chapters.');
+      return false;
+    }
+    const startKey = notebookId + ':' + book.id;
+    if (pendingFullBookStarts.has(startKey)) return false;
+    pendingFullBookStarts.add(startKey);
 
     try {
       const response = await fetch(`${API_BASE_URL}/audiobook/generate-full`, {
@@ -732,6 +743,7 @@ export default function AudiobookView({
       });
       if (!response.ok) throw new Error(await response.text());
       const data = await response.json();
+      if (typeof data.jobId !== 'string' || !data.jobId) throw new Error('No audiobook job was returned');
 
       const status =
         data.status === "completed" ||
@@ -784,11 +796,34 @@ export default function AudiobookView({
             ? `Resuming ${title} from completed chapters.`
             : `Started ${title}. Chapters will appear as they finish.`,
       );
+      return true;
     } catch (error) {
       console.error("Full audiobook generation failed to start", error);
       toast.error("Could not start the audiobook");
+      return false;
+    } finally {
+      pendingFullBookStarts.delete(startKey);
     }
-  };
+  }, [notebookId, audiobookRuntimeAvailable, jsonHeaders, selectedVoice, selectedStyle, outputFormat, effectiveProvider, pronunciationsByBook, upsertJob]);
+
+  useEffect(() => {
+    if (audioCommand?.kind !== 'audiobook' || audioCommand.phase !== 'queued' || !sources) return;
+    const command = useStudioAudioCommands.getState().claim(notebookId, 'audiobook');
+    if (!command) return;
+    const finish = (ok: boolean, message: string) => useStudioAudioCommands.getState().finish(notebookId, command.id, ok, message);
+    if (command.operation === 'open') { finish(true, 'Audiobook Studio is open. Use its chapter player and download controls.'); return; }
+    if (command.operation === 'cancel') { finish(false, 'This runtime does not expose a safe audiobook cancellation command. No worker was stopped.'); return; }
+    const book = command.sourceIds.length === 1 ? ebooks.find((item) => item.id === command.sourceIds[0]) : undefined;
+    if (!book) { finish(false, 'Choose one imported document from this notebook. A chat summary cannot stand in for the full book.'); return; }
+    setCurrentBookId(book.id);
+    const existing = useAudiobookStore.getState().jobs[book.id];
+    if (command.operation === 'status') {
+      finish(Boolean(existing && existing.notebookId === notebookId), existing?.notebookId === notebookId ? 'Last reported audiobook status: ' + existing.status + '. Studio is refreshing the job.' : 'No audiobook job exists for this source.');
+      return;
+    }
+    if (command.operation === 'resume' && (!existing || existing.notebookId !== notebookId || !['paused', 'failed'].includes(existing.status))) { finish(false, 'There is no paused or failed audiobook for this source to retry.'); return; }
+    void generateFullBook(book).then((ok) => finish(ok, ok ? 'Audio request accepted. Follow the chapter progress in chat or Studio; a full download is available only after completion.' : 'The audiobook did not start. Check the local runtime, source and Studio error message.')).catch(() => finish(false, 'The audiobook request failed. No completion is claimed.'));
+  }, [audioCommand, ebooks, sources, notebookId, setCurrentBookId, generateFullBook]);
 
   const downloadAudio = async (url: string, fileName: string) => {
     try {

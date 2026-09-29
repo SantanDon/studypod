@@ -1,3 +1,5 @@
+import StudioAudioCommandCard from './StudioAudioCommandCard';
+import { parseStudioAudioIntent, useStudioAudioCommands } from '@/lib/audio/studioAudioCommands';
 import { lazy, Suspense, useState, useEffect, useRef, useCallback } from 'react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -184,6 +186,13 @@ const ChatArea = ({
   const handleSendMessage = useCallback(async (messageText?: string, sourceIdsOverride?: string[]) => {
     const textToSend = messageText || message.trim();
     if (textToSend && notebookId) {
+      const audioIntent = !sourceIdsOverride ? parseStudioAudioIntent(textToSend) : null;
+      if (audioIntent) {
+        const accepted = useStudioAudioCommands.getState().draft(notebookId, audioIntent, activeSourceId);
+        if (accepted) { setMessage(''); setFailedMessage(null); }
+        else toast({ title: 'An audio command is already waiting', description: 'Finish or dismiss that command before sending another.' });
+        return;
+      }
       // Check guest message limit
       if (isGuest && !canSendMessage) {
         showAuthPrompt('send more messages');
@@ -241,6 +250,7 @@ const ChatArea = ({
     responseStyle,
     sendMessageAsync,
     showAuthPrompt,
+    toast,
   ]);
 
   const handleAudioListeningQuestion = useCallback((request: AudioListeningQuestionRequest) => {
@@ -559,6 +569,7 @@ const ChatArea = ({
              </div>
           </ScrollArea>
 
+          {notebookId && <StudioAudioCommandCard notebookId={notebookId} sources={sources || []} />}
           {/* Chat Input - Fixed at bottom */}
           <ChatInput 
             message={message}

@@ -1,3 +1,4 @@
+import { concatenatePcmWav } from "./pcmWav";
 /**
  * Streaming TTS Generator - HYBRID VERSION
  *
@@ -783,7 +784,7 @@ class StreamingTTSGenerator {
    */
   async combineAudios(enableStudioEQ: boolean = true): Promise<string | null> {
     if (this.generatedAudios.length === 0) {
-      console.warn("[StreamingTTSGenerator] No audios to combine");
+      if (this.usingKokoro) throw new Error("No generated audio is available to assemble");
       return null;
     }
 
@@ -797,6 +798,8 @@ class StreamingTTSGenerator {
     const validAudios = this.generatedAudios.filter(
       (a) => !!a.blob && a.blob.size > 0,
     );
+    if (this.isGenerating) throw new Error("Podcast audio is still generating");
+    if (validAudios.length !== this.generatedAudios.length) throw new Error("Cannot export a podcast with missing audio segments");
     const blobs = validAudios.map((a) => a.blob!);
 
     console.log(
@@ -821,7 +824,7 @@ class StreamingTTSGenerator {
       return url;
     } catch (e) {
       console.error("[StreamingTTSGenerator] Failed to combine audio", e);
-      return null;
+      throw e; // An assembly failure is not browser-speech fallback or a ready download.
     }
   }
 
@@ -1029,114 +1032,17 @@ class StreamingTTSGenerator {
   private async combineViaPcmExtraction(
     validAudios: GeneratedAudio[],
   ): Promise<Blob> {
-    let totalPcmLength = 0;
-    const pcmChunks: ArrayBuffer[] = [];
-    let sampleRate = 24000;
-    let channels = 1;
-    let bitsPerSample = 16;
-    const podcastFormat =
-      this.currentScript?.metadata?.format === "solo" ? "solo" : "dialogue";
-
-    for (let audioIndex = 0; audioIndex < validAudios.length; audioIndex += 1) {
-      const audio = validAudios[audioIndex];
-      const blob = audio.blob!;
-      const buffer = await blob.arrayBuffer();
-      const view = new DataView(buffer);
-      let foundPcm = false;
-
-      // Find the data chunk
-      let offset = 12;
-      const fileLen = buffer.byteLength;
-
-      while (offset < fileLen - 8) {
-        const chunkId = String.fromCharCode(
-          view.getUint8(offset),
-          view.getUint8(offset + 1),
-          view.getUint8(offset + 2),
-          view.getUint8(offset + 3),
-        );
-        const chunkSize = view.getUint32(offset + 4, true);
-
-        if (chunkId === "fmt ") {
-          channels = view.getUint16(offset + 10, true);
-          sampleRate = view.getUint32(offset + 12, true);
-          bitsPerSample = view.getUint16(offset + 22, true);
-        }
-
-        if (chunkId === "data") {
-          const pcmStart = offset + 8;
-          const pcmData = buffer.slice(pcmStart, pcmStart + chunkSize);
-          pcmChunks.push(pcmData);
-          totalPcmLength += pcmData.byteLength;
-          foundPcm = true;
-        }
-
-        offset += 8 + chunkSize;
-        if (chunkSize % 2 !== 0) offset++;
-      }
-
-      if (foundPcm && audioIndex < validAudios.length - 1) {
-        const pauseMs = podcastPauseMilliseconds(
-          audio.speaker,
-          validAudios[audioIndex + 1]?.speaker,
-          podcastFormat,
-          this.currentConfig.pauseBetweenSegments,
-        );
-        const bytesPerFrame = channels * (bitsPerSample / 8);
-        const silenceBytes =
-          Math.round((sampleRate * pauseMs) / 1000) * bytesPerFrame;
-        if (silenceBytes > 0) {
-          pcmChunks.push(new ArrayBuffer(silenceBytes));
-          totalPcmLength += silenceBytes;
-        }
-      }
+    const format = this.currentScript?.metadata?.format === "solo" ? "solo" : "dialogue";
+    const parts = [];
+    for (let index = 0; index < validAudios.length; index++) {
+      const audio = validAudios[index];
+      if (!audio.blob) throw new Error("A generated podcast segment is missing");
+      parts.push({
+        buffer: await audio.blob.arrayBuffer(),
+        pauseAfterMs: podcastPauseMilliseconds(audio.speaker, validAudios[index + 1]?.speaker, format, this.currentConfig.pauseBetweenSegments),
+      });
     }
-
-    if (pcmChunks.length === 0) {
-      throw new Error("No PCM data found in any WAV blob");
-    }
-
-    const blockAlign = channels * (bitsPerSample / 8);
-    const byteRate = sampleRate * blockAlign;
-
-    // Assemble single WAV
-    const headerSize = 44;
-    const totalSize = headerSize + totalPcmLength;
-    const wavBuffer = new ArrayBuffer(totalSize);
-    const wavView = new DataView(wavBuffer);
-
-    const writeStr = (off: number, s: string) => {
-      for (let i = 0; i < s.length; i++)
-        wavView.setUint8(off + i, s.charCodeAt(i));
-    };
-
-    writeStr(0, "RIFF");
-    wavView.setUint32(4, totalSize - 8, true);
-    writeStr(8, "WAVE");
-    writeStr(12, "fmt ");
-    wavView.setUint32(16, 16, true);
-    wavView.setUint16(20, 1, true);
-    wavView.setUint16(22, channels, true);
-    wavView.setUint32(24, sampleRate, true);
-    wavView.setUint32(28, byteRate, true);
-    wavView.setUint16(32, blockAlign, true);
-    wavView.setUint16(34, bitsPerSample, true);
-    writeStr(36, "data");
-    wavView.setUint32(40, totalPcmLength, true);
-
-    let writeOffset = 44;
-    for (const chunk of pcmChunks) {
-      const src = new Uint8Array(chunk);
-      const dst = new Uint8Array(wavBuffer);
-      dst.set(src, writeOffset);
-      writeOffset += src.length;
-    }
-
-    const result = new Blob([wavBuffer], { type: "audio/wav" });
-    console.log(
-      `[StreamingTTSGenerator] Combined via PCM extraction: ${result.size} bytes, ${sampleRate}Hz, ${channels}ch`,
-    );
-    return result;
+    return new Blob([concatenatePcmWav(parts)], { type: "audio/wav" });
   }
 
   /**

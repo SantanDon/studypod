@@ -1,3 +1,4 @@
+import { OPEN_STUDIO_AUDIO_EVENT } from '@/lib/audio/studioAudioCommands';
 
 import { lazy, Suspense, useEffect, useState } from 'react';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
@@ -56,8 +57,15 @@ const MobileNotebookTabs = ({
       const request = (event as CustomEvent<AudioListeningQuestionRequest>).detail;
       if (request?.notebookId === notebookId) setActiveTab('chat');
     };
+    const onAudioTool = (event: Event) => {
+      if ((event as CustomEvent<{ notebookId?: string }>).detail?.notebookId === notebookId) setActiveTab('studio');
+    };
     window.addEventListener(AUDIO_LISTENING_QUESTION_EVENT, onAudioQuestion);
-    return () => window.removeEventListener(AUDIO_LISTENING_QUESTION_EVENT, onAudioQuestion);
+    window.addEventListener(OPEN_STUDIO_AUDIO_EVENT, onAudioTool);
+    return () => {
+      window.removeEventListener(AUDIO_LISTENING_QUESTION_EVENT, onAudioQuestion);
+      window.removeEventListener(OPEN_STUDIO_AUDIO_EVENT, onAudioTool);
+    };
   }, [notebookId]);
   return (
     <Tabs value={activeTab} onValueChange={setActiveTab} className="flex-1 flex flex-col overflow-hidden">

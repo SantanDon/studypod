@@ -34,7 +34,6 @@ import {
   parseEpub,
   sanitizeFileName,
   saveBookManifest,
-  stripHtmlToText,
   uniqueSafeFileName,
 } from "../services/audiobookBookService.js";
 import { prepareNarrationText } from "../services/audiobookNarrationTextService.js";
@@ -43,6 +42,7 @@ import {
   chapterCacheKeyFor,
   createBookContentSignature,
   finalAudiobookEncodingArgs,
+  hasCompleteChapterDuration,
   isCanonicalAudiobookWav,
   isUsableAudioFile,
   probeAudioDurationSeconds,
@@ -58,6 +58,9 @@ import {
   removeAudiobookBookmark,
   updateAudiobookListenerState,
 } from "../services/audiobookManifestService.js";
+
+import { selectNarrationChapterIds } from "../services/audiobookSelectionService.js";
+import { createAudiobookAdmissionGuard, isOwnedAudiobookManifest } from "../services/audiobookRequestGuard.js";
 
 const router = express.Router();
 router.use(authenticateToken, requireScope("sources:read"));
@@ -404,7 +407,7 @@ const activeWorkerJobs = new Set();
 
 const requestUserId = (req) => String(req.user?.userId || req.user?.id || "");
 const isForeignManifest = (manifest, userId) =>
-  Boolean(manifest?.ownerId && userId && manifest.ownerId !== userId);
+  !isOwnedAudiobookManifest(manifest, userId);
 
 const jobPathFor = (jobId) =>
   path.join(JOB_DIR, `${safeCachePart(jobId)}.json`);
@@ -1213,46 +1216,14 @@ const extractAndPersistBook = async ({
 
 const getChapterText = async (fileName, chapterId, ownerId) => {
   const manifest = loadBookManifest(MANIFEST_DIR, fileName);
-  if (manifest) {
-    if (isForeignManifest(manifest, ownerId)) {
-      const error = new Error("Book not found");
-      error.code = "AUDIOBOOK_NOT_FOUND";
-      throw error;
-    }
-    const text = getChapterTextFromManifest(manifest, chapterId);
-    const chapter = manifest.chapters?.find((c) => c.id === chapterId);
-    return { text, title: chapter?.title || chapterId, chapter, manifest };
+  if (!isOwnedAudiobookManifest(manifest, ownerId)) {
+    const error = new Error("Book not found. Import it through Audiobook Studio to establish ownership.");
+    error.code = "AUDIOBOOK_NOT_FOUND";
+    throw error;
   }
-
-  const filePath = path.join(UPLOADS_DIR, fileName);
-  if (!fs.existsSync(filePath))
-    return { text: "", title: chapterId, manifest: null };
-
-  if (path.extname(fileName).toLowerCase() === ".epub") {
-    const epub = await parseEpub(filePath);
-    const html = await epub.getChapter(chapterId);
-    return {
-      text: stripHtmlToText(html || ""),
-      title: chapterId,
-      manifest: null,
-    };
-  }
-
-  const rebuilt = await extractAndPersistBook({
-    permanentPath: filePath,
-    fileName,
-    source: "recovered-local-file",
-    ownerId,
-  });
-  const recoveredManifest = loadBookManifest(MANIFEST_DIR, rebuilt.fileName);
-  const text = getChapterTextFromManifest(recoveredManifest, chapterId);
-  const chapter = recoveredManifest?.chapters?.find((c) => c.id === chapterId);
-  return {
-    text,
-    title: chapter?.title || chapterId,
-    chapter,
-    manifest: recoveredManifest,
-  };
+  const text = getChapterTextFromManifest(manifest, chapterId);
+  const chapter = manifest.chapters?.find((entry) => entry.id === chapterId);
+  return { text, title: chapter?.title || chapterId, chapter, manifest };
 };
 
 // ─── DIAGNOSTICS ───────────────────────────────────────────────────────────────
@@ -1820,9 +1791,9 @@ export const runFullAudiobookJob = async ({
   requestedStyle,
   style,
   analysis,
-  pronunciations,
+  pronunciations: _pronunciations,
   userPronunciations = [],
-  narrationSignature,
+  narrationSignature: _narrationSignature,
   contentSignature,
   outputFormat,
   ownerId,
@@ -1832,6 +1803,7 @@ export const runFullAudiobookJob = async ({
     const profile = getNarrationProfile(style);
     const engine = normalizedProvider === "kokoro" ? await getTTS() : null;
     const chapterPaths = [];
+    const chapterDurations = [];
     const safeName = safeCachePart(fileName);
     let cachedChapters = 0;
     let availableChapterCount = 0;
@@ -1923,19 +1895,8 @@ export const runFullAudiobookJob = async ({
       });
 
       if (!hasCachedChapter) {
-        if (!chapter.text || chapter.text.length < 2) {
-          logger.warn(`  ⚠️ Skipping empty chapter: ${cid}`);
-          await mutateOwnedManifest({
-            fileName,
-            ownerId,
-            mutate: (current) =>
-              patchAudiobookRenderChapter(current, renderId, cid, {
-                status: "skipped",
-                completedAt: new Date().toISOString(),
-                error: null,
-              }),
-          });
-          continue;
+        if (!chapter.text || chapter.text.trim().length < 2) {
+          throw new Error(`Selected chapter has no narration text: ${cid}`);
         }
 
         logger.info(
@@ -1998,7 +1959,11 @@ export const runFullAudiobookJob = async ({
       }
       const fileSizeBytes = fs.statSync(cachePath).size;
       const durationSeconds = await probeAudioDurationSeconds(cachePath);
+      if (!Number.isFinite(durationSeconds) || durationSeconds <= 0) {
+        throw new Error(`Chapter audio has no valid duration: ${cid}`);
+      }
       chapterPaths.push(cachePath);
+      chapterDurations.push(durationSeconds);
       availableChapterCount += 1;
 
       await mutateOwnedManifest({
@@ -2032,13 +1997,14 @@ export const runFullAudiobookJob = async ({
       });
     }
 
-    if (chapterPaths.length === 0) {
-      throw new Error("No chapters had extractable text");
+    if (chapterPaths.length === 0 || chapterPaths.length !== chapterIds.length) {
+      throw new Error("Full narration did not produce every selected chapter");
     }
 
     const finalFileName = `${safeName}_${AUDIOBOOK_PIPELINE_VERSION}_${AUDIOBOOK_EXPORT_VERSION}_full_${safeCachePart(renderId)}.${outputFormat}`;
     const finalPath = path.join(AUDIO_CACHE_DIR, finalFileName);
-    const finalAlreadyExists = isUsableAudioFile(finalPath);
+    const finalAlreadyExists = isUsableAudioFile(finalPath) &&
+      hasCompleteChapterDuration(await probeAudioDurationSeconds(finalPath), chapterDurations);
 
     await mutateOwnedManifest({
       fileName,
@@ -2087,6 +2053,9 @@ export const runFullAudiobookJob = async ({
 
     const fileSizeBytes = fs.statSync(finalPath).size;
     const durationSeconds = await probeAudioDurationSeconds(finalPath);
+    if (!hasCompleteChapterDuration(durationSeconds, chapterDurations)) {
+      throw new Error("Exported audio is incomplete or has an invalid duration");
+    }
     const completedAt = new Date().toISOString();
     await mutateOwnedManifest({
       fileName,
@@ -2261,6 +2230,7 @@ router.post(
   "/generate-full",
   requireAudiobookWrite,
   requireRuntime,
+  createAudiobookAdmissionGuard({ ownerFor: requestUserId, fileFor: sanitizeFileName }),
   async (req, res) => {
     try {
       const ownerId = requestUserId(req);
@@ -2280,71 +2250,14 @@ router.post(
       const outputFormat = ["mp3", "m4b", "wav"].includes(requestedOutputFormat)
         ? requestedOutputFormat
         : "mp3";
-      const filePath = path.join(UPLOADS_DIR, fileName);
       let manifest = loadBookManifest(MANIFEST_DIR, fileName);
-      if (isForeignManifest(manifest, ownerId)) {
-        return res.status(404).json({ error: `Book not found: ${fileName}` });
+      if (!isOwnedAudiobookManifest(manifest, ownerId)) {
+        return res.status(404).json({ error: "Book not found. Import it through Audiobook Studio to establish ownership." });
       }
-      if (!manifest && fs.existsSync(filePath)) {
-        await extractAndPersistBook({
-          permanentPath: filePath,
-          fileName,
-          source: "generation-recovery",
-          ownerId,
-        });
-        manifest = loadBookManifest(MANIFEST_DIR, fileName);
-      }
-      if (!manifest) {
-        return res.status(404).json({ error: `Book not found: ${fileName}` });
-      }
-      if (
-        (!chapterIds || chapterIds.length === 0) &&
-        manifest?.chapters?.length
-      ) {
-        chapterIds = manifest.chapters
-          .filter(
-            (chapter) =>
-              chapter.narratable !== false &&
-              String(chapter.narrationText || chapter.text || "").length > 1,
-          )
-          .map((chapter) => chapter.id);
-      }
-      if (!Array.isArray(chapterIds))
-        return res.status(400).json({ error: "chapterIds must be an array" });
-      if (chapterIds.length > 500)
-        return res
-          .status(400)
-          .json({ error: "chapterIds cannot exceed 500 entries" });
-      chapterIds = [
-        ...new Set(
-          chapterIds
-            .map((chapterId) => String(chapterId || "").trim())
-            .filter(Boolean),
-        ),
-      ];
-      if (chapterIds.length === 0)
-        return res.status(400).json({ error: "chapterIds are required" });
-      if (manifest?.chapters?.length) {
-        const allowedChapterIds = new Set(
-          manifest.chapters.map((chapter) => String(chapter.id)),
-        );
-        const unknownChapterId = chapterIds.find(
-          (chapterId) => !allowedChapterIds.has(chapterId),
-        );
-        if (unknownChapterId)
-          return res.status(400).json({
-            error: "chapterIds contains a chapter that is not in this book",
-          });
-        const nonNarratableChapter = manifest.chapters.find(
-          (chapter) =>
-            chapterIds.includes(String(chapter.id)) &&
-            chapter.narratable === false,
-        );
-        if (nonNarratableChapter) {
-          return res.status(400).json({
-            error: "chapterIds contains a structural divider with no narration",
-          });
-        }
+      try {
+        chapterIds = selectNarrationChapterIds(manifest, chapterIds);
+      } catch (error) {
+        return res.status(400).json({ error: error.message });
       }
 
       const analysis =
@@ -2430,9 +2343,12 @@ router.post(
       const finalReady = Boolean(
         existingRender?.status === "completed" &&
           existingRender?.final?.status === "completed" &&
-          finalFileName &&
-          path.basename(finalFileName) === finalFileName &&
-          isUsableAudioFile(path.join(AUDIO_CACHE_DIR, finalFileName)),
+          finalFileName && path.basename(finalFileName) === finalFileName &&
+          isUsableAudioFile(path.join(AUDIO_CACHE_DIR, finalFileName)) &&
+          chapterIds.every((id) => existingRender.chapters?.[id]?.status === "completed")
+      ) && hasCompleteChapterDuration(
+        await probeAudioDurationSeconds(path.join(AUDIO_CACHE_DIR, finalFileName)),
+        chapterIds.map((id) => existingRender.chapters?.[id]?.durationSeconds),
       );
 
       if (finalReady) {
@@ -2598,6 +2514,8 @@ router.post(
     } catch (err) {
       logger.error("Could not start audiobook generation:", err);
       res.status(500).json({ error: "Could not start audiobook generation" });
+    } finally {
+      res.locals.releaseAudiobookAdmission?.();
     }
   },
 );

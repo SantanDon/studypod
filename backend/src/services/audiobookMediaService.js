@@ -12,7 +12,12 @@ const safeCachePart = (value = "part") =>
 
 export const isUsableAudioFile = (filePath) => {
   try {
-    return fs.existsSync(filePath) && fs.statSync(filePath).size >= 44;
+    if (!fs.existsSync(filePath) || !fs.statSync(filePath).isFile()) return false;
+    if (fs.statSync(filePath).size < 44) return false;
+    // WAV cache entries must contain their declared audio, not merely a header.
+    // Compressed exports still require a separate duration/decoder check.
+    if (/\.wav$/i.test(filePath)) return readWavMetadata(filePath) !== null;
+    return true;
   } catch {
     return false;
   }
@@ -48,38 +53,55 @@ function readWavMetadata(filePath) {
     let dataOffset = null;
     let dataSize = null;
     let rf64DataSize = null;
+    let rf64RiffSize = null;
 
     while (offset + 8 <= bytesRead) {
       const chunkId = buffer.toString("ascii", offset, offset + 4);
       const chunkSize = buffer.readUInt32LE(offset + 4);
       const payloadOffset = offset + 8;
 
-      if (chunkId === "ds64" && payloadOffset + 16 <= bytesRead) {
+      if (chunkId === "ds64" && chunkSize >= 28 && payloadOffset + 28 <= bytesRead) {
+        const riffSize64 = buffer.readBigUInt64LE(payloadOffset);
+        if (riffSize64 <= BigInt(Number.MAX_SAFE_INTEGER)) rf64RiffSize = Number(riffSize64);
         const size64 = buffer.readBigUInt64LE(payloadOffset + 8);
         if (size64 <= BigInt(Number.MAX_SAFE_INTEGER)) {
           rf64DataSize = Number(size64);
         }
-      } else if (chunkId === "fmt " && payloadOffset + 16 <= bytesRead) {
+      } else if (chunkId === "fmt " && chunkSize >= 16 && payloadOffset + 16 <= bytesRead) {
         format = {
           formatTag: buffer.readUInt16LE(payloadOffset),
           channels: buffer.readUInt16LE(payloadOffset + 2),
           sampleRate: buffer.readUInt32LE(payloadOffset + 4),
           byteRate: buffer.readUInt32LE(payloadOffset + 8),
+          blockAlign: buffer.readUInt16LE(payloadOffset + 12),
           bitsPerSample: buffer.readUInt16LE(payloadOffset + 14),
         };
       } else if (chunkId === "data") {
         dataOffset = payloadOffset;
         dataSize =
           chunkSize === 0xffffffff ? rf64DataSize : Number(chunkSize);
-        if (!Number.isFinite(dataSize) || dataSize <= 0) {
-          dataSize = Math.max(0, stat.size - payloadOffset);
-        }
+        // A zero/sentinel length is not a completed, reusable cache entry.
+        if (!Number.isSafeInteger(dataSize) || dataSize <= 0) return null;
         break;
       }
 
       const paddedSize = chunkSize + (chunkSize % 2);
       if (chunkSize === 0xffffffff || paddedSize < 0) break;
       offset = payloadOffset + paddedSize;
+    }
+
+    const declaredRiffSize = container === "RF64" ? rf64RiffSize : buffer.readUInt32LE(4);
+    if (!format || !Number.isSafeInteger(dataOffset) || !Number.isSafeInteger(dataSize)) return null;
+    if (!Number.isSafeInteger(declaredRiffSize) || declaredRiffSize + 8 > stat.size || declaredRiffSize < 36) return null;
+    if (dataSize <= 0 || dataOffset + dataSize > stat.size || dataOffset + dataSize > declaredRiffSize + 8) return null;
+    if (format.channels < 1 || format.sampleRate < 1 || format.byteRate < 1 || format.blockAlign < 1) return null;
+    if (dataSize % format.blockAlign !== 0) return null;
+    // Validate the uncompressed formats emitted by the supported TTS engines.
+    if ([1, 3].includes(format.formatTag)) {
+      if (![8, 16, 24, 32, 64].includes(format.bitsPerSample)) return null;
+      if (format.formatTag === 3 && ![32, 64].includes(format.bitsPerSample)) return null;
+      if (format.blockAlign !== format.channels * format.bitsPerSample / 8) return null;
+      if (format.byteRate !== format.sampleRate * format.blockAlign) return null;
     }
 
     return {
@@ -140,7 +162,7 @@ export function finalAudiobookEncodingArgs({
   const inputArgs = ["-y", "-f", "concat", "-safe", "0", "-i", listPath];
 
   if (normalizedFormat === "wav") {
-    return [...inputArgs, "-c:a", "pcm_s16le", outputPath];
+    return [...inputArgs, "-c:a", "pcm_s16le", "-rf64", "auto", outputPath];
   }
 
   if (normalizedFormat === "m4b") {
@@ -224,6 +246,8 @@ export function wavDurationSeconds(filePath) {
 
 export async function probeAudioDurationSeconds(filePath) {
   const wavDuration = wavDurationSeconds(filePath);
+  // Do not salvage a truncated WAV through a more permissive decoder.
+  if (/\.wav$/i.test(filePath)) return wavDuration;
   if (wavDuration > 0) return wavDuration;
   try {
     const { stdout } = await execFileAsync(
@@ -237,11 +261,19 @@ export async function probeAudioDurationSeconds(filePath) {
         "default=noprint_wrappers=1:nokey=1",
         filePath,
       ],
-      { windowsHide: true, maxBuffer: 1024 * 1024 },
+      { windowsHide: true, maxBuffer: 1024 * 1024, timeout: 10_000 },
     );
     const duration = Number(String(stdout || "").trim());
     return Number.isFinite(duration) && duration > 0 ? duration : 0;
   } catch {
     return 0;
   }
+}
+
+/** A container-duration guard, not a claim of spoken-text fidelity. */
+export function hasCompleteChapterDuration(durationSeconds, chapterDurations) {
+  if (!Number.isFinite(durationSeconds) || durationSeconds <= 0 || !Array.isArray(chapterDurations) || chapterDurations.length === 0) return false;
+  if (chapterDurations.some((duration) => !Number.isFinite(duration) || duration <= 0)) return false;
+  const expected = chapterDurations.reduce((sum, duration) => sum + duration, 0);
+  return Number.isFinite(expected) && durationSeconds >= expected - 0.25;
 }

@@ -61,6 +61,15 @@ export function manifestPathFor(manifestDir, fileName) {
 }
 
 export function saveBookManifest(manifestDir, manifest) {
+  if (!manifest || typeof manifest !== "object") {
+    throw new TypeError("saveBookManifest requires a manifest object");
+  }
+  if (typeof manifest.fileName !== "string" || !manifest.fileName.trim()) {
+    throw new TypeError("saveBookManifest requires manifest.fileName");
+  }
+  if (typeof manifestDir !== "string" || !manifestDir.trim()) {
+    throw new TypeError("saveBookManifest requires a manifest directory");
+  }
   fs.mkdirSync(manifestDir, { recursive: true });
   const manifestPath = manifestPathFor(manifestDir, manifest.fileName);
   const nextManifest = {
@@ -71,20 +80,27 @@ export function saveBookManifest(manifestDir, manifest) {
     ),
     updatedAt: new Date().toISOString(),
   };
+  // Serialize before touching the filesystem so circular-data errors throw
+  // while the previous manifest is still intact.
+  const payload = JSON.stringify(nextManifest, null, 2);
+  // Unique same-directory temporary file; the rename below is the only write
+  // to the live path, so a failure can never truncate the previous manifest.
   const temporaryPath = `${manifestPath}.${process.pid}.${randomUUID()}.tmp`;
-  fs.writeFileSync(
-    temporaryPath,
-    JSON.stringify(nextManifest, null, 2),
-    "utf8",
-  );
+  const discardTemp = () => {
+    try {
+      fs.unlinkSync(temporaryPath);
+    } catch {}
+  };
   try {
+    fs.writeFileSync(temporaryPath, payload, "utf8");
     fs.renameSync(temporaryPath, manifestPath);
   } catch (error) {
-    // Windows can reject replacing an existing file even though POSIX rename is
-    // atomic. Fall back to a complete temporary copy rather than a partial write.
-    if (!["EEXIST", "EPERM", "EACCES"].includes(error?.code)) throw error;
-    fs.copyFileSync(temporaryPath, manifestPath);
-    fs.unlinkSync(temporaryPath);
+    // A blocked atomic replacement (Windows EPERM/EACCES/EEXIST, or any other
+    // rename/write fault) fails safely: the old destination is never touched,
+    // the temporary file is removed, and the caller sees the original error
+    // and may retry. No in-place copy is attempted.
+    discardTemp();
+    throw error;
   }
   return manifestPath;
 }
