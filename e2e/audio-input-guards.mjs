@@ -46,7 +46,7 @@ export const adoptedAudioPins = Object.freeze({
   "e2e/audio-fidelity.helpers.mjs": "54bc046a853425dd134b702d470247109de0b300aeb93a41bdb5bdf6a808edf7",
   "e2e/audio-fidelity.facts.mjs": "362b81c9c178d5239ed11e3a4bc9bae0c47d7891651a8909f336c084f3d21b77",
   "e2e/studio-quiz-journey.pw.ts": "2f7765ac4f8147bd6f1ecbfb0dee03fba9cdae4c6557facc23f306d1343bc85a",
-  "e2e/helpers/cedarFactOracle.ts": "0fdee2849324d7187f4eb6f574c5a26cf5772a2914e6552b7c0d2a97dd729218",
+  "e2e/helpers/cedarFactOracle.ts": "178beb863e4b867306e92aef3f1be0ba833a00eaa1650a3d098f41555d1bf433",
   "src/types/quiz.ts": "cf134d9124e819ba280245e7373ff46016e734a518e1208908748368af1086ee",
   "e2e/studio-task-capture.pw.ts": "a4287c352b0ca7cfad1d9e0487fc6a4007dc5acb4489bd96b67a3fb950296273",
   "e2e/studio-flashcard-review.pw.ts": "b29afb1fd7f03d80338d73c071239ca9fb2d465994229a8ce0d4e3af67ea3ff5",
