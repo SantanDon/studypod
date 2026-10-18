@@ -63,7 +63,20 @@ export function podcastApi(notebookId: string, token?: string) {
   }
  }
  return {
-  list: async (): Promise<PodcastRecord[]> => (await (await request('')).json()).podcasts,
+  list: async (): Promise<PodcastRecord[]> => {
+   const records = new Map<string,PodcastRecord>();
+   const cursors = new Set<string>();
+   let cursor: string | undefined;
+   do {
+    const page = await (await request(cursor ? '?cursor=' + encodeURIComponent(cursor) : '')).json();
+    if (!Array.isArray(page.podcasts)) throw invalidTransfer();
+    for (const record of page.podcasts) records.set(record.id,record);
+    cursor = page.nextCursor;
+    if (cursor !== undefined && (typeof cursor !== 'string' || !cursor || cursor.length > 256 || cursors.has(cursor))) throw invalidTransfer();
+    if (cursor) cursors.add(cursor);
+   } while (cursor);
+   return [...records.values()];
+  },
   save: async ({blob,...metadata}: PodcastSave): Promise<PodcastRecord> => {
    if (blob.size < 44 || blob.size > MAX_BYTES) throw invalidTransfer();
    const bytes = await blob.arrayBuffer();

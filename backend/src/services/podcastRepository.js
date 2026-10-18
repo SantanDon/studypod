@@ -82,9 +82,16 @@ export function createPodcastRepository({ getDatabase: database = getDatabase } 
       const result = await client.execute({ sql: `SELECT p.id,p.notebook_id,p.title,p.created_at,p.duration FROM studio_podcasts p INNER JOIN notebooks n ON n.id=p.notebook_id AND n.user_id=p.user_id WHERE p.user_id=? ORDER BY p.created_at DESC,p.id DESC LIMIT 1`, args: [userId] });
       return result.rows[0] ? { id: result.rows[0].id, notebook_id: result.rows[0].notebook_id, title: result.rows[0].title, created_at: result.rows[0].created_at, duration: result.rows[0].duration, persistence: 'account' } : null;
     },
-    async list(notebookId, userId) {
+    async list(notebookId, userId, page) {
       const client = await owned(notebookId, userId);
-      const result = await client.execute({ sql: `SELECT ${columns} FROM studio_podcasts WHERE notebook_id=? AND user_id=? ORDER BY created_at DESC`, args: [notebookId, userId] });
+      const args = [notebookId, userId];
+      let after = '';
+      if (page?.cursor) {
+        after = ' AND (created_at < ? OR (created_at = ? AND id < ?))';
+        args.push(page.cursor[0], page.cursor[0], page.cursor[1]);
+      }
+      const limit = page ? ' LIMIT 5' : '';
+      const result = await client.execute({ sql: `SELECT ${columns} FROM studio_podcasts WHERE notebook_id=? AND user_id=?${after} ORDER BY created_at DESC,id DESC${limit}`, args });
       return result.rows.map(record);
     },
     async get(notebookId, userId, id) { return record(await find(await owned(notebookId, userId), notebookId, userId, id)); },

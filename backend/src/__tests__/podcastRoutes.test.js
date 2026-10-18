@@ -15,7 +15,7 @@ const session = claims => jwt.sign({ userId: 'owner', ...claims }, secret, { alg
 function dispatch(router, { method = 'GET', url = '/book/studio/podcasts', token, cookies, headers = {}, body } = {}) {
   return new Promise((resolve, reject) => {
     // Deliberately not a stream: denied POST must finish before the upload parser.
-    const req = Object.assign(body ? Readable.from([body]) : {}, { method, url, originalUrl: url, is: express.request.is, headers: { ...headers, ...(token ? { authorization: `Bearer ${token}` } : {}) }, cookies });
+    const req = Object.assign(body ? Readable.from([body]) : {}, { method, url, originalUrl: url, query: Object.fromEntries(new URL(url,'http://offline.invalid').searchParams), is: express.request.is, headers: { ...headers, ...(token ? { authorization: `Bearer ${token}` } : {}) }, cookies });
     const res = { statusCode: 200, status(value) { this.statusCode = value; return this; }, json(body) { resolve({ status: this.statusCode, body }); return this; }, set(value) { this.headers = value; return this; }, send(body) { resolve({ status: this.statusCode, body, headers: this.headers }); return this; } };
     router.handle(req, res, error => error ? reject(error) : resolve({ status: 404 }));
   });
@@ -65,4 +65,10 @@ describe('podcast authenticated HTTP boundary', () => {
     expect(result).toEqual({ status: 201, body: { podcast: { id: 'episode' } } });
     expect(repository.create).toHaveBeenCalledWith('book', 'owner', metadata, bytes);
   });
+});
+
+describe('history route pages',()=>{
+ const rows=Array.from({length:5},(_,i)=>({id:'00000000-0000-4000-8000-'+String(5-i).padStart(12,'0'),created_at:'2026-10-18T00:00:00.000Z',script:{segments:[{text:'x'.repeat(524000),speaker:'A'}]}}));
+ it('returns four full scripts and reusable last-item cursor',async()=>{const list=vi.fn().mockResolvedValue(rows);const router=createPodcastRouter({assertOwner:vi.fn(),list},{});const result=await dispatch(router,{token:session({})});expect(result.status).toBe(200);expect(result.body.podcasts).toEqual(rows.slice(0,4));expect(Buffer.byteLength(JSON.stringify(result.body))).toBeLessThan(4500000);const cursor=result.body.nextCursor;expect(JSON.parse(Buffer.from(cursor,'base64url'))).toEqual([rows[3].created_at,rows[3].id]);await dispatch(router,{url:'/book/studio/podcasts?cursor='+cursor,token:session({})});expect(list).toHaveBeenLastCalledWith('book','owner',{cursor:[rows[3].created_at,rows[3].id]});});
+ it('rejects malformed cursors before repository list',async()=>{const list=vi.fn();const router=createPodcastRouter({assertOwner:vi.fn(),list},{});for(const value of ['!','W10',Buffer.from(JSON.stringify(['bad','bad'])).toString('base64url')]){expect((await dispatch(router,{url:'/book/studio/podcasts?cursor='+value,token:session({})})).status).toBe(422);}expect(list).not.toHaveBeenCalled();});
 });

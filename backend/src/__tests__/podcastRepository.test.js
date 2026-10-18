@@ -87,3 +87,23 @@ describe('atomic account podcast persistence', () => {
     expect((await repo.recent('foreign')).id).toBe(foreign.id);
   });
 });
+
+describe('four-record history keyset pages',()=>{
+ it('keeps ten maximum-size scripts below hosted response limit with stable timestamp ties',async()=>{
+  const ids=[];for(let i=0;i<10;i++){const item=payload();item.script.segments[0].text='';item.script.segments[0].text='x'.repeat(524288-Buffer.byteLength(JSON.stringify(item.script)));ids.push((await repo.create('book','owner',item,wav())).id);}
+  await client.execute("UPDATE studio_podcasts SET created_at='2026-10-18T10:00:00.000Z'");
+  const seen=[];let cursor;let pages=0;
+  do{const rows=await repo.list('book','owner',{cursor});expect(rows.length).toBeLessThanOrEqual(5);const items=rows.slice(0,4);const last=items.at(-1);const next=rows.length>4?[last.created_at,last.id]:undefined;
+   expect(Buffer.byteLength(JSON.stringify({podcasts:items,nextCursor:next}))).toBeLessThan(4500000);expect(items.every(x=>Buffer.byteLength(JSON.stringify(x.script))===524288)).toBe(true);seen.push(...items.map(x=>x.id));cursor=next;pages++;
+  }while(cursor);expect(pages).toBe(3);expect(seen).toEqual(ids.sort().reverse());expect(new Set(seen).size).toBe(10);
+ });
+ it('denies foreign and member pagination',async()=>{for(const user of ['member','foreign'])await expect(repo.list('book',user,{cursor:['2026-10-18T00:00:00.000Z',randomUUID()]})).rejects.toMatchObject({code:'PODCAST_NOT_FOUND'});});
+});
+
+it('keyset excludes newly inserted newer episodes without skipping older history',async()=>{
+ const ids=[];for(let i=0;i<6;i++)ids.push((await repo.create('book','owner',payload(),wav())).id);
+ await client.execute("UPDATE studio_podcasts SET created_at='2026-10-17T00:00:00.000Z'");
+ const first=(await repo.list('book','owner',{})).slice(0,4);const last=first.at(-1);const added=await repo.create('book','owner',payload(),wav());
+ const rest=await repo.list('book','owner',{cursor:[last.created_at,last.id]});const seen=[...first,...rest].map(x=>x.id);
+ expect(seen).toEqual(ids.sort().reverse());expect(seen).not.toContain(added.id);expect(new Set(seen).size).toBe(6);
+});

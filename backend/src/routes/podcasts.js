@@ -53,7 +53,21 @@ export function createPodcastRouter(repository = podcastRepository, transfers = 
   router.post('/:id/studio/podcasts/uploads', parse(express.json({limit:'600kb'})), run(async(req,res) => res.status(201).json(await transfers.start(...args(req),req.body))));
   router.put('/:id/studio/podcasts/uploads/:uploadId/chunks/:index', parse(express.raw({type:'application/octet-stream',limit:PODCAST_CHUNK_BYTES})), run(async(req,res) => res.json(await transfers.put(...args(req),req.params.uploadId,req.params.index,req.body))));
   router.get('/:id/studio/podcasts/:podcastId/audio/chunks/:index', run(async(req,res) => { const audio=await transfers.read(...args(req),req.params.podcastId,req.params.index); res.set({'Content-Type':'application/octet-stream','Content-Length':String(audio.bytes.length),'Cache-Control':'private, no-store','X-Content-Type-Options':'nosniff','ETag':`"${audio.hash}"`}); res.send(audio.bytes); }));
-  router.get('/:id/studio/podcasts', run(async (req, res) => res.json({ podcasts: await repository.list(...args(req)) })));
+  // Four full 512 KiB scripts plus metadata fit comfortably below the hosted response limit.
+  router.get('/:id/studio/podcasts', run(async (req, res) => {
+    let cursor;
+    if (req.query.cursor !== undefined) {
+      try {
+        if (typeof req.query.cursor !== 'string' || req.query.cursor.length > 256 || !/^[A-Za-z0-9_-]+$/.test(req.query.cursor)) throw new Error();
+        cursor = JSON.parse(Buffer.from(req.query.cursor, 'base64url').toString('utf8'));
+        if (!Array.isArray(cursor) || cursor.length !== 2 || typeof cursor[0] !== 'string' || cursor[0].length > 64 || !Number.isFinite(Date.parse(cursor[0])) || typeof cursor[1] !== 'string' || !/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(cursor[1])) throw new Error();
+      } catch { throw Object.assign(new Error('Invalid podcast history cursor.'), {code:'PODCAST_INVALID_PAYLOAD'}); }
+    }
+    const records = await repository.list(...args(req), {cursor});
+    const podcasts = records.slice(0,4);
+    const last = podcasts.at(-1);
+    res.json({podcasts, ...(records.length > 4 ? {nextCursor:Buffer.from(JSON.stringify([last.created_at,last.id])).toString('base64url')} : {})});
+  }));
   router.post('/:id/studio/podcasts', parse(express.json({limit:'2kb'})), async(req,res,next) => { if(!req.is('application/json')) return next(); try { res.status(201).json({podcast:await transfers.complete(...args(req),req.body?.uploadId)}); } catch(error) { errorResponse(error,res); } });
   router.post('/:id/studio/podcasts', (req, res, next) => upload(req, res, error => error ? errorResponse(error, res) : next()), run(async (req, res) => {
     let metadata;
