@@ -157,31 +157,35 @@ export const useChatMessages = (notebookId?: string) => {
     onError: (error, variables) => {
       console.error("❌ Chat message error:", error);
       const msg = error instanceof Error ? error.message : "Failed to send message";
-      const httpStatus = (error as Error & { status?: number })?.status;
+      const { status: httpStatus, code: errorCode } = error as Error & { status?: number; code?: string };
       // True offline: no network connectivity
       const isTrueOffline = typeof navigator !== "undefined" && !navigator.onLine;
-      // Provider unavailable: explicit 503 from backend titan provider chain
-      const isProviderUnavailable = httpStatus === 503 || msg.includes('503') || msg.includes('PROVIDER_UNAVAILABLE');
-      const isOffline = isTrueOffline || isProviderUnavailable;
+      // A 503 can also come from the notebook database or another service.
+      const isProviderUnavailable = errorCode === 'PROVIDER_UNAVAILABLE'
+        || (!errorCode && msg.includes('PROVIDER_UNAVAILABLE'));
+      const isDatabaseUnavailable = errorCode === 'DATABASE_TEMPORARILY_UNAVAILABLE';
+      const canRetry = isTrueOffline || isProviderUnavailable || isDatabaseUnavailable || httpStatus === 503;
       const isImageBlock = msg.includes('image') || msg.includes('attachment');
 
       const description = isTrueOffline
         ? "You appear to be offline. Your draft is saved — retry when your connection is restored."
         : isProviderUnavailable
           ? "AI providers are currently unreachable. Your draft is still available, so you can retry when the connection recovers."
+          : isDatabaseUnavailable
+            ? "The notebook database is temporarily unavailable. Your draft is still available. Please retry shortly."
           : isImageBlock
             ? "This AI model processes text only. Images and files cannot be read."
             : msg;
 
       toast({
-        title: isOffline
-          ? (isTrueOffline ? "You're Offline" : "AI Temporarily Unavailable")
-          : isImageBlock
-            ? "Attachment Not Supported"
-            : "Error",
+        title: isTrueOffline ? "You're Offline"
+          : isProviderUnavailable ? "AI Temporarily Unavailable"
+            : isDatabaseUnavailable ? "Notebook Temporarily Unavailable"
+              : httpStatus === 503 ? "Temporarily Unavailable"
+                : isImageBlock ? "Attachment Not Supported" : "Error",
         description,
         variant: "destructive",
-        action: isOffline
+        action: canRetry
           ? (
               <ToastAction
                 altText="Retry sending message"

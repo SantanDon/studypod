@@ -9,6 +9,82 @@ const log = vi.hoisted(() => ({
 
 vi.mock("../utils/logger.js", () => ({ logger: log }));
 
+describe("LLM7 model availability recovery", () => {
+  function isolate(model = "retired-model") {
+    for (const key of ["OPENAI_API_KEY", "GROQ_API_KEY", "VITE_GROQ_API_KEY", "TOKENLLM7_KEY", "NVIDIA_API_KEY", "GEMINI_API_KEY", "ANTHROPIC_API_KEY", "OLLAMA_BASE_URL"]) vi.stubEnv(key, "");
+    vi.stubEnv("OVHCLOUD_ENABLED", "false");
+    vi.stubEnv("TOKENLLM7_ENABLED", "true");
+    vi.stubEnv("TOKENLLM7_MODEL", model);
+    vi.resetModules();
+  }
+  const failure = (status, message) => ({ ok: false, status, headers: { get: () => null }, text: async () => JSON.stringify({ error: { message } }) });
+  const success = () => ({ ok: true, json: async () => ({ choices: [{ message: { content: "Supported response" } }] }) });
+  const request = { messages: [{ role: "user", content: "Summarize the source." }], priority: "context" };
+  afterEach(() => { vi.unstubAllEnvs(); vi.unstubAllGlobals(); vi.clearAllMocks(); });
+
+  it("defaults to the public-catalogue LLM7 model", async () => {
+    isolate("");
+    const fetchMock = vi.fn(async () => success());
+    vi.stubGlobal("fetch", fetchMock);
+    const { dispatchToTitan } = await import("../services/titanProvider.js");
+    expect(await dispatchToTitan(request)).toMatchObject({ modelUsed: "mistral-Nemo-Instruct-2407" });
+    expect(JSON.parse(fetchMock.mock.calls[0][1].body).model).toBe("mistral-Nemo-Instruct-2407");
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it.each([400, 404])("recovers once from explicit unavailable-model status %s", async (status) => {
+    isolate();
+    const fetchMock = vi.fn().mockResolvedValueOnce(failure(status, "Model 'retired-model' is currently unavailable.")).mockResolvedValueOnce(success());
+    vi.stubGlobal("fetch", fetchMock);
+    const { dispatchToTitan } = await import("../services/titanProvider.js");
+    expect(await dispatchToTitan(request)).toMatchObject({ answer: "Supported response", modelUsed: "mistral-Nemo-Instruct-2407" });
+    expect(fetchMock.mock.calls.map(([, options]) => JSON.parse(options.body).model)).toEqual(["retired-model", "mistral-Nemo-Instruct-2407"]);
+  });
+
+  it.each([[400, "Invalid request format"], [401, "Model is currently unavailable"], [403, "Forbidden"], [429, "Rate limit"], [404, "Endpoint not found"], [500, "Model is currently unavailable"]])("does not retry unrelated/auth/rate/server failure %s %s", async (status, message) => {
+    isolate();
+    const fetchMock = vi.fn(async () => failure(status, message));
+    vi.stubGlobal("fetch", fetchMock);
+    const { dispatchToTitan } = await import("../services/titanProvider.js");
+    await expect(dispatchToTitan(request)).rejects.toMatchObject({ name: "ProviderUnavailableError" });
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it.each(["retired-model", "mistral-Nemo-Instruct-2407"])("fails closed without looping when fallback is unavailable (%s)", async (model) => {
+    isolate(model);
+    const fetchMock = vi.fn(async () => failure(400, "Model is currently unavailable"));
+    vi.stubGlobal("fetch", fetchMock);
+    const { dispatchToTitan } = await import("../services/titanProvider.js");
+    await expect(dispatchToTitan(request)).rejects.toMatchObject({ name: "ProviderUnavailableError" });
+    expect(fetchMock).toHaveBeenCalledTimes(model === "retired-model" ? 2 : 1);
+  });
+
+  it("does not start fallback with less than one second remaining", async () => {
+    isolate();
+    let now = 1_000;
+    const clock = vi.spyOn(Date, "now").mockImplementation(() => now);
+    const fetchMock = vi.fn(async () => {
+      now += 4_500;
+      return failure(400, "Model is currently unavailable");
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    try {
+      const { dispatchToTitan } = await import("../services/titanProvider.js");
+      await expect(dispatchToTitan({ ...request, timeoutMs: 5_000 })).rejects.toMatchObject({ name: "ProviderUnavailableError" });
+      expect(fetchMock).toHaveBeenCalledTimes(1);
+    } finally { clock.mockRestore(); }
+  });
+
+  it("does not retry transport failures as unavailable models", async () => {
+    isolate();
+    const fetchMock = vi.fn(async () => { throw new Error("Connection failed"); });
+    vi.stubGlobal("fetch", fetchMock);
+    const { dispatchToTitan } = await import("../services/titanProvider.js");
+    await expect(dispatchToTitan(request)).rejects.toMatchObject({ name: "ProviderUnavailableError" });
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+});
+
 describe("Titan provider configuration", () => {
   it("disables default Ollama thinking for bounded interactive responses", async () => {
     for (const name of ["OPENAI_API_KEY", "TOKENLLM7_KEY", "NVIDIA_API_KEY", "GEMINI_API_KEY", "ANTHROPIC_API_KEY", "GROQ_API_KEY", "VITE_GROQ_API_KEY"]) vi.stubEnv(name, "");

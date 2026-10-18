@@ -34,6 +34,8 @@ const MAX_CONCURRENCY = boundedInteger(
 );
 const RATE_LIMIT_COOLDOWN_MS = 30_000;
 const GROQ_FALLBACK_MODEL = "qwen/qwen3.8-27b";
+// Listed by LLM7's public /v1/models catalogue; overrides may still become stale.
+const LLM7_FALLBACK_MODEL = "mistral-Nemo-Instruct-2407";
 
 const providerConcurrency = new Map();
 const providerCooldowns = new Map();
@@ -58,7 +60,7 @@ const TITANS = {
   TOKENLLM7: {
     url: "https://api.llm7.io/v1/chat/completions",
     key: process.env.TOKENLLM7_KEY || null,
-    model: process.env.TOKENLLM7_MODEL || "mistralai/mistral-small-3.2-24b-instruct:free",
+    model: process.env.TOKENLLM7_MODEL || LLM7_FALLBACK_MODEL,
     provider: "tokenllm7",
     protocol: "chat-completions",
     auth: !process.env.TOKENLLM7_KEY, // no-auth when no key configured (free public tier)
@@ -603,6 +605,24 @@ async function dispatchWithinDeadline({ messages, priority, temperature, deadlin
       } catch (error) {
         signal.throwIfAborted();
         let handledError = error;
+
+        const llm7ModelUnavailable = name === "TOKENLLM7"
+          && [400, 404].includes(Number(error?.status || 0))
+          && /\bmodel\b.{0,160}\b(?:currently unavailable|not available|does not exist|not found)\b/i.test(error?.providerDetail || "");
+        if (llm7ModelUnavailable && titan.model !== LLM7_FALLBACK_MODEL && deadline - Date.now() >= 1_000) {
+          logger.warn(`[Titan] TOKENLLM7 model is unavailable; retrying once with ${LLM7_FALLBACK_MODEL}`);
+          try {
+            const result = await requestProvider(
+              { ...titan, model: LLM7_FALLBACK_MODEL }, messages, temperature, priority,
+              Math.min(FETCH_TIMEOUT_MS, Math.max(0, deadline - Date.now())), signal,
+            );
+            logger.info(`[Titan] TOKENLLM7 completed a request with fallback model ${LLM7_FALLBACK_MODEL}`);
+            return result;
+          } catch (fallbackError) {
+            signal.throwIfAborted();
+            handledError = fallbackError;
+          }
+        }
 
         if (
           name === "GROQ"
