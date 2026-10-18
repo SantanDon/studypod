@@ -14,6 +14,7 @@ import {
 import { ApiService } from "@/services/apiService";
 import { generateAIResponse } from "@/services/chatAiService";
 import { validateCitations, validateAIResponse } from "@/lib/extraction/contentValidator";
+import { mapPersistedMessage } from "@/lib/chat/persistedMessage";
 
 
 export const useChatMessages = (notebookId?: string) => {
@@ -40,17 +41,7 @@ export const useChatMessages = (notebookId?: string) => {
           // Cloud account - fetch from backend API
           const dbMessages = await ApiService.getChatMessages(notebookId, session.access_token, signal);
           
-          expandedMessages = dbMessages.map((msg: Record<string, unknown>) => ({
-            id: msg.id,
-            notebook_id: msg.notebookId || msg.notebook_id,
-            message: { 
-              type: msg.role === 'user' ? 'human' : 'ai', 
-              content: msg.content 
-            },
-            created_at: msg.createdAt || msg.created_at,
-            // Add sources if we implement citation support in backend later
-            sources: msg.groundedSources ? (typeof msg.groundedSources === 'string' ? JSON.parse(msg.groundedSources) : msg.groundedSources) : undefined
-          }));
+          expandedMessages = dbMessages.map(mapPersistedMessage);
         } else {
           // Guest account - fetch from localStorage
           const storedMessages = localStorageService.getChatMessages(notebookId);

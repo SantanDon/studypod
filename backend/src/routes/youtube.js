@@ -19,6 +19,9 @@ import {
   selectCaptionTrack,
 } from '../services/youtubeUnderstandingService.js';
 
+import { createTransportRecorder, fetchWithTransportTimeout } from '../utils/youtubeTransportDiagnostics.js';
+
+const transportRecorder = createTransportRecorder({ emit: record => logger.info(JSON.stringify(record)) });
 const router = express.Router();
 const YT_FETCH_TIMEOUT = 15000;
 const YOUTUBE_INNERTUBE_API_KEY = process.env.YOUTUBE_INNERTUBE_API_KEY || '';
@@ -28,13 +31,7 @@ function isPlaceholderKey(key) {
 }
 
 async function fetchWithTimeout(url, options, timeoutMs = YT_FETCH_TIMEOUT) {
-  const controller = new AbortController();
-  const id = setTimeout(() => controller.abort(), timeoutMs);
-  try {
-    return await fetch(url, { ...options, signal: controller.signal });
-  } finally {
-    clearTimeout(id);
-  }
+  return fetchWithTransportTimeout(url, options, timeoutMs, transportRecorder);
 }
 
 async function fetchOEmbedMetadata(videoId) {
@@ -886,7 +883,7 @@ async function performYouTubeExtraction({ url, preferredLanguage = 'en' }) {
   };
 }
 
-router.get('/youtube-transcript', authenticateToken, requireScope('sources:read'), async (req, res) => {
+router.get('/youtube-transcript', authenticateToken, requireScope('sources:read'), async (req, res, next) => {
   try {
     const { url, language = 'en' } = req.query;
     if (!url) throw new AppError(400, 'MISSING_URL', 'Missing url parameter');
@@ -897,12 +894,12 @@ router.get('/youtube-transcript', authenticateToken, requireScope('sources:read'
     res.status(result.statusCode).json(result.payload);
   } catch (error) {
     logger.error('[YouTube] Error:', error);
-    if (error instanceof AppError || error.statusCode) throw error;
-    throw new AppError(500, 'YOUTUBE_EXTRACTION_FAILED', error.message);
+    if (error instanceof AppError || error.statusCode) return next(error);
+    return next(new AppError(500, 'YOUTUBE_EXTRACTION_FAILED', error.message));
   }
 });
 
-router.post('/ingest', authenticateToken, requireScope('sources:write', { bodyField: 'notebookId' }), async (req, res) => {
+router.post('/ingest', authenticateToken, requireScope('sources:write', { bodyField: 'notebookId' }), async (req, res, next) => {
   try {
     const { notebookId, url, language = 'en', title } = req.body || {};
     if (!notebookId) throw new AppError(400, 'MISSING_NOTEBOOK_ID', 'notebookId is required');
@@ -944,8 +941,8 @@ router.post('/ingest', authenticateToken, requireScope('sources:write', { bodyFi
     });
   } catch (error) {
     logger.error('[YouTube] Ingest error:', error);
-    if (error instanceof AppError || error.statusCode) throw error;
-    throw new AppError(500, 'YOUTUBE_INGEST_FAILED', error.message);
+    if (error instanceof AppError || error.statusCode) return next(error);
+    return next(new AppError(500, 'YOUTUBE_INGEST_FAILED', error.message));
   }
 });
 

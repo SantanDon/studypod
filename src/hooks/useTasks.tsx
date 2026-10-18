@@ -1,68 +1,56 @@
-import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { useAuth } from "@/hooks/useAuth";
-import { ApiService } from "@/services/apiService";
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import { ApiService } from '@/services/apiService';
+import { useStudioIdentity } from '@/services/studioApiService';
 
 export interface Task {
-  id: string;
-  notebook_id: string;
-  userId: string;
-  content: string;
-  status: 'pending' | 'completed';
-  priority: 'low' | 'medium' | 'high';
-  source_id?: string;
-  createdAt: string;
-  updatedAt: string;
+  id: string; notebook_id: string; userId: string; content: string;
+  status: 'pending' | 'completed'; priority: 'low' | 'medium' | 'high';
+  source_id?: string; createdAt: string; updatedAt: string;
+}
+
+function normalizeTask(raw: Record<string, unknown>): Task {
+  const notebook = raw.notebookId ?? raw.notebook_id;
+  if (typeof raw.id !== 'string' || typeof notebook !== 'string' || typeof raw.content !== 'string'
+    || !['pending', 'completed'].includes(String(raw.status))
+    || !['low', 'medium', 'high'].includes(String(raw.priority))) {
+    throw new Error('Saved tasks could not be read. Please retry.');
+  }
+  return { id: raw.id, notebook_id: notebook, content: raw.content,
+    userId: String(raw.userId ?? raw.user_id ?? ''), status: raw.status as Task['status'],
+    priority: raw.priority as Task['priority'],
+    source_id: typeof (raw.sourceId ?? raw.source_id) === 'string' ? String(raw.sourceId ?? raw.source_id) : undefined,
+    createdAt: String(raw.createdAt ?? raw.created_at ?? ''), updatedAt: String(raw.updatedAt ?? raw.updated_at ?? '') };
 }
 
 export const useTasks = (notebookId?: string) => {
-  const { session } = useAuth();
+  const identity = useStudioIdentity(notebookId);
   const queryClient = useQueryClient();
-  const isAuthenticated = !!session?.access_token;
-
-  // ─── READ ──────────────────────────────────────────────────────────────────
-  const { data: tasks, isLoading } = useQuery({
-    queryKey: ["tasks", notebookId, isAuthenticated],
+  const queryKey = ['tasks', notebookId, identity.owner];
+  const eligible = !!notebookId && identity.ready && identity.authenticated;
+  const query = useQuery({
+    queryKey,
     queryFn: async () => {
-      if (!notebookId || !isAuthenticated) return [];
-      console.log("useTasks: Fetching from backend API...");
-      const rawTasks = await ApiService.fetchTasks(notebookId, session!.access_token);
-      
-      // Auto-map keys if backend returns different naming
-      return rawTasks.map((t: Record<string, unknown>) => ({
-        ...t,
-        notebook_id: t.notebookId || t.notebook_id,
-        createdAt: t.createdAt || t.created_at,
-        updatedAt: t.updatedAt || t.updated_at,
-      }));
+      identity.assertCurrent();
+      if (!eligible) return [];
+      const raw = await ApiService.fetchTasks(notebookId!, identity.token || 'COOKIE_SESSION');
+      identity.assertCurrent();
+      if (!Array.isArray(raw)) throw new Error('Saved tasks could not be read. Please retry.');
+      return raw.map(normalizeTask);
     },
-    enabled: !!notebookId && isAuthenticated,
-    refetchInterval: 15000, // Refresh tasks every 15s
+    enabled: eligible, refetchInterval: eligible ? 15000 : false,
   });
-
-  // ─── CREATE ────────────────────────────────────────────────────────────────
-  const createTaskMutation = useMutation({
-    mutationFn: async ({
-      content,
-      priority = "medium",
-      sourceId: _sourceId,
-    }: {
-      content: string;
-      priority?: 'low' | 'medium' | 'high';
-      sourceId?: string;
-    }) => {
-      if (!notebookId || !isAuthenticated) throw new Error("Authentication and Notebook ID required");
-      return ApiService.createTask(notebookId, content, priority, session!.access_token);
-    },
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["tasks", notebookId] });
+  const mutation = useMutation({
+    mutationFn: async ({ content, priority = 'medium' }: { content: string; priority?: Task['priority']; sourceId?: string }) => {
+      identity.assertCurrent();
+      if (!eligible) throw new Error('Sign in and choose a notebook to save tasks.');
+      const result = await ApiService.createTask(notebookId!, content, priority, identity.token || 'COOKIE_SESSION');
+      identity.assertCurrent();
+      await queryClient.invalidateQueries({ queryKey });
+      return result;
     },
   });
-
-  return {
-    tasks,
-    isLoading,
-    createTask: createTaskMutation.mutate,
-    createTaskAsync: createTaskMutation.mutateAsync,
-    isCreating: createTaskMutation.isPending,
-  };
+  return { tasks: eligible ? query.data : undefined, isLoading: !identity.ready || (eligible && query.isLoading),
+    ready: identity.ready, isAuthenticated: identity.authenticated, isError: eligible && query.isError,
+    error: query.error, refetch: query.refetch,
+    createTask: mutation.mutate, createTaskAsync: mutation.mutateAsync, isCreating: mutation.isPending };
 };

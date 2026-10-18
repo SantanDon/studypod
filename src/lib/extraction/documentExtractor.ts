@@ -11,6 +11,7 @@ import { uploadPdfToServer } from "./serverFileUpload";
 // Import the pdfExtractor to ensure PDF.js worker is configured
 import "./pdfExtractor";
 import { API_BASE_URL } from "@/config/api";
+import { getServerAiAuthValue } from "@/lib/ai/serverAiClient";
 
 export interface ExtractionResult {
   content: string;
@@ -158,6 +159,8 @@ export async function extractEPUB(file: File): Promise<ExtractionResult> {
 
     const response = await fetch(`${API_BASE_URL}/audiobook/extract`, {
       method: "POST",
+      credentials: "include",
+      headers: { Authorization: `Bearer ${getServerAiAuthValue()}` },
       body: formData,
     });
 
@@ -271,8 +274,8 @@ function processTextContent(content: string): string {
   // Clean up common OCR artifacts (repeated characters)
   processed = processed.replace(/([A-Za-z])\1{4,}/g, '$1$1'); // Replace repeated letters (like "aaaaa" with "aa")
 
-  // Remove empty lines created by the cleanup process
-  processed = processed.replace(/^\s*[\r\n]/gm, '');
+  // Retain paragraph boundaries, including those exposed by artifact cleanup.
+  processed = processed.replace(/\n{3,}/g, '\n\n');
 
   return processed;
 }
@@ -285,6 +288,25 @@ export async function extractContent(file: File): Promise<ExtractionResult> {
   const fileType = file.type.toLowerCase();
 
   console.log(`🔍 Detecting file type: ${fileName} (${fileType})`);
+
+  // Audio failures must reject the upload, never become a saved error document
+  // or fall through to decoding binary recording bytes as text.
+  if (isAudioFile(file)) {
+    const { extractAudio } = await import('./audioExtractor');
+    const result = await extractAudio(file);
+    const content = result.text.trim();
+    if (!content) throw new Error('Audio extraction failed: no speech transcript was produced. Upload a clear recording or a text transcript instead.');
+    return {
+      content,
+      metadata: {
+        ...result.metadata,
+        wordCount: content.split(/\s+/).length,
+        charCount: content.length,
+        extractionMethod: 'whisper-browser-transcription',
+      },
+      chunks: chunkText(content),
+    };
+  }
 
   try {
     // PDF - now handled server-side to avoid Vite bundling complications
@@ -329,10 +351,7 @@ export async function extractContent(file: File): Promise<ExtractionResult> {
 
     // Images
     if (fileType.startsWith("image/") || fileName.endsWith(".jpg") || fileName.endsWith(".jpeg") || fileName.endsWith(".png") || fileName.endsWith(".webp")) {
-      return {
-        content: "Processing image content...",
-        metadata: { wordCount: 0, charCount: 0, extractionMethod: "image-ready" }
-      };
+      throw new Error("Image text extraction is unavailable. Upload a text transcript or try again after signing in.");
     }
 
     // Fallback: try as text
@@ -373,6 +392,10 @@ To use this document, try:
       chunks: [],
     };
   }
+}
+
+function isAudioFile(file: File): boolean {
+  return file.type.toLowerCase().startsWith('audio/') || /\.(mp3|wav|m4a|aac|ogg|oga|opus|flac|aiff|aif|weba|webm)$/i.test(file.name);
 }
 
 /**
@@ -544,6 +567,7 @@ function getOverlapText(chunk: string, overlapSize: number): string {
 export function getFileCategory(file: File): string {
   const fileName = file.name.toLowerCase();
   const fileType = file.type.toLowerCase();
+  if (isAudioFile(file)) return "audio";
 
   if (fileType === "application/pdf" || fileName.endsWith(".pdf")) return "pdf";
   if (fileName.endsWith(".docx")) return "docx";

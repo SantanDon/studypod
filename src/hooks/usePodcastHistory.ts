@@ -1,92 +1,50 @@
-import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import {
-  localStorageService,
-  LocalPodcast,
-} from "@/services/localStorageService";
-import { indexedDBService } from "@/services/indexedDBService";
-import { useToast } from "@/hooks/use-toast";
-import { clearPlaybackCheckpoint } from "@/lib/audio/playbackProgress";
+import { useCallback } from 'react';
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import { indexedDBService } from '@/services/indexedDBService';
+import { clearPlaybackCheckpoint } from '@/lib/audio/playbackProgress';
+import { useStudioIdentity, readGuestStudio, writeGuestStudio } from '@/services/studioApiService';
+import { podcastApi, latestSavedPodcast, type PodcastRecord, type PodcastSave, type RecentPodcast } from '@/services/podcastApiService';
+
+export function useRecentSavedPodcast(notebookIds: string[]) {
+ const identity = useStudioIdentity();
+ const notebookKey = notebookIds.join(',');
+ const query = useQuery({
+  queryKey: ['recentPodcast', identity.owner, identity.authenticated ? 'account' : 'guest', notebookKey],
+  enabled: identity.ready && notebookIds.length > 0,
+  queryFn: async (): Promise<RecentPodcast | null> => {
+   identity.assertCurrent();
+   if (identity.authenticated) {
+    const record = await latestSavedPodcast(identity.token);
+    identity.assertCurrent();
+    return record && notebookIds.includes(record.notebook_id) ? record : null;
+   }
+   const ids = new Set(notebookIds);
+   const records = readGuestStudio<PodcastRecord>(identity.owner, 'podcasts')
+    .filter(record => ids.has(record.notebook_id) && record.persistence === 'guest')
+    .sort((a, b) => b.created_at.localeCompare(a.created_at));
+   identity.assertCurrent();
+   const record = records[0];
+   return record ? { id: record.id, notebook_id: record.notebook_id, title: record.title, created_at: record.created_at, duration: record.duration, persistence: 'guest' } : null;
+  },
+ });
+ return { episode: query.data, isLoading: query.isLoading, error: query.error, retry: query.refetch, isRefreshing: query.isFetching };
+}
 
 export function usePodcastHistory(notebookId: string) {
-  const queryClient = useQueryClient();
-  const { toast } = useToast();
-
-  const { data: podcasts, isLoading } = useQuery({
-    queryKey: ["podcasts", notebookId],
-    queryFn: () => localStorageService.getPodcasts(notebookId),
-    enabled: !!notebookId,
-  });
-
-  const savePodcastMutation = useMutation({
-    mutationFn: async ({
-      title,
-      blob,
-      duration,
-    }: {
-      title: string;
-      blob: Blob;
-      duration?: number;
-    }) => {
-      const blobId = crypto.randomUUID();
-
-      // 1. Save Blob to IndexedDB
-      await indexedDBService.saveAudio(blobId, blob);
-
-      // 2. Save Metadata to LocalStorage
-      const podcast = localStorageService.createPodcast({
-        notebook_id: notebookId,
-        title,
-        duration,
-        audio_blob_id: blobId,
-      });
-
-      return podcast;
-    },
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["podcasts", notebookId] });
-      toast({ title: "Podcast Saved", description: "Audio saved to history." });
-    },
-    onError: (error) => {
-      console.error("Failed to save podcast:", error);
-      toast({
-        title: "Save Failed",
-        description: "Could not save podcast.",
-        variant: "destructive",
-      });
-    },
-  });
-
-  const deletePodcastMutation = useMutation({
-    mutationFn: async (podcast: LocalPodcast) => {
-      try {
-        await indexedDBService.deleteAudio(podcast.audio_blob_id);
-      } catch (error) {
-        // Metadata must remain removable even if the browser already evicted the blob.
-        console.warn("Could not remove podcast audio blob:", error);
-      }
-      localStorageService.deletePodcast(podcast.id);
-      clearPlaybackCheckpoint(podcast.id);
-    },
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["podcasts", notebookId] });
-      toast({ title: "Deleted", description: "Podcast removed from history." });
-    },
-    onError: (error) => {
-      console.error("Failed to delete podcast:", error);
-      toast({
-        title: "Delete Failed",
-        description: "Could not delete podcast.",
-        variant: "destructive",
-      });
-    },
-  });
-
-  return {
-    podcasts,
-    isLoading,
-    savePodcast: savePodcastMutation.mutateAsync,
-    isSaving: savePodcastMutation.isPending,
-    deletePodcast: deletePodcastMutation.mutateAsync,
-    isDeleting: deletePodcastMutation.isPending,
-  };
+ const identity = useStudioIdentity(notebookId);
+ const { assertCurrent, authenticated, token } = identity;
+ const queryClient = useQueryClient();
+ const queryKey = ['podcasts',identity.key];
+ const api = podcastApi(notebookId, identity.token);
+ const query = useQuery({queryKey, enabled:identity.ready && !!notebookId, queryFn:async () => { identity.assertCurrent(); const records = identity.authenticated ? await api.list() : readGuestStudio<PodcastRecord>(identity.owner,'podcasts').filter(p => p.notebook_id === notebookId); identity.assertCurrent(); return records; }});
+ const save = useMutation({ mutationFn:async (input:PodcastSave) => {
+  identity.assertCurrent(); const id = input.id || crypto.randomUUID();
+  let record:PodcastRecord;
+  if(identity.authenticated) record = await api.save({...input,id});
+  else { await indexedDBService.saveAudio(id,input.blob); identity.assertCurrent(); record = {id,notebook_id:notebookId,title:input.title,duration:input.duration,created_at:new Date().toISOString(),audio_blob_id:id,script:input.script,source_ids:input.sourceIds,persistence:'guest'}; const records = readGuestStudio<PodcastRecord>(identity.owner,'podcasts'); writeGuestStudio(identity.owner,'podcasts',[record,...records.filter(p=>p.id!==id)]); }
+  identity.assertCurrent(); await queryClient.invalidateQueries({queryKey}); await queryClient.invalidateQueries({queryKey:['recentPodcast',identity.owner]}); return record;
+ }});
+ const remove = useMutation({mutationFn:async (record:PodcastRecord) => { identity.assertCurrent(); if(identity.authenticated) await api.remove(record.id); else { await indexedDBService.deleteAudio(record.audio_blob_id); identity.assertCurrent(); writeGuestStudio(identity.owner,'podcasts',readGuestStudio<PodcastRecord>(identity.owner,'podcasts').filter(p=>p.id!==record.id)); } identity.assertCurrent(); clearPlaybackCheckpoint(record.id); await queryClient.invalidateQueries({queryKey}); await queryClient.invalidateQueries({queryKey:['recentPodcast',identity.owner]}); }});
+ const loadAudio = useCallback(async (record:PodcastRecord) => { assertCurrent(); const blob = authenticated ? await podcastApi(notebookId,token).audio(record.id) : await indexedDBService.getAudio(record.audio_blob_id); assertCurrent(); if(!blob) throw new Error('The saved audio is missing. Remove this episode and generate it again.'); return blob; },[assertCurrent,authenticated,token,notebookId]);
+ return {podcasts:query.data,isLoading:query.isLoading,loadError:query.error,mutationError:save.error||remove.error,retryHistory:query.refetch,isRefreshing:query.isFetching,savePodcast:save.mutateAsync,isSaving:save.isPending,deletePodcast:remove.mutateAsync,isDeleting:remove.isPending,loadAudio,scopeKey:identity.key,ready:identity.ready,authenticated:identity.authenticated,assertCurrent:identity.assertCurrent};
 }

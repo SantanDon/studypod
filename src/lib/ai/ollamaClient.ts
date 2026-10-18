@@ -68,7 +68,7 @@ async function fetchWithTimeout(
     : null;
   try {
     // Don't override signal if one was already provided
-    const finalInit = init.signal ? init : { ...init, signal };
+    const finalInit = { ...init, signal: init.signal && signal ? AbortSignal.any([init.signal, signal]) : init.signal || signal };
     const res = await fetch(input, finalInit);
     return res;
   } finally {
@@ -152,7 +152,7 @@ async function parseModelsResponse(res: Response): Promise<string[]> {
  *
  * Tries multiple endpoints in order and returns the first successful model list.
  */
-export async function listModels(timeoutMs: number = TIMEOUTS.OLLAMA_MODEL_LIST): Promise<string[]> {
+export async function listModels(timeoutMs: number = TIMEOUTS.OLLAMA_MODEL_LIST, signal?: AbortSignal): Promise<string[]> {
   const base = getBaseUrl();
 
   // Use the standard /api/tags endpoint for Ollama model listing
@@ -162,7 +162,7 @@ export async function listModels(timeoutMs: number = TIMEOUTS.OLLAMA_MODEL_LIST)
 
     const res = await fetchWithTimeout(
       url,
-      { method: "GET", headers },
+      { method: "GET", headers, signal },
       timeoutMs,
     );
 
@@ -174,6 +174,7 @@ export async function listModels(timeoutMs: number = TIMEOUTS.OLLAMA_MODEL_LIST)
     if (models && models.length > 0) return models;
     throw new Error(`No models found in response from ${url}`);
   } catch (err) {
+    signal?.throwIfAborted();
     const isAbort = String(err).includes("AbortError") || String(err).includes("The operation was aborted");
     if (isAbort) {
        throw new Error(`Failed to list models from Ollama: Request timed out after ${timeoutMs}ms. Please check if Ollama is running and responsive.`);
@@ -195,6 +196,7 @@ export interface GenerateOptions {
   // e.g. temperature, top_p, max_tokens, etc.
   params?: Record<string, unknown>;
   timeoutMs?: number;
+  signal?: AbortSignal;
 }
 
 /**
@@ -224,8 +226,8 @@ export async function generateText(
 
   // Try to get available models first
   try {
-    const models = await listModels(TIMEOUTS.OLLAMA_FAST_PING); // Quick check with 5s timeout
-    if (!models.includes(opts.model)) {
+    const models = await listModels(TIMEOUTS.OLLAMA_FAST_PING, opts.signal); // Quick check with 5s timeout
+    if (!models.includes(opts.model) && opts.model !== import.meta.env.VITE_OLLAMA_MODEL?.trim()) {
       // Try to find a similar model (matching prefix before :)
       const prefix = opts.model.split(":")[0];
       const fallbackModel = models.find((m) => m.startsWith(prefix));
@@ -237,6 +239,7 @@ export async function generateText(
       }
     }
   } catch (err) {
+    opts.signal?.throwIfAborted();
     console.warn("Failed to check available models:", err);
     // Continue with requested model
   }
@@ -262,6 +265,7 @@ export async function generateText(
       method: "POST",
       headers,
       body: JSON.stringify(payload),
+      signal: opts.signal,
     },
     timeoutMs,
   );

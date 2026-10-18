@@ -15,7 +15,7 @@ router.use(authenticateToken, requireScope("sources:write"));
  * Smart server-side scraper using Cheerio.
  * Bypasses CORS and extracts clean, readable text before the browser even sees it.
  */
-router.get("/extract-web", async (req, res) => {
+router.get("/extract-web", async (req, res, next) => {
   try {
     const { url } = req.query;
     if (!url)
@@ -49,7 +49,7 @@ router.get("/extract-web", async (req, res) => {
       },
     });
   } catch (error) {
-    if (error instanceof AppError) throw error;
+    if (error instanceof AppError) return next(error);
     logger.error("[Smart Proxy] Error:", error);
     res.status(500).json({ error: "Failed to extract web content" });
   }

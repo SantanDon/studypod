@@ -1,4 +1,4 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
 import { useResearchGoals, ResearchGoal } from '@/hooks/useResearchGoals';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -8,6 +8,8 @@ import { useToast } from '@/hooks/use-toast';
 import SuggestedGoalsForSource from './SuggestedGoalsForSource';
 import { useAuth } from '@/hooks/useAuth';
 import ApiService from '@/services/apiService';
+import { useQueryClient } from '@tanstack/react-query';
+import { useStudioIdentity } from '@/services/studioApiService';
 
 interface ResearchGoalsPanelProps {
   notebookId: string;
@@ -34,17 +36,31 @@ const ResearchGoalsPanel = ({ notebookId, activeSourceId }: ResearchGoalsPanelPr
   const { goals, isLoading, createGoal, updateGoal, deleteGoal } = useResearchGoals(notebookId, { includeArchived: filter === 'all' });
   const { toast } = useToast();
   const { session } = useAuth();
+  const identity = useStudioIdentity(notebookId);
+  const queryClient = useQueryClient();
+  const isCurrent = () => { try { identity.assertCurrent(); return true; } catch { return false; } };
   const [isSynthesizing, setIsSynthesizing] = useState(false);
+  useEffect(() => {
+    setIsAdding(false); setTitle(''); setDescription(''); setParentGoalId(null); setIsSynthesizing(false);
+  }, [identity.key]);
 
   const handleClosedLoopSynthesis = async () => {
+    if (!session?.access_token || !isCurrent()) return;
     setIsSynthesizing(true);
     try {
       const res = await ApiService.sendChatMessage(notebookId, { message: 'closed-loop synthesis' }, session?.access_token || '');
-      toast({ title: 'Goal Broker Synthesis Completed', description: res.answer || 'Goal Broker synthesis executed successfully.' });
+      if (!isCurrent()) return;
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: ['notes', notebookId] }),
+        queryClient.invalidateQueries({ queryKey: ['researchGoals', notebookId] }),
+      ]);
+      if (!isCurrent()) return;
+      toast({ title: 'Synthesis result', description: res.answer || 'Review this notebook’s Notes for any saved synthesis.' });
     } catch (err: unknown) {
+      if (!isCurrent()) return;
       toast({ title: 'Synthesis Failed', description: err instanceof Error ? err.message : 'An error occurred during synthesis.', variant: 'destructive' });
     } finally {
-      setIsSynthesizing(false);
+      if (isCurrent()) setIsSynthesizing(false);
     }
   };
 
@@ -62,6 +78,7 @@ const ResearchGoalsPanel = ({ notebookId, activeSourceId }: ResearchGoalsPanelPr
     }
     try {
       await createGoal({ title, description, parentGoalId: parentGoalId || undefined, priority });
+      if (!isCurrent()) return;
       setTitle('');
       setDescription('');
       setPriority('medium');
@@ -69,6 +86,7 @@ const ResearchGoalsPanel = ({ notebookId, activeSourceId }: ResearchGoalsPanelPr
       setParentGoalId(null);
       toast({ title: 'Goal added', description: 'Your research goal is active.' });
     } catch (err: unknown) {
+      if (!isCurrent()) return;
       toast({ title: 'Failed to add goal', description: err instanceof Error ? err.message : 'An error occurred.', variant: 'destructive' });
     }
   };
@@ -77,8 +95,10 @@ const ResearchGoalsPanel = ({ notebookId, activeSourceId }: ResearchGoalsPanelPr
     if (!window.confirm('Are you sure you want to remove this research goal?')) return;
     try {
       await deleteGoal(id);
+      if (!isCurrent()) return;
       toast({ title: 'Goal removed', description: 'The research goal was deleted.' });
     } catch (err: unknown) {
+      if (!isCurrent()) return;
       toast({ title: 'Failed to delete', description: err instanceof Error ? err.message : 'An error occurred.', variant: 'destructive' });
     }
   };
@@ -86,8 +106,10 @@ const ResearchGoalsPanel = ({ notebookId, activeSourceId }: ResearchGoalsPanelPr
   const handleComplete = async (goal: ResearchGoal) => {
     try {
       await updateGoal({ goalId: goal.id, updates: { status: 'completed', progress_pct: 100 } });
+      if (!isCurrent()) return;
       toast({ title: 'Goal completed', description: goal.title });
     } catch (err: unknown) {
+      if (!isCurrent()) return;
       toast({ title: 'Failed to complete', description: err instanceof Error ? err.message : String(err), variant: 'destructive' });
     }
   };
@@ -104,7 +126,7 @@ const ResearchGoalsPanel = ({ notebookId, activeSourceId }: ResearchGoalsPanelPr
   });
 
   const renderGoal = (goal: ResearchGoal, depth: number = 0) => {
-    const children = goals.filter(g => g.parent_goal_id === goal.id);
+    const children = filteredGoals.filter(g => g.parent_goal_id === goal.id);
     const pct = typeof goal.progress_pct === 'number' ? goal.progress_pct : 0;
     const isCompleted = goal.status === 'completed';
     return (
@@ -186,6 +208,8 @@ const ResearchGoalsPanel = ({ notebookId, activeSourceId }: ResearchGoalsPanelPr
     );
   };
 
+  if (!session?.access_token) return <p className="p-3 text-xs text-muted-foreground">Sign in to save research goals and synthesize your notebook sources into Notes.</p>;
+
   return (
     <div className="space-y-4">
       {activeSourceId && (
@@ -219,17 +243,18 @@ const ResearchGoalsPanel = ({ notebookId, activeSourceId }: ResearchGoalsPanelPr
             size="sm"
             variant="outline"
             disabled={isSynthesizing}
+            aria-label={isSynthesizing ? 'Syncing...' : 'Synthesize'}
             onClick={handleClosedLoopSynthesis}
             className="h-7 text-[11px] rounded-lg font-semibold border-indigo-200 text-indigo-700 hover:bg-indigo-50"
           >
             {isSynthesizing ? (
               <>
-                <i className="fi fi-rr-spinner animate-spin mr-1"></i>
+                <i aria-hidden="true" className="fi fi-rr-spinner animate-spin mr-1"></i>
                 Syncing...
               </>
             ) : (
               <>
-                <i className="fi fi-rr-refresh mr-1"></i>
+                <i aria-hidden="true" className="fi fi-rr-refresh mr-1"></i>
                 Synthesize
               </>
             )}
@@ -324,7 +349,7 @@ const ResearchGoalsPanel = ({ notebookId, activeSourceId }: ResearchGoalsPanelPr
         </div>
       ) : (
         <div className="space-y-2">
-          {filteredGoals.filter(g => !g.parent_goal_id).map(root => renderGoal(root, 0))}
+          {filteredGoals.filter(g => !g.parent_goal_id || !filteredGoals.some(parent => parent.id === g.parent_goal_id)).map(root => renderGoal(root, 0))}
         </div>
       )}
     </div>

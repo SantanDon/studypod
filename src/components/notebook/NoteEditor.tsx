@@ -7,6 +7,7 @@ import { Note } from "@/hooks/useNotes";
 import MarkdownRenderer from "@/components/chat/MarkdownRenderer";
 import { Citation, MessageSegment } from "@/types/message";
 import { parseJsonResponse } from "@/utils/jsonParser";
+import { generateTitle } from "@/lib/ai/ollamaService";
 
 interface NoteEditorProps {
   note?: Note;
@@ -14,6 +15,7 @@ interface NoteEditorProps {
   onDelete?: () => void;
   onCancel: () => void;
   isLoading?: boolean;
+  error?: string | null;
   onCitationClick?: (citation: Citation) => void;
 }
 
@@ -23,6 +25,7 @@ const NoteEditor = ({
   onDelete,
   onCancel,
   isLoading,
+  error,
   onCitationClick,
 }: NoteEditorProps) => {
   const [title, setTitle] = useState(note?.title || "");
@@ -71,29 +74,7 @@ const NoteEditor = ({
 
     setIsGeneratingTitle(true);
     try {
-      // Use local implementation with Ollama for title generation
-      const response = await fetch("http://localhost:11434/api/generate", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          model: "llama3", // Use appropriate Ollama model
-          prompt: `Generate a concise, descriptive title for the following note content. Return only the title, no additional text:\n\n${note.content}`,
-          stream: false,
-        }),
-      });
-
-      if (!response.ok) {
-        throw new Error("Failed to generate title from Ollama");
-      }
-
-      const data = await response.json();
-
-      if (data.response) {
-        const generatedTitle = data.response.trim().replace(/^["']|["']$/g, ""); // Remove quotes if present
-        setTitle(generatedTitle);
-      }
+      setTitle(await generateTitle(note.content));
     } catch (error) {
       console.error("Error generating title:", error);
       // Fallback to a simple title if generation fails
@@ -151,6 +132,7 @@ const NoteEditor = ({
           </div>
 
           <h2 className="text-lg font-semibold text-gray-900">{title}</h2>
+          {error && <p role="alert" className="mt-2 text-sm text-destructive">{error}</p>}
         </div>
 
         {/* Content */}
@@ -228,6 +210,7 @@ const NoteEditor = ({
             </Button>
           )}
         </div>
+        {error && <p role="alert" className="text-sm text-destructive">{error}</p>}
       </div>
 
       {/* Content */}
@@ -262,7 +245,7 @@ const NoteEditor = ({
             disabled={!title.trim() || !content.trim() || isLoading}
             size="sm"
           >
-            <i className="fi fi-rr-disk h-4 w-4 mr-2"></i>
+            <i aria-hidden="true" className="fi fi-rr-disk h-4 w-4 mr-2"></i>
             {isLoading ? "Saving..." : "Save"}
           </Button>
         </div>

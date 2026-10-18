@@ -26,9 +26,10 @@ const RenameSourceDialog = ({
   open,
   onOpenChange,
   source,
+  notebookId,
 }: RenameSourceDialogProps) => {
   const [title, setTitle] = useState("");
-  const { updateSource, isUpdating } = useSourceUpdate();
+  const { updateSource, isUpdating } = useSourceUpdate(notebookId);
 
   useEffect(() => {
     if (source && open) {
@@ -39,13 +40,16 @@ const RenameSourceDialog = ({
   const handleSave = async () => {
     if (!source || !title.trim()) return;
 
-    await updateSource({
-      sourceId: source.id,
-      title: title.trim(),
-    });
-
-    onOpenChange(false);
-    setTitle("");
+    try {
+      await updateSource({
+        sourceId: source.id,
+        title: title.trim(),
+      });
+      onOpenChange(false);
+      setTitle("");
+    } catch {
+      // The hook reports the failed save; retain the draft so it can be retried.
+    }
   };
 
   const handleCancel = () => {

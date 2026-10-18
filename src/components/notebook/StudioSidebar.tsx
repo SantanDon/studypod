@@ -19,6 +19,7 @@ import SignalQueuePanel from './SignalQueuePanel';
 import ResearchGoalsPanel from './ResearchGoalsPanel';
 import AgentMissionPanel from './AgentMissionPanel';
 import AudiobookView from './AudiobookView';
+import TaskPulse from './TaskPulse';
 import {
   Bot,
   Brain,
@@ -166,19 +167,37 @@ const StudioSidebar = ({
   const [isComparisonSectionOpen, setIsComparisonSectionOpen] = React.useState(false);
   const [activeWorkspace, setActiveWorkspace] = React.useState<'studio' | 'audiobook'>('studio');
 
-  const { notes, sources, usableSources, installedModels, conceptMaps, currentSession } = data;
+  const { notes, sources, usableSources, sourcesLoading, sourcesFetching, sourcesError, retrySources, installedModels, conceptMaps, currentSession, savedQuizzes, quizHistory } = data;
   const sourceCount = sources?.length ?? 0;
   const usableSourceCount = usableSources.length;
-  const sourceSummary = sourceCount === 0
-    ? 'Add sources to create grounded outputs and study tools.'
-    : usableSourceCount === 0
-      ? 'No sources are ready for grounded work yet.'
-      : usableSourceCount < sourceCount
-        ? `${usableSourceCount} of ${sourceCount} sources ready for grounded work.`
-        : `${usableSourceCount} ${usableSourceCount === 1 ? 'source' : 'sources'} available for grounded work.`;
+  const sourceReadiness = (() => {
+    if (sourcesError) return {
+      label: sourceCount > 0 ? 'Source check needs retry' : 'Sources unavailable',
+      detail: sourceCount > 0
+        ? 'Showing the last loaded list. Retry to confirm what is ready.'
+        : 'Retry loading sources to check audio readiness.',
+    };
+    if (sourcesLoading && sourceCount === 0) return {
+      label: 'Checking sources',
+      detail: 'Audio readiness will appear when sources finish loading.',
+    };
+    if (sourceCount === 0) return {
+      label: 'No sources yet',
+      detail: 'Add a source to create grounded audio and study tools.',
+    };
+    const label = `${usableSourceCount} of ${sourceCount} ${sourceCount === 1 ? 'source' : 'sources'} ready`;
+    if (usableSourceCount === 0) return {
+      label,
+      detail: 'Audio needs a source with a ready excerpt.',
+    };
+    return {
+      label,
+      detail: `By default, Audio Overview draws on excerpts from every ready source in this notebook.${usableSourceCount < sourceCount ? ' Other sources are skipped.' : ''}`,
+    };
+  })();
   const hasOnlyTweets = sources && sources.length > 0 && sources.every(s => s.type === 'tweet');
-  const { isLoading, isCreating, isUpdating, isDeleting, isGenerating, isGeneratingMap, isDeletingMap, isEditingMode, isQuizActive, isQuizCompleted } = flags;
-  const { generationError, generatingProgress } = misc;
+  const { isLoading, isCreating, isUpdating, isDeleting, isGenerating, isGeneratingMap, isDeletingMap, isEditingMode, isQuizActive, isQuizCompleted, isCompleting } = flags;
+  const { generationError, generatingProgress, completionError, noteError, quizzesError, historyError, mapLoadError, mapMutationError } = misc;
   const audioCommand = useStudioAudioCommands((store) => notebookId ? store.requests[notebookId] : undefined);
   React.useEffect(() => {
     if (!notebookId || audioCommand?.phase !== 'queued') return;
@@ -192,6 +211,7 @@ const StudioSidebar = ({
   const {
     handleGenerateConceptMap, handleCreateNote, handleEditNote, handleSaveNote, handleDeleteNote, handleCancel,
     handleStartQuiz, handleQuizComplete, handleQuizRetry, handleQuizClose,
+    handleOpenSavedQuiz, handleOpenQuizAttempt,
     answerQuestion, nextQuestion, getPreviewText, getCurrentQuestion, getProgress, deleteMap
   } = handlers;
 
@@ -204,7 +224,8 @@ const StudioSidebar = ({
           onSave={handleSaveNote} 
           onDelete={editingNote ? handleDeleteNote : undefined} 
           onCancel={handleCancel} 
-          isLoading={isCreating || isUpdating || isDeleting} 
+          isLoading={isCreating || isUpdating || isDeleting}
+          error={noteError}
           onCitationClick={onCitationClick} 
         />
       </div>
@@ -227,6 +248,8 @@ const StudioSidebar = ({
             onComplete={handleQuizComplete}
             onCancel={handleQuizClose}
             isLastQuestion={progress.current === progress.total}
+            isCompleting={isCompleting}
+            completionError={completionError}
           />
         </div>
       );
@@ -270,33 +293,50 @@ const StudioSidebar = ({
 
   return (
     <div className="flex h-full w-full flex-col overflow-hidden border-l border-border bg-background">
-      <div className="flex min-h-[72px] flex-shrink-0 items-center justify-between gap-3 border-b border-border px-4 py-3">
-        <div className="min-w-0">
+      <div className="flex min-h-[72px] flex-shrink-0 flex-wrap items-start justify-between gap-x-3 gap-y-2 border-b border-border px-4 py-3">
+        <div className="min-w-0 flex-1 basis-48">
           <h2 className="text-base font-semibold tracking-tight text-foreground">Studio</h2>
-          <p className="mt-0.5 truncate text-[10px] leading-4 text-muted-foreground">
-            {sourceSummary}
+          <p className="mt-1 text-xs font-medium leading-5 text-foreground">
+            {sourceReadiness.label}
+          </p>
+          <p className="text-xs leading-5 text-muted-foreground">
+            {sourceReadiness.detail}
           </p>
         </div>
         {hasOnlyTweets && (
-          <span className="shrink-0 rounded-full border border-border bg-muted/45 px-2 py-1 text-[9px] font-medium text-muted-foreground">
+          <span className="shrink-0 rounded-full border border-border bg-muted/45 px-2 py-1 text-xs font-medium text-muted-foreground">
             Bookmark mode
           </span>
         )}
       </div>
 
+      {sourcesError && (
+        <div role="alert" className="mx-4 mt-3 rounded-xl border border-amber-300 bg-amber-50 p-3 text-xs text-amber-950 dark:border-amber-900/60 dark:bg-amber-950/30 dark:text-amber-100">
+          <p>{sourceCount > 0 ? 'Could not refresh sources. Showing the last loaded list.' : 'Could not load sources. Studio cannot check what is ready yet.'}</p>
+          <Button type="button" variant="outline" size="sm" className="mt-2" disabled={sourcesFetching} onClick={() => void retrySources()}>
+            {sourcesFetching ? 'Retrying…' : 'Retry loading sources'}
+          </Button>
+        </div>
+      )}
       <ScrollArea className="flex-1">
-        <div className="space-y-8 p-4">
+        <div className="studypod-studio-sections space-y-8 p-4">
+          {notebookId && (
+            <section className="studypod-audio-studio space-y-3" aria-label="Audio studio">
+              <StudioSectionHeading
+                title="Audio Overview"
+                description="Listen to saved overviews or create a new overview from your sources."
+              />
+              <div data-testid="audio-overview-studio-card">
+                <PodcastView notebookId={notebookId} onOpenSource={onCitationClick} />
+              </div>
+            </section>
+          )}
+
           <section className="space-y-3" aria-label="Create from sources">
             <StudioSectionHeading
               title="Create from sources"
               description="Turn notebook evidence into durable outputs without leaving the research context."
             />
-
-            {(!hasOnlyTweets || audioCommand?.kind === 'podcast') && notebookId && (
-              <div data-testid="audio-overview-studio-card">
-                <PodcastView notebookId={notebookId} />
-              </div>
-            )}
 
             <StudioActionCard
               icon={FileText}
@@ -368,6 +408,8 @@ const StudioSidebar = ({
             )}
           </section>
 
+          <TaskPulse notebookId={notebookId} />
+
           <section className="space-y-3" aria-label="Research workflows">
             <StudioSectionHeading
               title="Research workflows"
@@ -421,7 +463,6 @@ const StudioSidebar = ({
               </CollapsibleContent>
             </Collapsible>
 
-            {!hasOnlyTweets && (
               <Collapsible open={isComparisonSectionOpen} onOpenChange={setIsComparisonSectionOpen}>
                 <StudioToolTrigger
                   icon={GitCompare}
@@ -449,7 +490,6 @@ const StudioSidebar = ({
                   </div>
                 </CollapsibleContent>
               </Collapsible>
-            )}
           </section>
 
           <section className="space-y-3" aria-label="Study and review">
@@ -458,7 +498,6 @@ const StudioSidebar = ({
               description="Test recall and explore relationships after the source material is ready."
             />
 
-            {!hasOnlyTweets && (
               <Collapsible open={isQuizSectionOpen} onOpenChange={setIsQuizSectionOpen}>
                 <StudioToolTrigger
                   icon={Brain}
@@ -480,11 +519,23 @@ const StudioSidebar = ({
                       <p className="text-xs text-muted-foreground">Add a source or wait for processing to finish before generating a quiz.</p>
                     </div>
                   )}
+                  {(quizzesError || historyError) && <p role="alert" className="p-3 text-sm text-destructive">{quizzesError || historyError}</p>}
+                  {(flags.isLoadingQuizzes || flags.isLoadingHistory) && <p role="status" className="p-3 text-xs text-muted-foreground">Loading saved quizzes…</p>}
+                  {savedQuizzes.length > 0 && (
+                    <div className="space-y-2 p-3" aria-label="Saved quizzes">
+                      <h4 className="text-xs font-semibold">Saved quizzes</h4>
+                      {savedQuizzes.map(quiz => <Button key={quiz.id} variant="outline" className="h-auto w-full justify-start whitespace-normal text-left" onClick={() => handleOpenSavedQuiz(quiz)}>Retake {quiz.title}</Button>)}
+                    </div>
+                  )}
+                  {quizHistory.length > 0 && (
+                    <div className="space-y-2 p-3" aria-label="Quiz history">
+                      <h4 className="text-xs font-semibold">Quiz history</h4>
+                      {quizHistory.map(attempt => <Button key={attempt.id || `${attempt.quizId}:${attempt.completedAt}`} variant="outline" className="h-auto w-full justify-start whitespace-normal text-left" disabled={!attempt.results || !savedQuizzes.some(quiz => quiz.id === attempt.quizId)} onClick={() => handleOpenQuizAttempt(attempt)}>View results: {attempt.title} · {attempt.score}%</Button>)}
+                    </div>
+                  )}
                 </CollapsibleContent>
               </Collapsible>
-            )}
 
-            {!hasOnlyTweets && (
               <Collapsible open={isFlashcardSectionOpen} onOpenChange={setIsFlashcardSectionOpen}>
                 <StudioToolTrigger
                   icon={Layers3}
@@ -496,7 +547,6 @@ const StudioSidebar = ({
                   {notebookId && <FlashcardDeckComponent notebookId={notebookId} />}
                 </CollapsibleContent>
               </Collapsible>
-            )}
 
             <Collapsible open={isConceptMapSectionOpen} onOpenChange={setIsConceptMapSectionOpen}>
               <StudioToolTrigger
@@ -528,6 +578,9 @@ const StudioSidebar = ({
                       )}
                     </Button>
 
+                    {(mapLoadError || mapMutationError) && (
+                      <p role="alert" className="text-sm text-destructive">{String(mapLoadError || mapMutationError)}</p>
+                    )}
                     {conceptMaps.length > 0 && (
                       <div className="space-y-2">
                         {conceptMaps.map((map) => (

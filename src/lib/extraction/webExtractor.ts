@@ -221,7 +221,10 @@ export function sanitizeWebContent(content: string): string {
       // Remove comments
       .replace(/<!--[\s\S]*?-->/g, "")
       // Remove excessive whitespace and normalize line breaks
-      .replace(/\s+/g, " ")
+      .replace(/\r\n?/g, "\n")
+      .replace(/[^\S\n]+/g, " ")
+      .replace(/ *\n */g, "\n")
+      .replace(/\n{3,}/g, "\n\n")
       .trim()
   );
 }

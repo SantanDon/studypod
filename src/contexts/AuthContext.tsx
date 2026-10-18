@@ -53,13 +53,15 @@ export const AuthProvider = ({ children }: AuthProviderProps) => {
       if (data.mfaRequired) {
         setMfaRequired(true);
         setMfaToken(data.mfaToken);
-        return;
+        return false;
       }
 
       signInWithCloud(data.user);
+      return true;
     } catch (err) {
       console.error("AuthContext: Sign in error:", err);
       setError(err instanceof Error ? err.message : "Sign in error");
+      throw err;
     }
   };
 

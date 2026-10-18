@@ -1,3 +1,4 @@
+import { getModelForTask } from '@/config/ollamaModels';
 import React, { useState } from 'react';
 import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
@@ -32,7 +33,7 @@ const QuizSelector: React.FC<QuizSelectorProps> = ({
   error,
   sourcesCount,
   availableModels = [],
-  defaultModel = 'llama3.2:latest',
+  defaultModel = getModelForTask('chat'),
 }) => {
   const [numQuestions, setNumQuestions] = useState(5);
   const [difficulty, setDifficulty] = useState<QuestionDifficulty>('medium');

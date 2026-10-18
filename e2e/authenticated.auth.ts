@@ -1,0 +1,191 @@
+import { test, expect, type Page, type BrowserContext } from '@playwright/test';
+import { randomUUID } from 'node:crypto';
+
+test('real account: failed login, notebook/source persistence, logout, fresh login', async ({ browser, baseURL }, testInfo) => {
+  expect(process.env.STUDYPOD_AUTH_MUTATIONS_ALLOWED, 'Explicit dedicated-test-data opt-in required').toBe('dedicated-test-data');
+  expect(Boolean(baseURL), 'Explicit target required').toBe(true);
+  const target = new URL(baseURL!);
+  expect(target.protocol === 'https:' || ['127.0.0.1', 'localhost'].includes(target.hostname)).toBe(true);
+  const email = process.env.STUDYPOD_AUTH_EMAIL;
+  const password = process.env.STUDYPOD_AUTH_PASSWORD;
+  expect(Boolean(email && password), 'Dedicated test credentials required').toBe(true);
+  const marker = `StudyPod acceptance ${randomUUID()}`;
+  const title = `Synthetic QA ${randomUUID().slice(0, 8)}`;
+  const content = `${marker}. This is synthetic study material, created only for acceptance testing. Plants convert light into chemical energy during photosynthesis. Chlorophyll absorbs light, while carbon dioxide and water provide the inputs. The process releases oxygen. These sentences contain no personal data and no copyrighted course material.`;
+  const contexts: BrowserContext[] = [];
+  let blockedGeneration = 0;
+  let browserErrors = 0;
+  const receipt: Record<string, unknown> = { phase: 'configuration', target: target.origin, viewport: testInfo.project.use.viewport, isMobile: testInfo.project.use.isMobile, hasTouch: testInfo.project.use.hasTouch, mockedAuthOrData: false, providerGeneration: 'same-origin /api/ai/generate blocked; separate audio/provider gate required' };
+  const fresh = async () => {
+    const context = await browser.newContext({ baseURL, viewport: testInfo.project.use.viewport, isMobile: testInfo.project.use.isMobile, hasTouch: testInfo.project.use.hasTouch, serviceWorkers: 'block' });
+    contexts.push(context);
+    // Only paid/provider work is blocked. Auth, notebooks and sources use the real backend.
+    await context.route('**/*', async route => {
+      const url = new URL(route.request().url());
+      if (url.origin === target.origin && url.pathname === '/api/ai/generate') {
+        blockedGeneration++; await route.abort('blockedbyclient'); return;
+      }
+      await route.continue();
+    });
+    const page = await context.newPage();
+    page.on('pageerror', () => { browserErrors++; });
+    return { context, page };
+  };
+  const login = async (page: Page, wrong = false, identity = { email: email!, password: password! }) => {
+    await page.goto('/auth?mode=cloud-login');
+    await page.getByLabel('Email Address').fill(identity.email);
+    await page.getByLabel('Password', { exact: true }).fill(wrong ? `Incorrect-${randomUUID()}` : identity.password);
+    const response = page.waitForResponse(r => new URL(r.url()).pathname === '/api/auth/signin' && r.request().method() === 'POST');
+    await page.getByRole('button', { name: 'Sign in', exact: true }).click();
+    const result = await response;
+    expect(result.status()).toBe(wrong ? 401 : 200);
+    if (wrong) {
+      await expect(page.getByRole('button', { name: 'Sign in', exact: true })).toBeVisible();
+      expect(new URL(page.url()).pathname).toBe('/auth');
+      await expect(page.getByRole('button', { name: 'Create notebook', exact: true })).toHaveCount(0);
+    } else {
+      await page.waitForURL(url => url.pathname === '/');
+      await expect(page.getByRole('heading', { name: 'Your study space', exact: true })).toBeVisible();
+    }
+  };
+  try {
+    receipt.phase = 'signup-or-login';
+    const first = await fresh();
+    if (process.env.STUDYPOD_AUTH_SIGNUP === '1') {
+      expect(process.env.STUDYPOD_AUTH_TERMS_ACCEPTED, 'Terms acceptance must be explicitly authorized for this test identity').toBe('1');
+      await first.page.goto('/auth?mode=cloud-signup');
+      await first.page.getByLabel('Display Name').fill('StudyPod acceptance account');
+      await first.page.getByLabel('Email Address').fill(email!);
+      await first.page.getByLabel('Password', { exact: true }).fill(password!);
+      await first.page.locator('#tosAccepted').click();
+      const signup = first.page.waitForResponse(r => new URL(r.url()).pathname === '/api/auth/signup' && r.request().method() === 'POST');
+      await first.page.getByRole('button', { name: 'Create Account', exact: true }).click();
+      expect((await signup).status()).toBe(201);
+      await expect(first.page.getByRole('button', { name: 'Create notebook', exact: true })).toBeVisible();
+      receipt.signup = 'passed';
+    } else await login(first.page);
+    receipt.phase = 'profile-and-create-notebook';
+    const profile = await first.context.request.get('/api/user/profile');
+    expect(profile.status()).toBe(200);
+    expect((await profile.json()).user.email).toBe(email);
+    const create = first.page.waitForResponse(r => new URL(r.url()).pathname === '/api/notebooks' && r.request().method() === 'POST');
+    await first.page.getByRole('button', { name: /^(Create notebook|\+ Create new)$/ }).click();
+    const created = await create;
+    expect(created.status()).toBe(201);
+    await first.page.waitForURL(/\/notebook\/[a-zA-Z0-9-]+/);
+    const notebookPath = new URL(first.page.url()).pathname;
+    const notebookId = notebookPath.split('/').pop()!;
+    receipt.notebookId = notebookId;
+    if (process.env.STUDYPOD_AUTH_MOBILE === '1') await first.page.getByRole('tab', { name: /(?:^|\s)Sources$/ }).click();
+    receipt.phase = 'add-synthetic-source';
+    await first.page.getByRole('button', { name: /(?:^|\s)Add$/ }).click();
+    await first.page.getByRole('button', { name: /Pasted Content/ }).click();
+    await first.page.getByLabel('Title', { exact: true }).fill(title);
+    await first.page.getByLabel('Content', { exact: true }).fill(content);
+    const add = first.page.waitForResponse(r => new URL(r.url()).pathname === `/api/notebooks/${notebookId}/sources` && r.request().method() === 'POST');
+    await first.page.getByRole('button', { name: 'Add Copied Text', exact: true }).click();
+    expect((await add).status()).toBe(201);
+    await expect(first.page.getByText(title, { exact: true }).first()).toBeVisible();
+    receipt.phase = 'logout';
+    await first.page.goto('/');
+    await first.page.locator('header button[aria-haspopup="menu"]').first().click();
+    const signout = first.page.waitForResponse(r => new URL(r.url()).pathname === '/api/auth/signout' && r.request().method() === 'POST');
+    await first.page.getByRole('menuitem', { name: /(?:^|\s)Sign out$/ }).click();
+    expect((await signout).status()).toBe(200);
+    await first.page.waitForURL(/\/auth/);
+    expect((await first.context.request.get('/api/user/profile')).status()).toBe(401);
+    await first.context.close();
+    receipt.phase = 'fresh-browser-failed-and-valid-login';
+    const second = await fresh();
+    await login(second.page, true);
+    receipt.failedLogin = 'passed';
+    await login(second.page);
+    const freshProfile = await second.context.request.get('/api/user/profile');
+    expect(freshProfile.status()).toBe(200);
+    expect((await freshProfile.json()).user.email).toBe(email);
+    receipt.phase = 'fresh-browser-persistence';
+    const list = await second.context.request.get('/api/notebooks');
+    expect(list.status()).toBe(200);
+    expect((await list.json()).some((n: { id: string }) => n.id === notebookId)).toBe(true);
+    const sources = await second.context.request.get(`/api/notebooks/${notebookId}/sources`);
+    expect(sources.status()).toBe(200);
+    const persistedSources = await sources.json();
+    const persistedSource = persistedSources.find((s: { title: string; content: string }) => s.title === title && s.content.includes(marker));
+    expect(Boolean(persistedSource)).toBe(true);
+    const ownedNotebook = await second.context.request.get(`/api/notebooks/${notebookId}`);
+    expect(ownedNotebook.status()).toBe(200);
+    const originalNotebook = await ownedNotebook.json();
+    const ownerNotebookWrite = await second.context.request.put(`/api/notebooks/${notebookId}`, { data: { title: originalNotebook.title } });
+    expect(ownerNotebookWrite.status()).toBe(200);
+    expect((await ownerNotebookWrite.json()).title).toBe(originalNotebook.title);
+    const ownerSourceWrite = await second.context.request.put(`/api/notebooks/${notebookId}/sources/${persistedSource.id}`, { data: { title, content } });
+    expect(ownerSourceWrite.status()).toBe(200);
+    expect((await ownerSourceWrite.json()).content).toBe(content);
+    receipt.ownerWriteControls = 'notebook and source PUT passed';
+    await second.page.goto(notebookPath);
+    if (process.env.STUDYPOD_AUTH_MOBILE === '1') await second.page.getByRole('tab', { name: /(?:^|\s)Sources$/ }).click();
+    await expect(second.page.getByText(title, { exact: true }).first()).toBeVisible();
+    receipt.phase = 'anonymous-access-denial';
+    const anonymous = await fresh();
+    const denied = await anonymous.context.request.get(`/api/notebooks/${notebookId}/sources`);
+    expect([401, 403, 404]).toContain(denied.status());
+    receipt.anonymousAccess = denied.status();
+    receipt.persistence = 'real server + fresh browser passed';
+    receipt.phase = 'second-account-ownership';
+    const otherEmail = process.env.STUDYPOD_AUTH_SECOND_EMAIL;
+    const otherPassword = process.env.STUDYPOD_AUTH_SECOND_PASSWORD;
+    expect(Boolean(otherEmail && otherPassword), 'Second dedicated identity required for ownership gate').toBe(true);
+    expect(otherEmail === email, 'Identities must differ').toBe(false);
+    const other = await fresh();
+    if (process.env.STUDYPOD_AUTH_SIGNUP === '1') {
+      await other.page.goto('/auth?mode=cloud-signup');
+      await other.page.getByLabel('Display Name').fill('StudyPod ownership acceptance');
+      await other.page.getByLabel('Email Address').fill(otherEmail!);
+      await other.page.getByLabel('Password', { exact: true }).fill(otherPassword!);
+      await other.page.locator('#tosAccepted').click();
+      const signup = other.page.waitForResponse(r => new URL(r.url()).pathname === '/api/auth/signup' && r.request().method() === 'POST');
+      await other.page.getByRole('button', { name: 'Create Account', exact: true }).click();
+      expect((await signup).status()).toBe(201);
+      await expect(other.page.getByRole('button', { name: 'Create notebook', exact: true })).toBeVisible();
+    } else await login(other.page, false, { email: otherEmail!, password: otherPassword! });
+    const otherProfile = await other.context.request.get('/api/user/profile');
+    expect(otherProfile.status()).toBe(200);
+    expect((await otherProfile.json()).user.email).toBe(otherEmail);
+    receipt.accountIdentityChecks = 'owner, fresh login and second account passed';
+    const otherList = await other.context.request.get('/api/notebooks');
+    expect(otherList.status()).toBe(200);
+    expect((await otherList.json()).some((n: { id: string }) => n.id === notebookId)).toBe(false);
+    const ownershipStatuses: number[] = [];
+    for (const path of [`/api/notebooks/${notebookId}`, `/api/notebooks/${notebookId}/sources`]) {
+      const response = await other.context.request.get(path);
+      ownershipStatuses.push(response.status());
+      expect([403, 404]).toContain(response.status());
+      expect((await response.text()).includes(marker)).toBe(false);
+    }
+    receipt.crossAccountOwnership = ownershipStatuses;
+    receipt.phase = 'cross-account-write-denial';
+    const notebookWrite = await other.context.request.put(`/api/notebooks/${notebookId}`, { data: { title: 'Synthetic unauthorized update' } });
+    receipt.crossAccountNotebookWrite = notebookWrite.status();
+    expect([403, 404]).toContain(notebookWrite.status());
+    const sourceWrite = await other.context.request.put(`/api/notebooks/${notebookId}/sources/${persistedSource.id}`, { data: { title: 'Synthetic unauthorized source update', content: 'Synthetic unauthorized replacement' } });
+    receipt.crossAccountSourceWrite = sourceWrite.status();
+    expect([403, 404]).toContain(sourceWrite.status());
+    const preservedNotebook = await second.context.request.get(`/api/notebooks/${notebookId}`);
+    expect(preservedNotebook.status()).toBe(200);
+    expect((await preservedNotebook.json()).title).toBe(originalNotebook.title);
+    const preservedSources = await second.context.request.get(`/api/notebooks/${notebookId}/sources`);
+    expect(preservedSources.status()).toBe(200);
+    const preservedSource = (await preservedSources.json()).find((s: { id: string }) => s.id === persistedSource.id);
+    expect(preservedSource.title).toBe(title);
+    expect(preservedSource.content).toBe(content);
+    receipt.ownerDataAfterDeniedWrites = 'unchanged';
+    receipt.phase = 'complete';
+    expect(browserErrors, 'Uncaught browser errors').toBe(0);
+    expect(blockedGeneration, 'CRUD gate must not request provider generation').toBe(0);
+  } finally {
+    receipt.blockedGenerationRequests = blockedGeneration;
+    receipt.uncaughtBrowserErrors = browserErrors;
+    await testInfo.attach('sanitized-acceptance-receipt', { body: JSON.stringify(receipt, null, 2), contentType: 'application/json' });
+    await Promise.allSettled(contexts.map(c => c.close()));
+  }
+});

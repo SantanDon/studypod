@@ -41,8 +41,43 @@ jobs:
       - name: Unit and integration tests
         run: npm test -- --run
 
+      - name: Acceptance gate decision and audio contracts
+        run: npm run test:gate:unit
+
+      - name: Podcast completion command acceptance
+        run: npx vitest run --config vitest.config.ts src/__tests__/integration/podcastChatCommands.test.tsx
+
       - name: Production build
         run: npm run build
+
+      - name: Install browser acceptance runtime
+        run: npx playwright install --with-deps chromium
+
+      - name: Built-app desktop and mobile acceptance gate
+        run: npm run test:e2e
+
+      - name: Real isolated authenticated desktop and mobile gate
+        run: npm run test:auth:local
+
+      - name: Preserve sanitized authenticated receipts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: studypod-auth-gate
+          path: |
+            .ai-bridge/studypod-renewal-20261012/release-gate/auth-local/*/desktop/report.json
+            .ai-bridge/studypod-renewal-20261012/release-gate/auth-local/*/mobile/report.json
+          if-no-files-found: ignore
+          retention-days: 14
+
+      - name: Preserve browser acceptance evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: studypod-browser-gate
+          path: .ai-bridge/studypod-browser-gate/
+          if-no-files-found: ignore
+          retention-days: 14
 
       - name: Enforce bundle budgets
         run: npm run check:bundle

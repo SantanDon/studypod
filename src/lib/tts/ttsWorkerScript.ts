@@ -5,6 +5,8 @@
  * This worker handles heavy ONNX inference without blocking the UI
  */
 
+import { generateCompleteKokoroAudio } from './kokoroTokenGeneration';
+
 // Worker message types
 interface TTSWorkerRequest {
   type: 'init' | 'synthesize' | 'cancel' | 'checkWebGPU';
@@ -137,10 +139,10 @@ async function synthesize(id: string, text: string, voice: string, speed: number
 
     // Generate audio with explicit voice parameter
     // The voice should be one of: af_heart, af_bella, am_michael, etc.
-    const audio = await kokoroInstance.generate(text, {
+    const audio = await generateCompleteKokoroAudio(kokoroInstance, text, {
       voice: voice, // e.g., "am_michael" or "af_bella"
       speed: speed,
-    });
+    }, () => currentRequestId !== id);
 
     console.log(`Kokoro TTS: Generated audio, duration=${audio.duration}s`);
 
@@ -158,6 +160,7 @@ async function synthesize(id: string, text: string, voice: string, speed: number
     // Convert to ArrayBuffer for transfer
     const audioBlob = await audio.toBlob();
     const arrayBuffer = await audioBlob.arrayBuffer();
+    if (currentRequestId !== id) return;
 
     postResponse({
       type: 'audio',

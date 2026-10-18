@@ -33,10 +33,11 @@ import {
   loadBookManifest,
   parseEpub,
   sanitizeFileName,
-  saveBookManifest,
+  saveBookManifestAsync,
   uniqueSafeFileName,
 } from "../services/audiobookBookService.js";
 import { prepareNarrationText } from "../services/audiobookNarrationTextService.js";
+import { generateKokoroAudio, prepareKokoroSegments } from "../services/kokoroGenerationService.js";
 import {
   canonicalAudiobookWavArgs,
   chapterCacheKeyFor,
@@ -61,6 +62,7 @@ import {
 } from "../services/audiobookManifestService.js";
 
 import { selectNarrationChapterIds } from "../services/audiobookSelectionService.js";
+import { createDeleteAudiobookAudioHandler } from "../services/audiobookAudioDeletionService.js";
 import { createAudiobookAdmissionGuard, isOwnedAudiobookManifest } from "../services/audiobookRequestGuard.js";
 
 const router = express.Router();
@@ -1281,7 +1283,7 @@ const generateChunkedAudio = async ({
   const normalizedProvider = normalizeTtsProvider(provider, voice);
   await assertProviderAvailable(normalizedProvider);
   const narrationText = humanizeNarrationText(text);
-  const segments = buildNarrationSegments(narrationText, {
+  let segments = buildNarrationSegments(narrationText, {
     requestedPreset: resolvedStyle,
     analysis,
     pronunciations,
@@ -1303,6 +1305,10 @@ const generateChunkedAudio = async ({
     return cachePath;
   }
 
+  if (normalizedProvider === "kokoro") {
+    segments = await prepareKokoroSegments(engine, segments, { voice });
+  }
+
   const generateSegment = async (segment, outputPath) => {
     const settings = {
       speed: segment.speedMultiplier,
@@ -1317,7 +1323,7 @@ const generateChunkedAudio = async ({
         settings,
       });
     }
-    const audio = await engine.generate(segment.text, {
+    const audio = await generateKokoroAudio(engine, segment.text, {
       voice,
       speed: settings.speed,
     });
@@ -1461,7 +1467,7 @@ const extractAndPersistBook = async ({
   book.manifest.narrationDirection = narrationDirection;
   book.manifest.pronunciationCandidates = pronunciationCandidates;
 
-  saveBookManifest(MANIFEST_DIR, book.manifest);
+  await saveBookManifestAsync(MANIFEST_DIR, book.manifest);
   const { manifest: _privateManifest, ...publicBook } = book;
   return {
     ...publicBook,
@@ -1634,6 +1640,31 @@ router.get("/meta", requireRuntime, async (req, res) => {
 
 // ─── PROGRESSIVE PLAYBACK, PROGRESS & BOOKMARKS ───────────────────────────────
 
+const audiobookAudioMutationAdmission = createAudiobookAdmissionGuard({
+  ownerFor: requestUserId, fileFor: sanitizeFileName,
+  rawFileFor: (req) => req.params.fileName ?? req.body?.fileName,
+});
+router.delete("/books/:fileName/audio", requireAudiobookWrite, requireRuntime, audiobookAudioMutationAdmission,
+  createDeleteAudiobookAudioHandler({
+    requestUserId, sanitizeFileName, mutateOwnedManifest,
+    readJob, isWorkerActive: (jobId) => activeWorkerJobs.has(jobId),
+    listBookJobs: (fileName, ownerId) => {
+      const ids = new Set(generationJobs.keys());
+      for (const entry of fs.readdirSync(JOB_DIR)) {
+        if (entry.endsWith(".json") && !entry.endsWith(".cancelled.json")) ids.add(entry.slice(0, -5));
+      }
+      return [...ids].map((jobId) => ({ jobId, job: readJob(jobId) }))
+        .filter(({ job }) => job?.ownerId === ownerId && job?.bookFileName === fileName);
+    },
+    writeCancelMarker: writeAudiobookCancelMarker,
+    removeAudioFile: (fileName) => {
+      if (path.basename(fileName) !== fileName) throw new Error("Invalid audio filename");
+      try { fs.unlinkSync(path.join(AUDIO_CACHE_DIR, fileName)); }
+      catch (error) { if (error.code !== "ENOENT") throw error; }
+    }, logger,
+  }),
+);
+
 router.get(
   "/books/:fileName/playback-manifest",
   requireRuntime,
@@ -1716,8 +1747,11 @@ router.put(
       const manifest = await mutateOwnedManifest({
         fileName,
         ownerId,
-        mutate: (current) =>
-          updateAudiobookListenerState(current, {
+        mutate: (current) => {
+          if (!current.renders?.[req.body?.renderId]) {
+            throw Object.assign(new Error("Audio was removed"), { code: "AUDIOBOOK_MANIFEST_NOT_FOUND" });
+          }
+          return updateAudiobookListenerState(current, {
             renderId: req.body?.renderId,
             currentChapterId:
               req.body?.currentChapterId ?? req.body?.chapterId ?? null,
@@ -1725,7 +1759,8 @@ router.put(
             chapterDurationSeconds: req.body?.chapterDurationSeconds,
             playbackRate: req.body?.playbackRate,
             ...(completedChapterIds ? { completedChapterIds } : {}),
-          }),
+          });
+        },
       });
       res.setHeader("Cache-Control", "no-store");
       return res.json({ listenerState: manifest.listenerState });
@@ -1759,6 +1794,9 @@ router.post(
         fileName,
         ownerId,
         mutate: (current) => {
+          if (!current.activeRenderId || !current.renders?.[current.activeRenderId]) {
+            throw Object.assign(new Error("Audio was removed"), { code: "AUDIOBOOK_MANIFEST_NOT_FOUND" });
+          }
           const added = addAudiobookBookmark(current, {
             chapterId,
             timeSeconds: req.body?.timeSeconds,
@@ -2571,7 +2609,7 @@ router.post(
   "/generate-full",
   requireAudiobookWrite,
   requireRuntime,
-  createAudiobookAdmissionGuard({ ownerFor: requestUserId, fileFor: sanitizeFileName }),
+  audiobookAudioMutationAdmission,
   async (req, res) => {
     try {
       const ownerId = requestUserId(req);

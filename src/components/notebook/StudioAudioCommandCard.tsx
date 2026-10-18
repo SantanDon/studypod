@@ -13,7 +13,7 @@ export default function StudioAudioCommandCard({ notebookId, sources }: {
     const [selection, setSelection] = useState('');
     const bookJob = useAudiobookStore((state) => request?.sourceIds[0] ? state.jobs[request.sourceIds[0]] : undefined);
     const podcast = usePodcastGenerationStore();
-    const eligible = sources.filter((source) => request?.kind === 'audiobook' ? hasNarrationManifest(source) : isSourceUsableForGroundedWork(source));
+    const eligible = sources.filter((source) => request?.kind === 'audiobook' ? hasNarrationManifest(source) || (request.operation === 'generate' && isSourceUsableForGroundedWork(source) && Boolean(source.content?.trim())) : isSourceUsableForGroundedWork(source));
     const sourceSignature = eligible.map((source) => source.id).join('|');
     useEffect(() => {
         const selected = request?.sourceIds[0];
@@ -38,7 +38,25 @@ export default function StudioAudioCommandCard({ notebookId, sources }: {
             store.queue(notebookId, useStudioAudioCommands.getState().requests[notebookId].id, chosenIds);
         }
     };
-    const title = request.kind === 'audiobook' ? 'Read aloud' : 'Podcast';
+    const audioName = request.kind === 'audiobook' ? 'audiobook' : 'Audio Overview';
+    const title = request.operation === 'generate'
+        ? (request.kind === 'audiobook' ? 'Read source aloud in full' : 'Create Audio Overview')
+        : request.operation === 'resume'
+            ? `Retry or resume ${audioName}`
+            : request.operation === 'cancel'
+                ? `Cancel ${audioName} generation`
+                : request.operation === 'status'
+                    ? `Check ${audioName} status`
+                    : `Open ${audioName} in Studio`;
+    const queuedMessage = request.operation === 'generate'
+        ? 'Opening Studio to request generation. Generation has not started yet.'
+        : request.operation === 'resume'
+            ? 'Opening Studio to retry or resume this audio.'
+            : request.operation === 'cancel'
+                ? 'Opening Studio to request cancellation.'
+                : request.operation === 'status'
+                    ? 'Opening Studio to check audio status.'
+                    : 'Opening the matching Studio tool.';
     return (<section aria-label="Chat audio action" className="mx-4 mb-3 max-h-72 overflow-y-auto rounded-xl border border-border bg-muted/40 p-4 text-sm">
       <div className="flex items-start justify-between gap-3">
         <div><p className="font-semibold">{title}</p><p className="mt-1 break-words text-muted-foreground">{request.message}</p></div>
@@ -52,16 +70,16 @@ export default function StudioAudioCommandCard({ notebookId, sources }: {
             {eligible.map((source) => <option key={source.id} value={source.id}>{source.title}</option>)}
           </select>
         </label>}
-        {request.kind === 'audiobook' && requiresSource && <p className="text-xs text-muted-foreground">Full narration uses the original book's chapter manifest, not a chat summary. A PDF or document without that manifest must first be imported through Audiobook Studio.</p>}
+        {request.kind === 'audiobook' && requiresSource && <p className="text-xs text-muted-foreground">Reads the selected source’s available text in order—not this chat answer and not a summary. Duration follows the text and reading speed, not a brief/deep-dive setting. The narration service must be available.</p>}
         {request.kind === 'audiobook' && singleBookOnly && <p className="text-xs text-muted-foreground">Choose exactly one book above. {request.operation === 'cancel' ? 'Cancelling without a chosen book is refused so the wrong job is never stopped.' : 'This command applies to that one book only.'}</p>}
-        {request.kind === 'podcast' && requiresSource && <p className="text-xs text-muted-foreground">A source-grounded discussion, not verbatim narration. Uses your Studio voices and episode settings.{request.focus ? ` Focus: ${request.focus}` : ''}</p>}
+        {request.kind === 'podcast' && requiresSource && <p className="text-xs text-muted-foreground">A guided reading of selected source passages with brief host introductions. Some source passages may be omitted. Uses your Studio voices and coverage settings.{request.focus ? ` Focus: ${request.focus}` : ''}</p>}
         {request.chapterSelection && <p className="text-xs text-muted-foreground">Choose the requested chapter in Studio. This command will not start full-book narration.</p>}
         <div className="flex flex-wrap gap-2"><Button size="sm" onClick={queuedAction} disabled={singleBookOnly ? chosenIds.length !== 1 : requiresSource && chosenIds.length === 0}>
           {request.operation === 'generate' ? 'Confirm generation' : request.operation === 'resume' ? 'Confirm retry / resume' : request.operation === 'cancel' ? 'Cancel generation' : request.operation === 'status' ? 'Check audio status' : 'Open in Studio'}
         </Button>{requiresSource && eligible.length === 0 && <Button size="sm" variant="outline" onClick={openStudio}>Open audio import</Button>}</div>
       </div>}
       <p aria-live="polite" className={`mt-2 ${request.phase === 'failed' ? 'text-destructive' : 'text-muted-foreground'}`}>
-        {request.phase === 'queued' ? 'Opening the matching Studio tool. Generation has not started yet.' : request.phase === 'executing' ? 'Studio is checking this request...' : request.result}
+        {request.phase === 'queued' ? queuedMessage : request.phase === 'executing' ? 'Studio is checking this request...' : request.result}
       </p>
       {request.phase === 'accepted' && request.kind === 'audiobook' && activeBook && <div className="mt-2 space-y-1">
         <p>{activeBook.bookTitle}: {activeBook.status} · {activeBook.completedChapters || 0}/{activeBook.chapterCount || '?'} chapters</p>
@@ -72,6 +90,6 @@ export default function StudioAudioCommandCard({ notebookId, sources }: {
         {podcast.isGenerating && <progress aria-label="Podcast progress" className="w-full" max={100} value={podcast.progress?.percentage || 0}/>}
         {podcast.audioUrl?.startsWith('blob:') && <audio aria-label="Generated podcast" controls preload="metadata" src={podcast.audioUrl} className="w-full"/>}
       </div>}
-      {!busy && request.phase !== 'draft' && <Button size="sm" variant="outline" className="mt-2" onClick={openStudio}>Open playback, chapters and download</Button>}
+      {!busy && request.phase !== 'draft' && <Button size="sm" variant="outline" className="mt-2" onClick={openStudio}>{request.phase === 'failed' ? 'Open Studio setup' : 'Open playback, chapters and download'}</Button>}
     </section>);
 }

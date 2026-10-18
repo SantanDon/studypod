@@ -1,6 +1,6 @@
 import { OPEN_STUDIO_AUDIO_EVENT } from '@/lib/audio/studioAudioCommands';
 
-import { lazy, Suspense, useEffect, useState } from 'react';
+import { lazy, Suspense, useEffect, useRef, useState } from 'react';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 // import { FileText, MessageCircle, NotebookPen } from 'lucide-react'; // Removed Lucide imports
 import SourcesSidebar from './SourcesSidebar';
@@ -50,7 +50,37 @@ const MobileNotebookTabs = ({
   activeSourceId,
   onActiveSourceChange,
 }: MobileNotebookTabsProps) => {
-  const [activeTab, setActiveTab] = useState('chat');
+  const [activeTab, setActiveTab] = useState(() => new URLSearchParams(window.location.search).get('view') === 'studio' ? 'studio' : 'chat');
+  const [citationOrigin, setCitationOrigin] = useState<'chat' | 'studio' | null>(null);
+  const citationTriggerRef = useRef<HTMLElement | null>(null);
+  const chatTabRef = useRef<HTMLButtonElement>(null);
+  const studioTabRef = useRef<HTMLButtonElement>(null);
+
+  const openCitation = (citation: Citation, origin: 'chat' | 'studio') => {
+    citationTriggerRef.current = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    setCitationOrigin(origin);
+    onCitationClick?.(citation);
+    setActiveTab('sources');
+  };
+
+  const closeCitation = () => {
+    setCitationOrigin(null);
+    onCitationClose?.();
+  };
+
+  const returnToCitationOrigin = () => {
+    if (citationOrigin) {
+      const origin = citationOrigin;
+      setActiveTab(origin);
+      requestAnimationFrame(() => {
+        const trigger = citationTriggerRef.current;
+        if (trigger?.isConnected && !trigger.closest('[data-state="inactive"]')) trigger.focus();
+        else (origin === 'chat' ? chatTabRef : studioTabRef).current?.focus();
+        citationTriggerRef.current = null;
+      });
+    }
+    setCitationOrigin(null);
+  };
 
   useEffect(() => {
     const onAudioQuestion = (event: Event) => {
@@ -74,22 +104,24 @@ const MobileNotebookTabs = ({
           value="sources" 
           className="flex items-center space-x-2 text-sm data-[state=active]:bg-white dark:data-[state=active]:bg-background data-[state=active]:shadow-sm"
         >
-          <i className="fi fi-rr-file h-4 w-4"></i>
+          <i aria-hidden="true" className="fi fi-rr-file h-4 w-4"></i>
           <span className="text-[11px] sm:text-sm">Sources</span>
         </TabsTrigger>
         <TabsTrigger 
+          ref={chatTabRef}
           value="chat" 
           className="flex items-center space-x-2 text-sm data-[state=active]:bg-white dark:data-[state=active]:bg-background data-[state=active]:shadow-sm"
         >
-          <i className="fi fi-rr-comment h-4 w-4"></i>
+          <i aria-hidden="true" className="fi fi-rr-comment h-4 w-4"></i>
           <span className="text-[11px] sm:text-sm">Chat</span>
         </TabsTrigger>
         <TabsTrigger 
+          ref={studioTabRef}
           value="studio" 
           className="flex items-center space-x-2 text-sm data-[state=active]:bg-white dark:data-[state=active]:bg-background data-[state=active]:shadow-sm"
           data-testid="mobile-studio-tab"
         >
-          <i className="fi fi-rr-notebook h-4 w-4"></i>
+          <i aria-hidden="true" className="fi fi-rr-notebook h-4 w-4"></i>
           <span className="text-[11px] sm:text-sm">Studio</span>
         </TabsTrigger>
       </TabsList>
@@ -99,20 +131,22 @@ const MobileNotebookTabs = ({
           hasSource={hasSource}
           notebookId={notebookId}
           selectedCitation={selectedCitation}
-          onCitationClose={onCitationClose}
+          onCitationClose={closeCitation}
           setSelectedCitation={setSelectedCitation}
           activeSourceId={activeSourceId}
           onActiveSourceChange={onActiveSourceChange}
+          returnToCitationOrigin={selectedCitation && citationOrigin ? citationOrigin : null}
+          onReturnToCitationOrigin={returnToCitationOrigin}
         />
       </TabsContent>
 
-      <TabsContent value="chat" className="flex-1 overflow-hidden mt-0">
+      <TabsContent value="chat" forceMount className="flex-1 overflow-hidden mt-0 data-[state=inactive]:hidden">
         <ChatArea 
           hasSource={hasSource}
           notebookId={notebookId}
           notebook={notebook}
           activeSourceId={activeSourceId}
-          onCitationClick={onCitationClick}
+          onCitationClick={(citation) => openCitation(citation, 'chat')}
         />
       </TabsContent>
 
@@ -120,7 +154,7 @@ const MobileNotebookTabs = ({
         <Suspense fallback={<StudioLoading />}>
           <StudioSidebar
             notebookId={notebookId}
-            onCitationClick={onCitationClick}
+            onCitationClick={(citation) => openCitation(citation, 'studio')}
             activeSourceId={activeSourceId}
           />
         </Suspense>

@@ -1,3 +1,4 @@
+import { createRequestDeadline, type RequestDeadlineOptions } from './requestDeadline';
 import { API_BASE_URL } from '@/config/api';
 
 export interface ServerChatMessage {
@@ -33,18 +34,25 @@ export function getServerAiAuthValue(storage: Pick<Storage, 'getItem'> | null =
 export async function generateServerAiResponse(
   messages: ServerChatMessage[],
   temperature = 0.7,
+  options: RequestDeadlineOptions = {},
 ): Promise<string> {
+  const scope = createRequestDeadline(options);
+  try {
+  scope.signal.throwIfAborted();
   const headers: Record<string, string> = { 'Content-Type': 'application/json' };
   headers[['Author', 'ization'].join('')] = ['Bearer', getServerAiAuthValue()].join(' ');
 
   const response = await fetch(`${API_BASE_URL}/ai/generate`, {
     method: 'POST',
     credentials: 'include',
+    signal: scope.signal,
     headers,
-    body: JSON.stringify({ messages, temperature, priority: 'reasoning' }),
+    body: JSON.stringify({ messages, temperature, priority: 'reasoning',
+      ...(options.deadlineAt === undefined ? {} : { timeoutMs: Math.max(0, options.deadlineAt - Date.now()) }),
+    }),
   });
 
-  const payload = await response.json().catch(() => ({}));
+  const payload = await response.json().catch(() => { scope.signal.throwIfAborted(); return {}; });
   if (!response.ok) {
     const message = typeof payload.error === 'string' ? payload.error : 'Server AI request failed';
     const error = new Error(message) as Error & { status?: number; retryAfterSeconds?: number | null };
@@ -57,5 +65,9 @@ export async function generateServerAiResponse(
   if (typeof payload.answer !== 'string' || !payload.answer.trim()) {
     throw new Error('The AI provider returned an empty response.');
   }
+  scope.signal.throwIfAborted();
   return payload.answer;
+  } finally {
+    scope.dispose();
+  }
 }

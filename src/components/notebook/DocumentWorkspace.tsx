@@ -80,7 +80,9 @@ export default function DocumentWorkspace({
   const draftKey = `studypod:document-draft:${document.id}`;
   const documentSourceIdsKey = document.sourceIds.join('');
 
-  const dirty = title !== document.title || content !== document.content || status !== document.status;
+  const sourceScopeDirty = selectedSourceIds.length !== document.sourceIds.length ||
+    selectedSourceIds.some((sourceId) => !document.sourceIds.includes(sourceId));
+  const dirty = title !== document.title || content !== document.content || status !== document.status || sourceScopeDirty;
   const selectedText = selectedRange ? content.slice(selectedRange.start, selectedRange.end) : '';
   const linkedSources = useMemo(
     () => (sources || []).filter((source) => selectedSourceIds.includes(source.id)),

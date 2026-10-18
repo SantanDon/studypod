@@ -5,6 +5,9 @@ import path from 'node:path';
 import { promisify } from 'node:util';
 import { logger } from '../utils/logger.js';
 
+import { createTransportRecorder, transportFailureClass, useAcceptanceSystemTrust } from '../utils/youtubeTransportDiagnostics.js';
+
+const transportRecorder = createTransportRecorder({ emit: record => logger.info(JSON.stringify(record)) });
 const execFileAsync = promisify(execFile);
 const DISCOVERY_TIMEOUT_MS = 8_000;
 const DEFAULT_TRANSCRIPT_TIMEOUT_MS = 90_000;
@@ -88,6 +91,9 @@ function parseConfiguredArgs() {
 }
 
 function commandCandidates() {
+  if (useAcceptanceSystemTrust() && (process.env.YTDLP_COMMAND || process.env.YTDLP_COMMAND_ARGS)) {
+    throw new Error('System trust trial requires an unconfigured yt-dlp entrypoint');
+  }
   if (process.env.YTDLP_COMMAND) {
     return [{ command: process.env.YTDLP_COMMAND, prefixArgs: parseConfiguredArgs(), label: 'configured' }];
   }
@@ -136,11 +142,13 @@ export async function fetchYtDlpTranscript(videoUrl, { language = 'en', timeoutM
   const command = await discoverYtDlpCommand();
   if (!command) return null;
 
+  const started = transportRecorder.start();
   const outputDirectory = await mkdtemp(path.join(os.tmpdir(), 'studypod-ytdlp-'));
   try {
     const languages = buildYtDlpLanguagePreference(language);
     const args = [
       ...command.prefixArgs,
+      ...(useAcceptanceSystemTrust() ? ['--ignore-config', '--compat-options', 'no-certifi'] : []),
       '--skip-download',
       '--write-auto-subs',
       '--write-subs',
@@ -155,12 +163,18 @@ export async function fetchYtDlpTranscript(videoUrl, { language = 'en', timeoutM
       videoUrl,
     ];
 
-    await execFileAsync(command.command, args, {
+    try {
+      await execFileAsync(command.command, args, {
       timeout: Number(timeoutMs || process.env.YTDLP_TIMEOUT_MS || DEFAULT_TRANSCRIPT_TIMEOUT_MS),
       windowsHide: true,
       maxBuffer: 2 * 1024 * 1024,
-    });
+      });
+    } catch (error) {
+      transportRecorder.finish('yt-dlp', started, { error });
+      throw error;
+    }
 
+    transportRecorder.finish('yt-dlp', started);
     const files = await readdir(outputDirectory);
     const selected = selectYtDlpSubtitleFile(files, language);
     if (!selected) {
@@ -184,7 +198,7 @@ export async function fetchYtDlpTranscript(videoUrl, { language = 'en', timeoutM
       version: command.version,
     };
   } catch (error) {
-    logger.warn(`[yt-dlp] Transcript fallback failed: ${error.message}`);
+    logger.warn(`[yt-dlp] Transcript fallback failed (${transportFailureClass(error, true)}).`);
     return null;
   } finally {
     await rm(outputDirectory, { recursive: true, force: true }).catch(() => {});

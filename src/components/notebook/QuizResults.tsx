@@ -46,7 +46,7 @@ const QuizResults: React.FC<QuizResultsProps> = ({
         <div className="flex items-center justify-between">
           <h2 className="text-lg font-semibold text-gray-900">Quiz Complete!</h2>
           <Button variant="ghost" size="sm" onClick={onClose}>
-            <i className="fi fi-rr-arrow-left h-4 w-4 mr-2"></i>
+            <i aria-hidden="true" className="fi fi-rr-arrow-left h-4 w-4 mr-2"></i>
             Back to Studio
           </Button>
         </div>
@@ -112,7 +112,7 @@ const QuizResults: React.FC<QuizResultsProps> = ({
 
           <div>
             <h3 className="font-semibold text-gray-900 mb-3 flex items-center">
-              <i className="fi fi-rr-book-alt h-4 w-4 mr-2"></i>
+              <i aria-hidden="true" className="fi fi-rr-book-alt h-4 w-4 mr-2"></i>
               Question Breakdown
             </h3>
             <div className="space-y-3">
@@ -180,7 +180,7 @@ const QuizResults: React.FC<QuizResultsProps> = ({
           {incorrectResults.length > 0 && (
             <Card className="p-4 bg-amber-50 border-amber-200">
               <h3 className="font-semibold text-amber-800 mb-2 flex items-center">
-                <i className="fi fi-rr-target h-4 w-4 mr-2"></i>
+                <i aria-hidden="true" className="fi fi-rr-target h-4 w-4 mr-2"></i>
                 Areas to Improve
               </h3>
               <p className="text-sm text-amber-700 mb-3">
@@ -217,7 +217,7 @@ const QuizResults: React.FC<QuizResultsProps> = ({
             Close
           </Button>
           <Button onClick={onRetry}>
-            <i className="fi fi-rr-rotate-left h-4 w-4 mr-2"></i>
+            <i aria-hidden="true" className="fi fi-rr-rotate-left h-4 w-4 mr-2"></i>
             Retry Quiz
           </Button>
         </div>

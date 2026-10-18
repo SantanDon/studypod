@@ -1,9 +1,11 @@
+import { Link } from "react-router-dom";
+import { useRecentSavedPodcast } from "@/hooks/usePodcastHistory";
+import { getResumableTime, loadPlaybackCheckpoint } from "@/lib/audio/playbackProgress";
 import DashboardHeader from "@/components/dashboard/DashboardHeader";
 import NotebookGrid from "@/components/dashboard/NotebookGrid";
 import EmptyDashboard from "@/components/dashboard/EmptyDashboard";
 import WhatsHappening from "@/components/dashboard/WhatsHappening";
 import GoalsPulse from "@/components/dashboard/GoalsPulse";
-import MetallicText from "@/components/ui/MetallicText";
 import { useNotebooks } from "@/hooks/useNotebooks";
 import { useAuth } from "@/hooks/useAuth";
 import { useVisualEffectsStore } from "@/stores/visualEffectsStore";
@@ -12,8 +14,13 @@ import { FEATURE_FLAGS } from "@/config/featureFlags";
 const Dashboard = () => {
   const { user, loading: authLoading, error: authError } = useAuth();
   const { notebooks, isLoading, error, isError } = useNotebooks();
-  const { metallicTextEnabled, metallicTextSpeed, useCustomFonts } = useVisualEffectsStore();
+  const { useCustomFonts } = useVisualEffectsStore();
   const hasNotebooks = notebooks && notebooks.length > 0;
+  const recentAudio = useRecentSavedPodcast(isLoading || isError ? [] : notebooks.map((notebook: { id: string }) => notebook.id));
+  const episodeNotebook = notebooks.find((notebook: { id: string }) => notebook.id === recentAudio.episode?.notebook_id);
+  const ownedEpisode = episodeNotebook ? recentAudio.episode : null;
+  const checkpoint = ownedEpisode ? loadPlaybackCheckpoint(ownedEpisode.id) : null;
+  const resumeAt = checkpoint?.kind === "podcast" ? getResumableTime(checkpoint, ownedEpisode?.duration) : 0;
 
   // Show loading while auth is initializing
   if (authLoading) {
@@ -23,7 +30,7 @@ const Dashboard = () => {
         <main className="max-w-7xl mx-auto px-6 py-8">
           <div className="mb-8">
             <h1 className="text-4xl font-medium text-gray-900 dark:text-foreground mb-2">
-              Welcome to StudyPodLM
+              Welcome to StudyPod
             </h1>
           </div>
           <div className="text-center py-16">
@@ -43,7 +50,7 @@ const Dashboard = () => {
         <main className="max-w-7xl mx-auto px-6 py-8">
           <div className="mb-8">
             <h1 className="text-4xl font-medium text-gray-900 dark:text-foreground mb-2">
-              Welcome to StudyPodLM
+              Welcome to StudyPod
             </h1>
           </div>
           <div className="text-center py-16">
@@ -68,7 +75,7 @@ const Dashboard = () => {
         <main className="max-w-7xl mx-auto px-6 py-8">
           <div className="mb-8">
             <h1 className="text-4xl font-medium text-gray-900 dark:text-foreground mb-2">
-              Welcome to StudyPodLM
+              Welcome to StudyPod
             </h1>
           </div>
           <div className="text-center py-16">
@@ -88,7 +95,7 @@ const Dashboard = () => {
         <main className="max-w-7xl mx-auto px-6 py-8">
           <div className="mb-8">
             <h1 className="text-4xl font-medium text-gray-900 dark:text-foreground mb-2">
-              Welcome to StudyPodLM
+              Welcome to StudyPod
             </h1>
           </div>
           <div className="text-center py-16">
@@ -111,16 +118,31 @@ const Dashboard = () => {
 
       <main className="max-w-7xl mx-auto px-4 sm:px-6 py-8">
         <div className="mb-6 border-b border-border/70 pb-5">
-          <h1 className={`font-medium text-gray-900 dark:text-foreground text-3xl ${useCustomFonts ? 'font-heading' : ''}`}>
-            <MetallicText enabled={metallicTextEnabled} speed={metallicTextSpeed}>
-              Your research workspace
-            </MetallicText>
+          <h1 className={`font-medium text-gray-900 dark:text-foreground text-3xl ${useCustomFonts ? 'font-heading' : ''}`}>Your study space
           </h1>
-          <p className="mt-1 text-sm text-muted-foreground">Open a notebook, continue a study thread, or start with a new source.</p>
+          <p className="mt-1 text-sm text-muted-foreground">Pick up where you left off, or bring something new to learn.</p>
         </div>
 
         {hasNotebooks ? (
-          <div className="grid grid-cols-1 lg:grid-cols-4 gap-8 items-start">
+          <>
+            <section aria-labelledby="saved-audio-heading" className="mb-7 rounded-2xl border border-teal-200 bg-[#faf8f3] p-4 sm:p-5 dark:border-teal-900 dark:bg-card">
+              <h2 id="saved-audio-heading" className="text-sm font-semibold uppercase tracking-[0.12em] text-teal-800 dark:text-teal-300">{resumeAt > 0 ? "Continue listening" : "Saved audio"}</h2>
+              {recentAudio.isLoading ? <p role="status" className="mt-2 text-sm text-muted-foreground">Checking your saved audio...</p> : recentAudio.error ? (
+                <div role="alert" className="mt-2 flex flex-wrap items-center gap-2 text-sm text-red-700 dark:text-red-400">
+                  <span>Could not check saved audio.</span>
+                  <button type="button" onClick={() => void recentAudio.retry()} disabled={recentAudio.isRefreshing} className="min-h-11 rounded-lg px-3 font-medium underline underline-offset-2 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-teal-600">Retry</button>
+                </div>
+              ) : episodeNotebook && ownedEpisode ? (
+                <div className="mt-2 flex min-w-0 flex-wrap items-center justify-between gap-3">
+                  <div className="min-w-0 flex-1">
+                    <p className="break-words font-medium text-stone-900 dark:text-foreground">{ownedEpisode.title}</p>
+                    <p className="break-words text-sm text-muted-foreground">Saved in {episodeNotebook.title}.{resumeAt > 0 ? ` Continue from ${Math.floor(resumeAt / 60)}:${Math.floor(resumeAt % 60).toString().padStart(2, "0")} on this device.` : " Open this episode in Studio to listen."}</p>
+                  </div>
+                  <Link to={`/notebook/${encodeURIComponent(episodeNotebook.id)}?view=studio&episode=${encodeURIComponent(ownedEpisode.id)}`} className="inline-flex min-h-11 items-center rounded-lg bg-teal-800 px-4 py-2 text-sm font-semibold text-white hover:bg-teal-900 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-teal-600 focus-visible:ring-offset-2 dark:bg-teal-700 dark:hover:bg-teal-600" aria-label={`${resumeAt > 0 ? "Resume" : "Open"} ${ownedEpisode.title} in ${episodeNotebook.title}`}>{resumeAt > 0 ? "Resume in Studio" : "Open episode"}</Link>
+                </div>
+              ) : <p className="mt-2 text-sm text-muted-foreground">No saved audio yet. Open a notebook's Studio to create an audio overview.</p>}
+            </section>
+            <div className="grid grid-cols-1 lg:grid-cols-4 gap-8 items-start">
             <div className="lg:col-span-3">
               <NotebookGrid />
             </div>
@@ -128,7 +150,8 @@ const Dashboard = () => {
               <GoalsPulse />
               {FEATURE_FLAGS.SIGNAL_QUEUE_VISIBLE && <WhatsHappening />}
             </div>
-          </div>
+            </div>
+          </>
         ) : (
           <EmptyDashboard />
         )}

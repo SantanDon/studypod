@@ -19,6 +19,28 @@ export interface Note {
   updatedAt?: string;
 }
 
+// Cloud notes store the title as a leading Markdown heading.
+// Decode that envelope so opening and saving a note does not duplicate its title.
+export const normalizeNoteRecord = (raw: Record<string, unknown>): Note => {
+  const storedContent = typeof raw.content === "string" ? raw.content : "";
+  const explicitTitle = typeof raw.title === "string" ? raw.title : "";
+  const heading = !explicitTitle ? /^# ([^\r\n]+)\r?\n(?:\r?\n)?/.exec(storedContent) : null;
+  return {
+    ...raw,
+    id: String(raw.id),
+    notebook_id: String(raw.notebookId ?? raw.notebook_id ?? ""),
+    title: explicitTitle || heading?.[1].trim() || "Untitled Note",
+    content: heading ? storedContent.slice(heading[0].length) : storedContent,
+    source_type: raw.source_type === "ai_response" ? "ai_response" : "user",
+    author_id: (raw.authorId ?? raw.author_id) as string | undefined,
+    created_at: (raw.createdAt ?? raw.created_at) as string,
+    updated_at: (raw.updatedAt ?? raw.updated_at) as string,
+  };
+};
+
+export const serializeNoteContent = (title: string, content: string): string =>
+  title.trim() ? `# ${title.trim()}\n\n${content}` : content;
+
 export const useNotes = (notebookId?: string) => {
   const { user } = useAuthState();
   const { session } = useAuth();
@@ -27,10 +49,11 @@ export const useNotes = (notebookId?: string) => {
   const queryClient = useQueryClient();
 
   const isAuthenticated = !!session?.access_token;
+  const notesQueryKey = ["notes", notebookId, effectiveUserId, isAuthenticated] as const;
 
   // ─── READ ──────────────────────────────────────────────────────────────────
   const { data: notes, isLoading } = useQuery({
-    queryKey: ["notes", notebookId, isAuthenticated],
+    queryKey: notesQueryKey,
     queryFn: async () => {
       if (!notebookId) return [];
 
@@ -39,14 +62,7 @@ export const useNotes = (notebookId?: string) => {
       if (isAuthenticated) {
         console.log("useNotes: Fetching from backend API...");
         const rawNotes = await ApiService.fetchNotes(notebookId, session!.access_token);
-        // Map Drizzle camelCase to Supabase-style snake_case the frontend expects
-        notes = rawNotes.map((n: Record<string, unknown>) => ({
-          ...n,
-          notebook_id: n.notebookId || n.notebook_id,
-          author_id: n.authorId || n.author_id,
-          created_at: n.createdAt || n.created_at,
-          updated_at: n.updatedAt || n.updated_at,
-        }));
+        notes = rawNotes.map(normalizeNoteRecord);
       } else {
         console.log("useNotes: Fetching from local storage...");
         notes = await localStorageService.getNotes(notebookId) as Note[];
@@ -78,7 +94,7 @@ export const useNotes = (notebookId?: string) => {
 
       if (isAuthenticated) {
         // Write to backend — visible to agents and across devices
-        const fullContent = title ? `# ${title}\n\n${content}` : content;
+        const fullContent = serializeNoteContent(title, content);
         return ApiService.createNote(notebookId, fullContent, session!.access_token);
       } else {
         return localStorageService.createNote({
@@ -107,7 +123,7 @@ export const useNotes = (notebookId?: string) => {
       content: string;
     }) => {
       if (isAuthenticated) {
-        const fullContent = title ? `# ${title}\n\n${content}` : content;
+        const fullContent = serializeNoteContent(title, content);
         return ApiService.updateNote(notebookId!, id, fullContent, session!.access_token);
       } else {
         const updatedNote = await localStorageService.updateNote(id, { title, content });
@@ -133,18 +149,18 @@ export const useNotes = (notebookId?: string) => {
     },
     onMutate: async (noteId) => {
       await queryClient.cancelQueries({ queryKey: ["notes", notebookId] });
-      const previousNotes = queryClient.getQueryData<Note[]>(["notes", notebookId]);
+      const previousNotes = queryClient.getQueryData<Note[]>(notesQueryKey);
       if (previousNotes) {
         queryClient.setQueryData<Note[]>(
-          ["notes", notebookId],
+          notesQueryKey,
           previousNotes.filter((note) => note.id !== noteId)
         );
       }
-      return { previousNotes };
+      return { previousNotes, queryKey: notesQueryKey };
     },
     onError: (_err, _noteId, context) => {
       if (context?.previousNotes) {
-        queryClient.setQueryData(["notes", notebookId], context.previousNotes);
+        queryClient.setQueryData(context.queryKey, context.previousNotes);
       }
     },
     onSettled: () => {
@@ -159,8 +175,10 @@ export const useNotes = (notebookId?: string) => {
     createNoteAsync: createNoteMutation.mutateAsync,
     isCreating: createNoteMutation.isPending,
     updateNote: updateNoteMutation.mutate,
+    updateNoteAsync: updateNoteMutation.mutateAsync,
     isUpdating: updateNoteMutation.isPending,
     deleteNote: deleteNoteMutation.mutate,
+    deleteNoteAsync: deleteNoteMutation.mutateAsync,
     isDeleting: deleteNoteMutation.isPending,
   };
 };

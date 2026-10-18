@@ -35,12 +35,12 @@ export interface SuggestedGoal {
 }
 
 export const useResearchGoals = (notebookId?: string, { includeArchived = false }: { includeArchived?: boolean } = {}) => {
-  const { session } = useAuth();
+  const { session, user } = useAuth();
   const queryClient = useQueryClient();
   const isAuthenticated = !!session?.access_token;
 
   const { data: goalsData, isLoading, refetch } = useQuery({
-    queryKey: ["researchGoals", notebookId, isAuthenticated, includeArchived],
+    queryKey: ["researchGoals", notebookId, user?.id, isAuthenticated, includeArchived],
     queryFn: async () => {
       if (!notebookId || !isAuthenticated) return [];
       const res = await ApiService.fetchResearchGoals(notebookId, session!.access_token, { includeArchived });
@@ -120,12 +120,12 @@ export const useResearchGoals = (notebookId?: string, { includeArchived = false 
 };
 
 export const useSuggestedGoals = (notebookId?: string, sourceId?: string | null) => {
-  const { session } = useAuth();
+  const { session, user } = useAuth();
   const queryClient = useQueryClient();
   const isAuthenticated = !!session?.access_token;
   const enabled = !!notebookId && !!sourceId && isAuthenticated;
   const { data, isLoading, refetch } = useQuery({
-    queryKey: ["suggestedGoals", notebookId, sourceId, isAuthenticated],
+    queryKey: ["suggestedGoals", notebookId, sourceId, user?.id, isAuthenticated],
     queryFn: async () => {
       if (!enabled) return { suggestions: [] as SuggestedGoal[], computed: false, rateLimited: false, retryIn: 0 };
       return ApiService.fetchSuggestedGoals(notebookId!, sourceId!, session!.access_token);
@@ -134,7 +134,7 @@ export const useSuggestedGoals = (notebookId?: string, sourceId?: string | null)
   });
   const acceptMutation = useMutation({
     mutationFn: async (suggestionId: string) => {
-      if (!notebookId || !sourceId) throw new Error("Notebook and source required");
+      if (!notebookId || !sourceId || !isAuthenticated) throw new Error("Sign in and choose a source before accepting a goal.");
       return ApiService.acceptSuggestedGoal(notebookId, sourceId, suggestionId, session!.access_token);
     },
     onSuccess: () => {

@@ -51,6 +51,8 @@ export function useAudioPlayer({
   const durationRef = useRef(0);
   const playbackRateRef = useRef(1);
   const restoredMediaRef = useRef<string | null>(null);
+  const nativeReleasedRef = useRef(false);
+  const persistFinalNativeRef = useRef<(audio: HTMLAudioElement) => void>(() => {});
   const { toast } = useToast();
 
   const isExpired = expiresAt ? new Date(expiresAt) <= new Date() : false;
@@ -58,19 +60,48 @@ export function useAudioPlayer({
   const resolvedMediaId =
     mediaId || (notebookId ? `podcast:${notebookId}:${title}` : "");
 
+  // Release native media on unmount. Keeping only React state
+  // in sync does not stop a detached audio element that is already playing.
+  useEffect(() => {
+    const audio = audioRef.current;
+    nativeReleasedRef.current = false;
+    return () => {
+      if (!audio) return;
+      // Read native progress before load() resets the detached player.
+      if (!audio.ended) persistFinalNativeRef.current(audio);
+      nativeReleasedRef.current = true;
+      audio.pause();
+      audio.removeAttribute("src");
+      audio.load();
+    };
+  }, []);
+
   const persistPlayback = useCallback(
-    (time = currentTimeRef.current) => {
-      if (!resolvedMediaId || time <= 0) return;
+    (time = currentTimeRef.current, nativeSnapshot?: { duration: number; playbackRate: number }) => {
+      if (nativeReleasedRef.current || !resolvedMediaId || time <= 0) return;
       savePlaybackCheckpoint({
         mediaId: resolvedMediaId,
         kind: mediaKind,
         currentTime: time,
-        duration: durationRef.current,
-        playbackRate: playbackRateRef.current,
+        duration: nativeSnapshot?.duration ?? durationRef.current,
+        playbackRate: nativeSnapshot?.playbackRate ?? playbackRateRef.current,
       });
     },
     [resolvedMediaId, mediaKind],
   );
+
+  // Keep the finalizer bound to the current media without releasing on rerenders.
+  useEffect(() => {
+    persistFinalNativeRef.current = (audio) => {
+      if (isWebSpeech) {
+        persistPlayback();
+        return;
+      }
+      persistPlayback(audio.currentTime, {
+        duration: audio.duration, playbackRate: audio.playbackRate,
+      });
+    };
+  }, [persistPlayback, isWebSpeech]);
 
   const completePlayback = useCallback(() => {
     setIsPlaying(false);

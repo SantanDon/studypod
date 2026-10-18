@@ -1,75 +1,41 @@
-import { useTasks, Task } from '@/hooks/useTasks';
-import { Card, CardContent } from '@/components/ui/card';
+import { useTasks } from '@/hooks/useTasks';
 import { Badge } from '@/components/ui/badge';
-import { CheckCircle2, Circle, Clock } from 'lucide-react';
-import { motion, AnimatePresence } from 'framer-motion';
+import { Button } from '@/components/ui/button';
+import { CheckCircle2, Circle } from 'lucide-react';
 
-const TaskPulse = ({ notebookId }: { notebookId: string }) => {
-  const { tasks, isLoading } = useTasks(notebookId);
-
-  if (isLoading) return <div className="p-4 text-xs text-gray-400">Syncing actionable knowledge...</div>;
-  if (!tasks || tasks.length === 0) return null;
-
-  const getPriorityColor = (p: string) => {
-    switch (p) {
-      case 'high': return 'bg-red-100 text-red-600 border-red-200';
-      case 'medium': return 'bg-amber-100 text-amber-600 border-amber-200';
-      default: return 'bg-blue-100 text-blue-600 border-blue-200';
-    }
-  };
-
+const TaskPulse = ({ notebookId }: { notebookId?: string }) => {
+  const { tasks, isLoading, isAuthenticated, isError, refetch } = useTasks(notebookId);
+  const pending = tasks?.filter(task => task.status === 'pending').length || 0;
   return (
-    <div className="p-4 space-y-4">
-      <div className="flex items-center justify-between mb-2">
-        <h3 className="text-xs font-bold text-gray-400 uppercase tracking-widest flex items-center">
-          <CheckCircle2 className="w-3 h-3 mr-2 text-indigo-500" />
-          Actionable Knowledge
-        </h3>
-        <Badge variant="outline" className="text-[10px] py-0 h-4 border-indigo-100 text-indigo-500">
-          {tasks.length} Active
-        </Badge>
+    <section aria-label="Saved tasks" className="space-y-3">
+      <div className="flex items-center justify-between gap-3">
+        <h3 className="text-sm font-semibold text-foreground">Saved tasks</h3>
+        {tasks && <Badge variant="outline">{pending} pending</Badge>}
       </div>
-
-      <div className="space-y-2">
-        <AnimatePresence>
-          {tasks.map((task: Task) => (
-            <motion.div
-              key={task.id}
-              initial={{ opacity: 0, y: 10 }}
-              animate={{ opacity: 1, y: 0 }}
-              exit={{ opacity: 0, scale: 0.95 }}
-            >
-              <Card className="bg-white/50 backdrop-blur-sm border-gray-100 hover:border-indigo-100 transition-all group overflow-hidden">
-                <CardContent className="p-3 flex items-start space-x-3">
-                  <div className="mt-0.5">
-                    {task.status === 'completed' ? (
-                      <CheckCircle2 className="w-4 h-4 text-emerald-500" />
-                    ) : (
-                      <Circle className="w-4 h-4 text-gray-300 group-hover:text-indigo-400 cursor-pointer transition-colors" />
-                    )}
-                  </div>
-                  <div className="flex-1 min-w-0">
-                    <p className={`text-sm ${task.status === 'completed' ? 'text-gray-400 line-through' : 'text-gray-700'} leading-relaxed`}>
-                      {task.content}
-                    </p>
-                    <div className="flex items-center mt-2 space-x-3 whitespace-nowrap">
-                      <Badge className={`text-[10px] px-1.5 py-0 ${getPriorityColor(task.priority)}`}>
-                        {task.priority}
-                      </Badge>
-                      <div className="flex items-center text-[10px] text-gray-400">
-                        <Clock className="w-2.5 h-2.5 mr-1" />
-                        {new Date(task.createdAt).toLocaleDateString()}
-                      </div>
-                    </div>
-                  </div>
-                </CardContent>
-              </Card>
-            </motion.div>
-          ))}
-        </AnimatePresence>
-      </div>
-    </div>
+      <p className="text-xs text-muted-foreground">Keep a chat response here with Save response as task.</p>
+      {isLoading ? <p role="status" className="text-xs text-muted-foreground">Loading saved tasks…</p>
+        : !isAuthenticated ? <p className="text-xs text-muted-foreground">Sign in to save and revisit tasks.</p>
+        : !notebookId ? <p className="text-xs text-muted-foreground">Choose a notebook to see its saved tasks.</p>
+        : isError ? <div className="space-y-2">
+          <p role="alert" className="text-xs text-destructive">Saved tasks could not be loaded.</p>
+          <Button size="sm" variant="outline" onClick={() => void refetch()}>Retry saved tasks</Button>
+        </div>
+        : !tasks?.length ? <p className="rounded-xl border border-dashed border-border p-4 text-xs text-muted-foreground">No saved tasks yet.</p>
+        : <ul className="space-y-2">{tasks.map(task => (
+          <li key={task.id} className="rounded-xl border border-border bg-card p-3">
+            <div className="flex items-start gap-2">
+              {task.status === 'completed'
+                ? <CheckCircle2 aria-hidden="true" className="mt-0.5 h-4 w-4 shrink-0 text-emerald-600" />
+                : <Circle aria-hidden="true" className="mt-0.5 h-4 w-4 shrink-0 text-muted-foreground" />}
+              <p className="whitespace-pre-wrap break-words text-sm leading-relaxed text-foreground">{task.content}</p>
+            </div>
+            <div className="mt-2 flex flex-wrap gap-2 text-xs text-muted-foreground">
+              <span>{task.status === 'completed' ? 'Completed' : 'Pending'}</span><span>{task.priority} priority</span>
+              {Number.isFinite(Date.parse(task.createdAt)) && <time dateTime={task.createdAt}>{new Date(task.createdAt).toLocaleDateString()}</time>}
+            </div>
+          </li>
+        ))}</ul>}
+    </section>
   );
 };
-
 export default TaskPulse;

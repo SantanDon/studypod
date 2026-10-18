@@ -1,3 +1,4 @@
+import { measureAcceptancePhase } from "../utils/acceptanceTiming.js";
 import express from "express";
 import { dbHelpers, getDatabase, schema } from "../db/database.js";
 import {
@@ -28,10 +29,10 @@ async function getFreshYouTubeUsage(user) {
 
   if (isNewDay) {
     used = 0;
-    await dbHelpers.updateUser(user.id, {
+    await measureAcceptancePhase("profile-reset", () => dbHelpers.updateUser(user.id, {
       youtubeExtractionsToday: 0,
       lastExtractionReset: now,
-    });
+    }));
   }
 
   return {
@@ -49,7 +50,7 @@ router.use(authenticateToken);
 // Get current user profile
 router.get("/profile", requireSessionCredential, async (req, res) => {
   try {
-    const user = await dbHelpers.getUserById(req.user.userId);
+    const user = await measureAcceptancePhase("profile-lookup", () => dbHelpers.getUserById(req.user.userId));
     if (!user) {
       return res.status(404).json({ error: "User not found" });
     }
@@ -104,7 +105,7 @@ router.put("/profile", requireSessionCredential, async (req, res) => {
 
     await dbHelpers.updateUser(req.user.userId, updates);
 
-    const user = await dbHelpers.getUserById(req.user.userId);
+    const user = await measureAcceptancePhase("profile-lookup", () => dbHelpers.getUserById(req.user.userId));
     res.json({
       message: "Profile updated successfully",
       user: {
@@ -220,7 +221,7 @@ router.put("/password", requireSessionCredential, async (req, res) => {
     }
 
     // Get user
-    const user = await dbHelpers.getUserById(req.user.userId);
+    const user = await measureAcceptancePhase("profile-lookup", () => dbHelpers.getUserById(req.user.userId));
     if (!user) {
       return res.status(404).json({ error: "User not found" });
     }
@@ -252,7 +253,7 @@ router.put("/password", requireSessionCredential, async (req, res) => {
 // Export user data (for privacy/GDPR compliance)
 router.get("/export", requireSessionCredential, async (req, res) => {
   try {
-    const user = await dbHelpers.getUserById(req.user.userId);
+    const user = await measureAcceptancePhase("profile-lookup", () => dbHelpers.getUserById(req.user.userId));
     const preferences = await dbHelpers.getUserPreferences(req.user.userId);
     const stats = await dbHelpers.getUserStats(req.user.userId);
     const notebooks = await dbHelpers.getNotebooksByUserId(req.user.userId);
@@ -314,7 +315,7 @@ router.delete("/account", requireSessionCredential, async (req, res) => {
     }
 
     // Get user
-    const user = await dbHelpers.getUserById(req.user.userId);
+    const user = await measureAcceptancePhase("profile-lookup", () => dbHelpers.getUserById(req.user.userId));
     if (!user) {
       return res.status(404).json({ error: "User not found" });
     }
@@ -347,7 +348,7 @@ router.all("/api_keys", (req, res) => {
 
 router.get("/usage/youtube", async (req, res) => {
   try {
-    const user = await dbHelpers.getUserById(req.user.userId);
+    const user = await measureAcceptancePhase("profile-lookup", () => dbHelpers.getUserById(req.user.userId));
     if (!user) {
       return res.status(404).json({ error: "User not found" });
     }

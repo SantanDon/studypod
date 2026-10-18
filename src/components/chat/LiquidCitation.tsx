@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useId, useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { Citation } from '@/types/message';
 
@@ -55,6 +55,7 @@ const getSourceIcon = (sourceType: string = "") => {
 
 const LiquidCitation = ({ citation, index, triggerType: _triggerType = 'click' }: LiquidCitationProps) => {
   const [isOpen, setIsOpen] = useState(false);
+  const evidenceId = useId();
 
   if (!citation) {
     return (
@@ -66,7 +67,7 @@ const LiquidCitation = ({ citation, index, triggerType: _triggerType = 'click' }
 
   const handleToggle = (e: React.MouseEvent) => {
     e.stopPropagation();
-    setIsOpen(!isOpen);
+    setIsOpen((open) => !open);
   };
 
   const content = (citation.prefetched_content || citation.excerpt || "").trim();
@@ -75,22 +76,27 @@ const LiquidCitation = ({ citation, index, triggerType: _triggerType = 'click' }
 
   return (
     <span className="inline select-none">
-      <motion.span
+      <motion.button
+        type="button"
+        aria-label={`Citation ${index}`}
+        aria-expanded={isOpen}
+        aria-controls={evidenceId}
         whileHover={{ scale: 1.05 }}
         whileTap={{ scale: 0.95 }}
         onClick={handleToggle}
-        className={`cursor-pointer inline-flex items-center rounded px-1.5 py-0.5 text-[10px] font-semibold border transition-all duration-300 ${
+        className={`cursor-pointer inline-flex items-center rounded px-1.5 py-0.5 text-[10px] font-semibold border transition-all duration-300 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-400 focus-visible:ring-offset-2 ${
           isOpen
             ? "bg-blue-500/20 text-white border-blue-500/40 shadow-sm"
             : "bg-blue-500/5 text-blue-400/80 border-blue-500/10 hover:bg-blue-500/15 hover:text-blue-300"
         }`}
       >
         [{index}]
-      </motion.span>
+      </motion.button>
 
       <AnimatePresence>
         {isOpen && (
           <motion.span
+            id={evidenceId}
             initial={{ opacity: 0, height: 0, marginTop: 0 }}
             animate={{ opacity: 1, height: "auto", marginTop: 8 }}
             exit={{ opacity: 0, height: 0, marginTop: 0 }}

@@ -107,6 +107,19 @@ export const GuestProvider = ({ children }: { children: ReactNode }) => {
     }
   }, [isSignedIn]);
 
+  const releaseSourceSlot = useCallback((notebookId: string) => {
+    if (!isGuest || !notebookId) return;
+
+    setUsage(prev => ({ ...prev, sources: Math.max(0, prev.sources - 1) }));
+    setNotebookUsage(prev => ({
+      ...prev,
+      [notebookId]: {
+        sources: Math.max(0, (prev[notebookId]?.sources || 0) - 1),
+        messages: prev[notebookId]?.messages || 0,
+      },
+    }));
+  }, [isGuest]);
+
   const getNotebookUsage = useCallback((notebookId: string) => {
     return notebookUsage[notebookId] || { sources: 0, messages: 0 };
   }, [notebookUsage]);
@@ -145,6 +158,7 @@ export const GuestProvider = ({ children }: { children: ReactNode }) => {
     remainingSources,
     remainingMessages,
     incrementUsage,
+    releaseSourceSlot,
     getNotebookUsage,
     migrateToUser,
     showAuthPrompt,

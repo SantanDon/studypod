@@ -55,7 +55,7 @@ describe('ChatInput Component', () => {
     const user = userEvent.setup();
     render(<ChatInput {...defaultProps} message="Hello" />);
     
-    const sendButton = screen.getByRole('button', { name: '' });
+    const sendButton = screen.getByRole('button', { name: 'Send message' });
     await user.click(sendButton);
     
     expect(mockOnSend).toHaveBeenCalled();
@@ -74,21 +74,21 @@ describe('ChatInput Component', () => {
   it('disables send button when message is empty', () => {
     render(<ChatInput {...defaultProps} message="" />);
     
-    const sendButton = screen.getByRole('button', { name: '' });
+    const sendButton = screen.getByRole('button', { name: 'Send message' });
     expect(sendButton).toBeDisabled();
   });
 
   it('disables send button when disabled prop is true', () => {
     render(<ChatInput {...defaultProps} message="Hello" disabled={true} />);
     
-    const sendButton = screen.getByRole('button', { name: '' });
+    const sendButton = screen.getByRole('button', { name: 'Send message' });
     expect(sendButton).toBeDisabled();
   });
 
   it('disables send button when isLoading is true', () => {
     render(<ChatInput {...defaultProps} message="Hello" isLoading={true} />);
     
-    const sendButton = screen.getByRole('button', { name: '' });
+    const sendButton = screen.getByRole('button', { name: 'Send message' });
     expect(sendButton).toBeDisabled();
   });
 

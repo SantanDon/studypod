@@ -319,5 +319,6 @@ export const signalQueueSuggestions = sqliteTable('signal_queue_suggestions', {
   sourceChunkIndices: text('source_chunk_indices').default('[]'),
   confidence: real('confidence').default(0.5),
   status: text('status', { enum: ['pending', 'accepted', 'dismissed'] }).default('pending'),
+  acceptedGoalId: text('accepted_goal_id').references(() => researchGoals.id, { onDelete: 'set null' }),
   createdAt: integer('created_at', { mode: 'timestamp' }).$defaultFn(() => new Date()),
 });

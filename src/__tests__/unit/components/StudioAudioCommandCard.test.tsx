@@ -32,11 +32,19 @@ describe('chat audio confirmation UI', () => {
         fireEvent.click(screen.getByRole('button', { name: 'Confirm generation' }));
         expect(useStudioAudioCommands.getState().requests['notebook-a'].sourceIds).toEqual(['two']);
     });
-    it('requires a book manifest and offers import rather than using a chat summary', () => {
+    it('requires source text or a manifest and never substitutes a summary', () => {
         draft('Read this whole PDF aloud');
-        render(<StudioAudioCommandCard notebookId="notebook-a" sources={[source('one')]}/>);
+        render(<StudioAudioCommandCard notebookId="notebook-a" sources={[{ ...source('one'), content: '', summary: 'A summary is not the full source.' }]}/>);
         expect(screen.getByRole('button', { name: 'Confirm generation' })).toBeDisabled();
         expect(screen.getByRole('button', { name: 'Open audio import' })).toBeInTheDocument();
+    });
+    it('offers confirmation for the actual user wording and available source text', () => {
+        draft('can u generate it as a audio book');
+        render(<StudioAudioCommandCard notebookId="notebook-a" sources={[source('one')]}/>);
+        expect(screen.getByText('Read source aloud in full')).toBeInTheDocument();
+        expect(screen.getByRole('button', { name: 'Confirm generation' })).toBeEnabled();
+        fireEvent.click(screen.getByRole('button', { name: 'Confirm generation' }));
+        expect(useStudioAudioCommands.getState().requests['notebook-a']).toMatchObject({kind: 'audiobook', phase: 'queued', sourceIds: ['one']});
     });
     it('accepts prepared PDF manifests, not just sources labelled ebook', () => {
         draft('Read this whole PDF aloud');

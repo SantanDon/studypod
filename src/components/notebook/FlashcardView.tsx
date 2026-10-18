@@ -1,4 +1,4 @@
-import React, { useState, useCallback } from 'react';
+import React, { useState, useCallback, useRef } from 'react';
 import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
 import { Progress } from '@/components/ui/progress';
@@ -9,7 +9,7 @@ import { cn } from '@/lib/utils';
 interface FlashcardViewProps {
   cards: Flashcard[];
   deckId: string;
-  onReview: (deckId: string, cardId: string, quality: 0 | 1 | 2 | 3 | 4 | 5) => void;
+  onReview: (deckId: string, cardId: string, quality: 0 | 1 | 2 | 3 | 4 | 5) => void | Promise<unknown>;
   onClose: () => void;
   isReviewing?: boolean;
 }
@@ -30,6 +30,9 @@ const FlashcardView: React.FC<FlashcardViewProps> = ({
   const [isFlipped, setIsFlipped] = useState(false);
   const [reviewedCards, setReviewedCards] = useState<Set<string>>(new Set());
   const [direction, setDirection] = useState(0); // For enter/exit animations
+  const savingRef = useRef(false);
+  const [saving, setSaving] = useState(false);
+  const [reviewError, setReviewError] = useState<string | null>(null);
 
   const currentCard = cards[currentIndex];
   const progress = cards.length > 0 ? ((reviewedCards.size) / cards.length) * 100 : 0;
@@ -38,16 +41,26 @@ const FlashcardView: React.FC<FlashcardViewProps> = ({
     setIsFlipped(prev => !prev);
   }, []);
 
-  const processReview = useCallback((quality: 0 | 1 | 2 | 3 | 4 | 5, dir: number) => {
-    if (!currentCard || isReviewing) return;
+  const processReview = useCallback(async (quality: 0 | 1 | 2 | 3 | 4 | 5, dir: number) => {
+    if (!currentCard || isReviewing || savingRef.current) return;
+    savingRef.current = true;
+    setSaving(true);
+    setReviewError(null);
+    try {
+      await onReview(deckId, currentCard.id, quality);
     
     setDirection(dir);
-    onReview(deckId, currentCard.id, quality);
     setReviewedCards(prev => new Set(prev).add(currentCard.id));
     
     if (currentIndex < cards.length - 1) {
       setCurrentIndex(prev => prev + 1);
       setIsFlipped(false);
+    }
+    } catch (error) {
+      setReviewError(error instanceof Error ? error.message : 'Could not save your review. Try again.');
+    } finally {
+      savingRef.current = false;
+      setSaving(false);
     }
   }, [currentCard, currentIndex, cards.length, deckId, onReview, isReviewing]);
 
@@ -121,6 +134,8 @@ const FlashcardView: React.FC<FlashcardViewProps> = ({
           </span>
         </div>
         <Progress value={progress} className="h-2 transition-all duration-500 ease-out" />
+        {reviewError && <p role="alert" className="mt-2 text-sm text-destructive">{reviewError}</p>}
+        {saving && <p role="status" className="mt-2 text-sm text-muted-foreground">Saving review…</p>}
       </div>
 
       <div className="relative mt-2 mb-4 flex min-h-[300px] flex-1 items-center justify-center rounded-xl perspective-1000">
@@ -146,6 +161,15 @@ const FlashcardView: React.FC<FlashcardViewProps> = ({
             whileDrag={{ scale: 1.05, cursor: "grabbing" }}
             className="absolute h-full max-h-[360px] min-h-[280px] w-full max-w-sm cursor-pointer"
             onClick={!isFlipped ? handleFlip : undefined}
+            role={!isFlipped ? "button" : undefined}
+            tabIndex={!isFlipped ? 0 : undefined}
+            aria-label={!isFlipped ? "Reveal answer" : undefined}
+            onKeyDown={!isFlipped ? (event) => {
+              if (event.key === "Enter" || event.key === " ") {
+                event.preventDefault();
+                handleFlip();
+              }
+            } : undefined}
           >
             <motion.div
               className="w-full h-full relative"
@@ -169,7 +193,7 @@ const FlashcardView: React.FC<FlashcardViewProps> = ({
                     {currentCard?.front}
                   </p>
                 </div>
-                <div className="mt-2 text-xs font-semibold text-muted-foreground/50 uppercase tracking-widest animate-pulse shrink-0">
+                <div className="mt-2 text-xs font-semibold text-muted-foreground/50 uppercase tracking-widest shrink-0">
                   Tap to reveal
                 </div>
               </Card>
@@ -219,7 +243,7 @@ const FlashcardView: React.FC<FlashcardViewProps> = ({
                 size="sm"
                 className="h-12 border-red-200 dark:border-red-900 hover:bg-red-50 dark:hover:bg-red-950/50 text-red-700 dark:text-red-400 transition-all font-bold group"
                 onClick={() => processReview(0, -1)}
-                disabled={isReviewing}
+                disabled={isReviewing || saving}
               >
                 <i className="fi fi-rr-thumbs-down mr-2 group-hover:-translate-x-1 transition-transform"></i>
                 Again
@@ -229,7 +253,7 @@ const FlashcardView: React.FC<FlashcardViewProps> = ({
                 size="sm"
                 className="h-12 border-orange-200 dark:border-orange-900 hover:bg-orange-50 dark:hover:bg-orange-950/50 text-orange-700 dark:text-orange-400 transition-all font-semibold"
                 onClick={() => processReview(2, -1)}
-                disabled={isReviewing}
+                disabled={isReviewing || saving}
               >
                 Hard
               </Button>
@@ -238,7 +262,7 @@ const FlashcardView: React.FC<FlashcardViewProps> = ({
                 size="sm"
                 className="h-12 border-blue-200 dark:border-blue-900 hover:bg-blue-50 dark:hover:bg-blue-950/50 text-blue-700 dark:text-blue-400 transition-all font-semibold"
                 onClick={() => processReview(3, 1)}
-                disabled={isReviewing}
+                disabled={isReviewing || saving}
               >
                 Good
               </Button>
@@ -247,7 +271,7 @@ const FlashcardView: React.FC<FlashcardViewProps> = ({
                 size="sm"
                 className="h-12 border-green-200 dark:border-green-900 hover:bg-green-50 dark:hover:bg-green-950/50 text-green-700 dark:text-green-400 transition-all font-bold group"
                 onClick={() => processReview(5, 1)}
-                disabled={isReviewing}
+                disabled={isReviewing || saving}
               >
                 <i className="fi fi-rr-thumbs-up mr-2 group-hover:translate-x-1 transition-transform"></i>
                 Easy

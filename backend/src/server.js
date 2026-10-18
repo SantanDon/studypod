@@ -1,3 +1,4 @@
+import { installAcceptanceTiming } from "./utils/acceptanceTiming.js";
 // STABILITY RELAY v1.0.2 - TS: 1309
 import "dotenv/config";
 import express from "express";
@@ -23,6 +24,8 @@ import proxyRoutes from "./routes/proxy.js";
 import antigravityRouter from "./routes/antigravity.js";
 import docxRouter from "./routes/docx.js";
 import documentRoutes from "./routes/documents.js";
+import studioRoutes from "./routes/studio.js";
+import podcastRoutes from "./routes/podcasts.js";
 import searchRouter from "./routes/search.js";
 import signalRouter from "./routes/signal.js";
 import audiobookRoutes from "./routes/audiobook.js";
@@ -58,6 +61,15 @@ if (!process.env.VERCEL) {
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
+// Generated once during vercel-build from Vercel's deployment metadata. The
+// absent file is expected in local development; hosted identity fails closed.
+let builtDeploymentIdentity = null;
+try {
+  builtDeploymentIdentity = (await import("./generated/deploymentIdentity.js")).default;
+} catch (error) {
+  if (error?.code !== "ERR_MODULE_NOT_FOUND") throw error;
+}
+
 // Consolidated environment validation
 const REQUIRED_ENVS = ["TURSO_DATABASE_URL", "TURSO_AUTH_TOKEN", "JWT_SECRET"];
 const missingEnvs = REQUIRED_ENVS.filter((env) => !process.env[env]);
@@ -84,6 +96,7 @@ if (!jwtSecret || jwtSecret.length < 32) {
 }
 
 const app = express();
+installAcceptanceTiming(app);
 const PORT = process.env.PORT || 4000;
 
 // Trust exactly one platform proxy hop. Using `true` lets clients spoof
@@ -214,6 +227,8 @@ app.use("/api/auth", authRoutes);
 app.use("/api/sync", syncRoutes);
 app.use("/api/user", apiLimiter, userRoutes);
 app.use("/api/notebooks", apiLimiter, documentRoutes);
+app.use("/api/notebooks", apiLimiter, studioRoutes);
+app.use("/api/notebooks", apiLimiter, podcastRoutes);
 app.use("/api/notebooks", apiLimiter, notebookRoutes);
 app.use("/api/pdf", apiLimiter, pdfRoutes);
 app.use("/api/youtube", apiLimiter, youtubeRouter);
@@ -236,6 +251,23 @@ app.get(["/health", "/api/health"], (req, res) =>
     timestamp: new Date().toISOString(),
   }),
 );
+
+// The generated build identity and runtime deployment metadata must agree.
+app.get("/api/health/deployment", (req, res) => {
+  res.set("Cache-Control", "no-store");
+  const commitSha = process.env.VERCEL_GIT_COMMIT_SHA?.trim().toLowerCase();
+  const deploymentUrl = `https://${process.env.VERCEL_URL?.trim().toLowerCase() || ""}`;
+  if (
+    process.env.VERCEL !== "1" ||
+    !/^[a-f0-9]{40}$/.test(commitSha || "") ||
+    !/^https:\/\/[a-z0-9.-]+\.vercel\.app$/.test(deploymentUrl) ||
+    builtDeploymentIdentity?.commitSha !== commitSha ||
+    builtDeploymentIdentity?.deploymentUrl !== deploymentUrl
+  ) {
+    return res.status(503).json({ status: "unavailable" });
+  }
+  return res.json(builtDeploymentIdentity);
+});
 
 // Provider configuration is operational metadata, so expose it only to signed-in users.
 app.get("/api/health/provider", authenticateToken, async (req, res) => {

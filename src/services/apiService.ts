@@ -620,7 +620,13 @@ export const ApiService = {
       const detailedMessage = errorData.details
         ? `${errorData.error}: ${errorData.details}`
         : errorData.error;
-      throw new Error(detailedMessage || "Failed to send chat message");
+      const error = new Error(detailedMessage || "Failed to send chat message") as Error & {
+        status: number;
+        code?: string;
+      };
+      error.status = response.status;
+      error.code = errorData.code;
+      throw error;
     }
     return response.json();
   },

@@ -31,7 +31,7 @@ export const CloudLogin = ({
   const [loading, setLoading] = useState(false);
   const [unverifiedEmail, setUnverifiedEmail] = useState<string | null>(null);
 
-  const { signIn, error, mfaRequired, verifyMfa } = useAuth();
+  const { signIn, signInWithCloud, error, mfaRequired, verifyMfa } = useAuth();
   const [mfaCode, setMfaCode] = useState("");
   const [isVerifyingMfa, setIsVerifyingMfa] = useState(false);
   const { toast } = useToast();
@@ -56,29 +56,28 @@ export const CloudLogin = ({
     try {
       if (isSignUp) {
         // --- SIGN UP ---
-        console.log("Attempting cloud signup for:", email);
-        await ApiService.signup({
+        const data = await ApiService.signup({
           email,
           password,
           displayName,
           emailConsent: marketingConsent,
         });
 
-        toast({
-          title: "Account Created",
-          description:
-            "Please check your email to verify your account before logging in.",
-        });
-
-        // Reset to sign in mode after successful signup
-        setIsSignUp(false);
+        if (data.user) {
+          signInWithCloud(data.user);
+          toast({ title: "Account Created", description: "Your study workspace is ready." });
+          onSuccess?.();
+        } else {
+          toast({
+            title: "Account Created",
+            description: "Check your email to verify your account before logging in.",
+          });
+          setIsSignUp(false);
+        }
       } else {
         // --- SIGN IN ---
-        console.log("Attempting cloud login for:", email);
-        await signIn({ email, password });
-
-        // Success toast is handled via the context flow or success check
-        if (!mfaRequired) {
+        const signedIn = await signIn({ email, password });
+        if (signedIn) {
           onSuccess?.();
         }
       }
@@ -213,12 +212,12 @@ export const CloudLogin = ({
           </div>
         </div>
         <h2 className="text-2xl font-semibold text-foreground">
-          {isSignUp ? "Create Cloud Account" : "Sign In to Cloud"}
+          {isSignUp ? "Create your StudyPod account" : "Welcome back to StudyPod"}
         </h2>
         <p className="text-sm text-muted-foreground">
           {isSignUp
-            ? "Create an account to sync your notebooks and agents instantly."
-            : "Use your Cloud Credentials to access shared intelligence."}
+            ? "Keep your notebooks together across devices."
+            : "Sign in to continue with your saved notebooks."}
         </p>
       </div>
 
@@ -230,7 +229,7 @@ export const CloudLogin = ({
               id="displayName"
               value={displayName}
               onChange={(e) => setDisplayName(e.target.value)}
-              placeholder="e.g. Satoshi Nakamoto"
+              placeholder="Your name"
               disabled={loading}
               required={isSignUp}
             />
@@ -317,7 +316,7 @@ export const CloudLogin = ({
                 htmlFor="marketingConsent"
                 className="text-sm font-medium leading-none peer-disabled:cursor-not-allowed peer-disabled:opacity-70"
               >
-                I'd like to receive product updates from StudyPodLM (optional)
+                I'd like to receive product updates from StudyPod (optional)
               </label>
             </div>
           </div>
@@ -333,7 +332,7 @@ export const CloudLogin = ({
             ) : isSignUp ? (
               "Create Account"
             ) : (
-              "Login to Cloud"
+              "Sign in"
             )}
           </Button>
 

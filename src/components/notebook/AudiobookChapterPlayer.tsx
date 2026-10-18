@@ -34,6 +34,7 @@ import { queueAudioListeningQuestion } from "@/lib/audio/listeningQuestion";
 import {
   adjacentPlayableAudiobookChapter,
   calculateAudiobookProgress,
+  clearLocalAudiobookProgress,
   findAudiobookResumeChapter,
   loadLocalAudiobookProgress,
   mergeAudiobookListenerState,
@@ -55,6 +56,7 @@ interface AudiobookChapterPlayerProps {
   playbackManifestUrl?: string;
   authHeaders: () => Record<string, string>;
   onManifestChange?: (manifest: AudiobookPlaybackManifest) => void;
+  onAudioDeleted?: () => void;
 }
 
 type ProgressOverride = Partial<
@@ -111,6 +113,7 @@ export default function AudiobookChapterPlayer({
   playbackManifestUrl,
   authHeaders,
   onManifestChange,
+  onAudioDeleted,
 }: AudiobookChapterPlayerProps) {
   const [manifest, setManifest] = useState<AudiobookPlaybackManifest | null>(
     null,
@@ -135,7 +138,24 @@ export default function AudiobookChapterPlayer({
   const [askOpen, setAskOpen] = useState(false);
   const [askQuestion, setAskQuestion] = useState("");
 
-  const audioRef = useRef<HTMLAudioElement>(null);
+  const [deletingAudio, setDeletingAudio] = useState(false);
+  const deletedAudioRef = useRef(false);
+  const deleteInFlightRef = useRef(false);
+  const mountedRef = useRef(true);
+  const audioRef = useRef<HTMLAudioElement | null>(null);
+  const attachAudio = useCallback((node: HTMLAudioElement | null) => {
+    const previous = audioRef.current;
+    if (previous && previous !== node) {
+      previous.pause();
+      previous.removeAttribute("src");
+      previous.load();
+    }
+    audioRef.current = node;
+  }, []);
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => { mountedRef.current = false; };
+  }, []);
   const manifestRef = useRef<AudiobookPlaybackManifest | null>(null);
   const listenerStateRef = useRef(listenerState);
   const selectedChapterIdRef = useRef<string | null>(null);
@@ -192,6 +212,7 @@ export default function AudiobookChapterPlayer({
         }
         const nextManifest =
           (await response.json()) as AudiobookPlaybackManifest;
+        if (!mountedRef.current || deletedAudioRef.current) return;
         const localProgress = loadLocalAudiobookProgress(fileName);
         const clientProgress = mergeAudiobookListenerState(
           listenerStateRef.current,
@@ -303,7 +324,7 @@ export default function AudiobookChapterPlayer({
           throw new Error(`Could not load this chapter (${response.status}).`);
         }
         const nextBlobUrl = URL.createObjectURL(await response.blob());
-        if (controller.signal.aborted) {
+        if (controller.signal.aborted || deletedAudioRef.current || !mountedRef.current) {
           URL.revokeObjectURL(nextBlobUrl);
           return;
         }
@@ -336,7 +357,7 @@ export default function AudiobookChapterPlayer({
       const currentManifest = manifestRef.current;
       const chapterId =
         overrides.currentChapterId ?? selectedChapterIdRef.current;
-      if (!currentManifest || !chapterId) return;
+      if (deletedAudioRef.current || deleteInFlightRef.current || !currentManifest || !chapterId) return;
 
       const audio = audioRef.current;
       const now = new Date().toISOString();
@@ -438,6 +459,40 @@ export default function AudiobookChapterPlayer({
       }
     };
   }, [persistProgress]);
+
+  const deleteSavedAudio = async () => {
+    if (deleteInFlightRef.current || !window.confirm("Delete all saved audio versions, listening place, and bookmarks for this book? Your imported source will remain.")) return;
+    deleteInFlightRef.current = true;
+    setDeletingAudio(true);
+    try {
+      const response = await fetch(`${API_BASE_URL}/audiobook/books/${encodeURIComponent(fileName)}/audio`, {
+        method: "DELETE", headers: authHeaders(), credentials: "include",
+      });
+      if (!response.ok) throw new Error(response.status === 409
+        ? "Cancel generation and wait for the worker to stop before deleting saved audio."
+        : "Saved audio could not be deleted. Try again.");
+      clearLocalAudiobookProgress(fileName);
+      deletedAudioRef.current = true;
+      if (!mountedRef.current) return;
+      const audio = audioRef.current;
+      audio?.pause();
+      audio?.removeAttribute("src");
+      audio?.load();
+      if (audioBlobUrlRef.current) URL.revokeObjectURL(audioBlobUrlRef.current);
+      audioBlobUrlRef.current = null;
+      manifestRef.current = null;
+      setAudioBlobUrl(null);
+      setManifest(null);
+      setIsPlaying(false);
+      onAudioDeleted?.();
+      toast.success("Saved audio deleted. Your source is still available.");
+    } catch (error) {
+      if (mountedRef.current) toast.error(error instanceof Error ? error.message : "Saved audio could not be deleted.");
+    } finally {
+      deleteInFlightRef.current = false;
+      if (mountedRef.current) setDeletingAudio(false);
+    }
+  };
 
   const playAudio = useCallback(async () => {
     const audio = audioRef.current;
@@ -776,6 +831,10 @@ export default function AudiobookChapterPlayer({
               chapters ready
             </p>
             <p>{statusLabel(manifest.status)}</p>
+            <Button variant="ghost" size="sm" disabled={deletingAudio || manifest.status === "processing" || manifest.status === "pending"}
+              onClick={deleteSavedAudio}>
+              <Trash2 className="mr-1 h-3 w-3" />{deletingAudio ? "Deleting saved audio…" : "Delete saved audio"}
+            </Button>
           </div>
         </div>
         <div className="mt-3 flex items-center gap-3">
@@ -847,8 +906,8 @@ export default function AudiobookChapterPlayer({
                 audioRef.current.currentTime = value;
                 setCurrentTime(value);
               }}
-              onValueCommit={() =>
-                persistProgress({}, { forceRemote: true })
+              onValueCommit={([value]) =>
+                persistProgress({ currentTimeSeconds: value }, { forceRemote: true })
               }
               aria-label="Chapter position"
             />
@@ -1132,7 +1191,7 @@ export default function AudiobookChapterPlayer({
       </div>
 
       <audio
-        ref={audioRef}
+        ref={attachAudio}
         src={audioBlobUrl || undefined}
         preload="metadata"
         className="hidden"

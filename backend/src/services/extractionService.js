@@ -49,6 +49,43 @@ function extractMeta($) {
   };
 }
 
+/** Extract one content region so nested main/article/body nodes are not duplicated. */
+export function extractHtmlContent(html, { isReddit = false } = {}) {
+  const $ = cheerio.load(html);
+  const meta = extractMeta($);
+  const pageHeading = $("h1").first().text().trim();
+  $("script, style, iframe, noscript, header, footer, nav, aside, [role='navigation'], .ad, .ads, #header, #footer, .mw-editsection, .mw-portlet, .vector-header-container, .vector-page-toolbar, .vector-toc, .mw-jump-link").remove();
+
+  const selectors = isReddit
+    ? ["shreddit-post", ".post-content", "#content"]
+    : [".mw-parser-output", "article", "main", "[role='main']"];
+  let root = $("body");
+  for (const selector of selectors) {
+    const candidates = $(selector).toArray().filter(el => $(el).text().trim().length >= 50);
+    if (candidates.length) {
+      candidates.sort((a, b) => $(b).text().length - $(a).text().length);
+      root = $(candidates[0]);
+      break;
+    }
+  }
+  const hasHeading = root.find("h1").length > 0;
+  root.find("h1, h2, h3, h4, h5, h6").each((i, el) => {
+    $(el).replaceWith(`\n\n${"#".repeat(Number(el.tagName.substring(1)))} ${$(el).text().trim()}\n\n`);
+  });
+  root.find("p").each((i, el) => {
+    $(el).replaceWith(`\n\n${$(el).text().trim()}\n\n`);
+  });
+  root.find("li").each((i, el) => {
+    $(el).replaceWith(`\n- ${$(el).text().trim()}`);
+  });
+  root.find("br").replaceWith("\n");
+  let content = root.text().replace(/\r\n?/g, "\n")
+    .replace(/[ \t]+/g, " ").replace(/ *\n */g, "\n")
+    .replace(/\n{3,}/g, "\n\n").trim();
+  if (!hasHeading && pageHeading) content = `# ${pageHeading}\n\n${content}`;
+  return { content, title: meta.title, metadata: { ...meta, method: "cheerio-dynamic-porter" } };
+}
+
 /**
  * Phase 1: Cheerio. Fast, static HTML extraction.
  */
@@ -80,42 +117,7 @@ async function extractWithCheerio(url) {
   }
 
   const html = await response.text();
-  const $ = cheerio.load(html);
-
-  // Clean up bloat
-  $(
-    "script, style, iframe, noscript, footer, nav, aside, .ad, .ads, #header, #footer",
-  ).remove();
-
-  // Transform to structural markdown (Simple conversion)
-  $("h1, h2, h3").each((i, el) => {
-    const level = el.tagName.substring(1);
-    $(el).replaceWith(`\n\n${"#".repeat(level)} ${$(el).text().trim()}\n\n`);
-  });
-
-  $("p").each((i, el) => {
-    $(el).replaceWith(`\n${$(el).text().trim()}\n`);
-  });
-
-  $("li").each((i, el) => {
-    $(el).replaceWith(`\n- ${$(el).text().trim()}`);
-  });
-
-  // Reddit-specific content targeting (shrd:post-body etc)
-  let content = isReddit
-    ? $("shreddit-post, .post-content, #content").text()
-    : $("article, main, body").text();
-
-  if (!content || content.length < 200) {
-    content = $("body").text();
-  }
-
-  // Cleanup whitespace but preserve structure
-  content = content
-    .replace(/\n\s*\n/g, "\n\n")
-    .replace(/[ \t]+/g, " ")
-    .trim();
-  const meta = extractMeta($);
+  const { content, title, metadata } = extractHtmlContent(html, { isReddit });
 
   // Only reject failure phrases in suspiciously short responses.
   const isLikelySystemError =
@@ -134,8 +136,8 @@ async function extractWithCheerio(url) {
 
   return {
     content,
-    title: meta.title,
-    metadata: { ...meta, method: "cheerio-dynamic-porter" },
+    title,
+    metadata,
   };
 }
 
@@ -463,3 +465,4 @@ export async function extractWebSource(url) {
 }
 
 export default { extractWebSource };
+

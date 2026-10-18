@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { useNavigate } from 'react-router-dom';
@@ -24,6 +24,7 @@ const NotebookHeader = ({ title, notebookId }: NotebookHeaderProps) => {
   const navigate = useNavigate();
   const displayTitle = formatDisplayTitle(title, 'Untitled notebook');
   const [isEditing, setIsEditing] = useState(false);
+  const titleButtonRef = useRef<HTMLButtonElement>(null);
   const [editedTitle, setEditedTitle] = useState(displayTitle);
   const [isExportOpen, setIsExportOpen] = useState(false);
   const { updateNotebook, isUpdating } = useNotebookUpdate();
@@ -80,10 +81,13 @@ const NotebookHeader = ({ title, notebookId }: NotebookHeaderProps) => {
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
     if (e.key === 'Enter') {
+      e.preventDefault();
       handleTitleSubmit();
+      requestAnimationFrame(() => titleButtonRef.current?.focus());
     } else if (e.key === 'Escape') {
       setEditedTitle(displayTitle);
       setIsEditing(false);
+      requestAnimationFrame(() => titleButtonRef.current?.focus());
     }
   };
 
@@ -101,7 +105,9 @@ const NotebookHeader = ({ title, notebookId }: NotebookHeaderProps) => {
         <div className="flex min-w-0 flex-1 items-center space-x-4">
           <div className="flex min-w-0 items-center space-x-2">
             <button
+              type="button"
               onClick={handleIconClick}
+              aria-label="Back to notebooks"
               className="hover:bg-accent rounded transition-colors p-1"
               data-testid="nav-home"
             >
@@ -110,6 +116,7 @@ const NotebookHeader = ({ title, notebookId }: NotebookHeaderProps) => {
             {isEditing ? (
               <Input
                 value={editedTitle}
+                aria-label="Notebook title"
                 onChange={(e) => setEditedTitle(e.target.value)}
                 onKeyDown={handleKeyDown}
                 onBlur={handleBlur}
@@ -118,12 +125,17 @@ const NotebookHeader = ({ title, notebookId }: NotebookHeaderProps) => {
                 disabled={isUpdating}
               />
             ) : (
-              <span
-                className="min-w-0 truncate text-base sm:text-lg font-medium text-foreground cursor-pointer hover:bg-accent rounded px-2 py-1 transition-colors"
+              <button
+                ref={titleButtonRef}
+                type="button"
+                className="min-w-0 truncate text-left text-base sm:text-lg font-medium text-foreground hover:bg-accent rounded px-2 py-1 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-teal-600"
                 onClick={handleTitleClick}
+                disabled={!notebookId}
+                aria-label={`Edit notebook title: ${displayTitle}`}
+                title={displayTitle}
               >
                 {displayTitle}
-              </span>
+              </button>
             )}
           </div>
         </div>

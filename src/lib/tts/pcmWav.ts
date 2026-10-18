@@ -28,7 +28,8 @@ function readWav(buffer: ArrayBuffer): WavData {
         offset: number;
         bytes: number;
     } | undefined;
-    for (let at = 12; at + 8 <= end;) {
+    let at = 12;
+    while (at + 8 <= end) {
         const size = v.getUint32(at + 4, true);
         const payload = at + 8;
         if (payload + size > end)
@@ -56,7 +57,11 @@ function readWav(buffer: ArrayBuffer): WavData {
             data = { offset: payload, bytes: size };
         }
         at = payload + size + (size % 2);
+        if (at > end)
+            throw new Error('WAV chunk padding is truncated in the podcast segment');
     }
+    if (at !== end)
+        throw new Error('WAV segment ends with an incomplete chunk header');
     if (!format || !data || data.bytes % (format.channels * format.bits / 8) !== 0)
         throw new Error('WAV segment has no complete sample frames');
     return { view: v, ...data, ...format };
@@ -119,8 +124,12 @@ export function concatenatePcmWav(parts: WavPart[]): ArrayBuffer {
     let position = 44;
     decoded.forEach((wav, i) => {
         for (let at = wav.offset; at < wav.offset + wav.bytes; at += wav.bits / 8) {
-            const sample = Math.max(-1, Math.min(1, readSample(wav, at)));
-            out.setInt16(position, Math.round(sample < 0 ? sample * 32768 : sample * 32767), true);
+            if (wav.format === 1 && wav.bits === 16)
+                out.setInt16(position, wav.view.getInt16(at, true), true);
+            else {
+                const sample = Math.max(-1, Math.min(1, readSample(wav, at)));
+                out.setInt16(position, Math.round(sample < 0 ? sample * 32768 : sample * 32767), true);
+            }
             position += 2;
         }
         position += pauses[i] * 2; // ArrayBuffer is zero initialized: valid signed-PCM silence.

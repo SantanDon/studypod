@@ -4,8 +4,9 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import PodcastView from '@/components/notebook/PodcastView';
 import { parseStudioAudioIntent, useStudioAudioCommands } from '@/lib/audio/studioAudioCommands';
 import { usePodcastGenerationStore } from '@/stores/podcastGenerationStore';
+import { AudioValidator, type AudioValidationResult } from '@/lib/tts/audioValidator';
 const mock = vi.hoisted(() => ({
-    script: vi.fn(), start: vi.fn(), cancel: vi.fn(), toast: vi.fn(), save: vi.fn(),
+    script: vi.fn(), start: vi.fn(), cancel: vi.fn(), toast: vi.fn(), save: vi.fn(), loadAudio: vi.fn(), assertCurrent: vi.fn(),
     sources: [
         { id: 'selected', notebook_id: 'notebook-a', title: 'Selected evidence', type: 'text', processing_status: 'ready', content: 'SELECTED_SOURCE: Controlled fixture explains the solar system. '.repeat(8), created_at: '2026-09-29T12:00:00Z', updated_at: '2026-09-29T12:00:00Z' },
         { id: 'excluded', notebook_id: 'notebook-a', title: 'Excluded evidence', type: 'text', processing_status: 'ready', content: 'EXCLUDED_SECRET_FIXTURE: This must not enter a selected-source podcast. '.repeat(8), created_at: '2026-09-29T12:00:00Z', updated_at: '2026-09-29T12:00:00Z' },
@@ -17,8 +18,11 @@ const mock = vi.hoisted(() => ({
 vi.mock('@/hooks/useSources', () => ({ useSources: () => ({ sources: mock.sources }) }));
 vi.mock('@/hooks/useNotes', () => ({ useNotes: () => ({ notes: mock.notes }) }));
 vi.mock('@/hooks/use-toast', () => ({ useToast: () => ({ toast: mock.toast }) }));
-vi.mock('@/hooks/usePodcastHistory', () => ({ usePodcastHistory: () => ({ podcasts: mock.history, savePodcast: mock.save }) }));
-vi.mock('@/lib/podcastGenerator', () => ({ generatePodcastScript: mock.script }));
+vi.mock('@/hooks/usePodcastHistory', () => ({ usePodcastHistory: () => ({ podcasts: mock.history, savePodcast: mock.save, loadAudio: mock.loadAudio, scopeKey: 'fixture:notebook-a', assertCurrent: mock.assertCurrent }) }));
+vi.mock('@/lib/podcastGenerator', async (importOriginal) => ({
+    ...(await importOriginal<typeof import('@/lib/podcastGenerator')>()),
+    generatePodcastScript: mock.script,
+}));
 vi.mock('@/lib/tts/streamingTTSGenerator', () => ({ getStreamingTTSGenerator: () => mock.generator }));
 vi.mock('@/lib/tts/podcastAudioGenerator', () => ({
     getPodcastAudioConfig: () => ({ host1Voice: 'am_onyx', host2Voice: 'af_nova', speed: 1, pauseBetweenSegments: 300 }),
@@ -48,7 +52,7 @@ beforeEach(() => {
     mock.start.mockResolvedValue(undefined);
     mock.script.mockResolvedValue(script());
 });
-afterEach(() => { cleanup(); usePodcastGenerationStore.setState({ isGenerating: false, script: null, notebookId: null }); });
+afterEach(() => { cleanup(); vi.unstubAllGlobals(); usePodcastGenerationStore.setState({ isGenerating: false, script: null, notebookId: null }); });
 describe('chat -> existing Podcast Studio handler (mocked providers, real components)', () => {
     it('generates once in StrictMode from exactly the confirmed sources and focus', async () => {
         render(<StrictMode><PodcastView notebookId="notebook-a"/></StrictMode>);
@@ -99,5 +103,70 @@ describe('chat -> existing Podcast Studio handler (mocked providers, real compon
         act(() => { progressCallback({ phase: 'complete', percentage: 100, message: 'Stale success', currentSegment: 2, totalSegments: 2, canPlay: true }); });
         expect(usePodcastGenerationStore.getState().notebookId).toBe('notebook-b');
         expect(usePodcastGenerationStore.getState().progress?.message).toBe('Starting generation...');
+    });
+});
+
+describe('completed audio publication gate (mocked providers, real view and store)', () => {
+    const passed: AudioValidationResult = { valid: true, hasSpeech: true, duration: 12, sampleRate: 24000, channels: 1, rms: 0.1, peak: 0.5, silenceRatio: 0.1, issues: [] };
+    const complete = async () => {
+        render(<PodcastView notebookId="notebook-a"/>);
+        act(() => { command('Make a podcast'); });
+        await waitFor(() => expect(mock.start).toHaveBeenCalledTimes(1));
+        act(() => { mock.start.mock.calls[0][3]({ audioUrls: ['blob:segment'], segmentsReady: 2, totalDuration: 12 }); });
+        await waitFor(() => expect(AudioValidator.validateBlob).toHaveBeenCalledTimes(1));
+    };
+    beforeEach(() => {
+        Object.assign(mock.generator as object, { combineAudios: vi.fn().mockResolvedValue('blob:combined') });
+        vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok: true, blob: async () => new Blob([new Uint8Array(2048)], { type: 'audio/wav' }) }));
+        vi.stubGlobal('URL', class extends URL { static revokeObjectURL = vi.fn(); });
+        mock.save.mockResolvedValue({ id: 'saved-episode' });
+        vi.mocked(AudioValidator.validateBlob).mockReset();
+    });
+    it('waits for the signal check before saving or offering final playback', async () => {
+        let resolve!: (value: AudioValidationResult) => void;
+        vi.mocked(AudioValidator.validateBlob).mockReturnValue(new Promise((done) => { resolve = done; }));
+        await complete();
+        expect(mock.save).not.toHaveBeenCalled();
+        expect(usePodcastGenerationStore.getState().audioUrl).toBeNull();
+        expect(usePodcastGenerationStore.getState().isGenerating).toBe(true);
+        await act(async () => { resolve(passed); });
+        await waitFor(() => expect(mock.save).toHaveBeenCalledTimes(1));
+        expect(usePodcastGenerationStore.getState().audioUrl).toBe('blob:combined');
+        expect(usePodcastGenerationStore.getState().podcastId).toBe('saved-episode');
+    });
+    it.each([
+        ['silence', { ...passed, valid: false, hasSpeech: false, issues: ['Audio is silent'] }],
+        ['corruption despite sufficient energy', { ...passed, valid: false, issues: ['Invalid audio header'] }],
+    ])('rejects %s without saving or publishing', async (_name, result) => {
+        vi.mocked(AudioValidator.validateBlob).mockResolvedValue(result);
+        await complete();
+        await waitFor(() => expect(mock.toast).toHaveBeenCalledWith(expect.objectContaining({ title: 'Audio check failed', description: expect.stringContaining('Retry from Studio') })));
+        expect(mock.save).not.toHaveBeenCalled();
+        expect(usePodcastGenerationStore.getState().audioUrl).toBeNull();
+        expect(usePodcastGenerationStore.getState().partialAudioUrls).toEqual([]);
+        expect(usePodcastGenerationStore.getState().isGenerating).toBe(false);
+        expect(usePodcastGenerationStore.getState().progress?.phase).toBe('error');
+    });
+    it('rejects a validator exception without publishing unchecked audio', async () => {
+        vi.mocked(AudioValidator.validateBlob).mockRejectedValue(new Error('Decoder unavailable'));
+        await complete();
+        await waitFor(() => expect(mock.toast).toHaveBeenCalledWith(expect.objectContaining({ title: 'Audio check failed' })));
+        expect(mock.save).not.toHaveBeenCalled();
+        expect(usePodcastGenerationStore.getState().audioUrl).toBeNull();
+    });
+    it('discards late validation after cancellation and a new run in the same notebook', async () => {
+        let resolve!: (value: AudioValidationResult) => void;
+        vi.mocked(AudioValidator.validateBlob).mockReturnValue(new Promise((done) => { resolve = done; }));
+        await complete();
+        act(() => {
+            usePodcastGenerationStore.getState().cancelGeneration();
+            usePodcastGenerationStore.getState().startGeneration('notebook-a', { ...script(), title: 'New run' });
+        });
+        await act(async () => { resolve(passed); });
+        expect(mock.save).not.toHaveBeenCalled();
+        expect(usePodcastGenerationStore.getState().audioUrl).toBeNull();
+        expect(usePodcastGenerationStore.getState().script?.title).toBe('New run');
+        expect(usePodcastGenerationStore.getState().isGenerating).toBe(true);
+        expect(mock.toast).not.toHaveBeenCalledWith(expect.objectContaining({ title: 'Audio check failed' }));
     });
 });

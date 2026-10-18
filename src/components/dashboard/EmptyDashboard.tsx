@@ -1,6 +1,6 @@
 import React, { useState } from "react";
 import { Button } from "@/components/ui/button";
-import { Upload, FileText, Globe, Video } from "lucide-react";
+import { Plus, FileText, MessageCircle, Headphones, ArrowRight } from "lucide-react";
 import { useNavigate } from "react-router-dom";
 import { useNotebooks } from "@/hooks/useNotebooks";
 import { useGuest } from "@/hooks/useGuest";
@@ -89,72 +89,43 @@ const EmptyDashboard = () => {
     }
   };
   return (
-    <div className="text-center py-16">
-      <div className="mb-12">
-        <h2 className="text-3xl font-medium text-gray-900 mb-4">
-          Create your first notebook
-        </h2>
-        <p className="text-lg text-gray-600 max-w-2xl mx-auto">
-          StudyPodLM is an AI-powered research and writing assistant that works
-          best with the sources you upload
-        </p>
-      </div>
-
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-6 max-w-4xl mx-auto mb-12">
-        <div className="bg-white rounded-lg border border-gray-200 p-6 text-center">
-          <div className="w-12 h-12 bg-blue-100 rounded-lg mx-auto mb-4 flex items-center justify-center">
-            <FileText className="h-6 w-6 text-blue-600" />
-          </div>
-          <h3 className="text-lg font-medium text-gray-900 mb-2">PDFs</h3>
-          <p className="text-gray-600">
-            Upload research papers, reports, and documents
+    <section className="rounded-3xl border border-stone-200 bg-[#faf8f3] px-6 py-10 sm:px-10 sm:py-14 dark:border-border dark:bg-card">
+      <div className="grid gap-10 lg:grid-cols-[1.1fr_1fr] lg:items-center">
+        <div className="max-w-xl">
+          <p className="mb-4 text-xs font-semibold uppercase tracking-[0.18em] text-teal-800 dark:text-teal-300">Your material. Your pace.</p>
+          <h2 className="text-4xl font-semibold leading-tight tracking-tight text-stone-900 sm:text-5xl dark:text-foreground">
+            Make room for<br />a little understanding.
+          </h2>
+          <p className="mt-5 max-w-lg text-base leading-relaxed text-stone-600 dark:text-muted-foreground">
+            Bring your reading into a notebook. Explore it with questions, then turn selected sources into a podcast you can take with you.
           </p>
-        </div>
-
-        <div className="bg-white rounded-lg border border-gray-200 p-6 text-center">
-          <div className="w-12 h-12 bg-green-100 rounded-lg mx-auto mb-4 flex items-center justify-center">
-            <Globe className="h-6 w-6 text-green-600" />
+          <div className="mt-7 flex flex-wrap items-center gap-3">
+            <Button onClick={handleCreateNotebook} size="lg" className="rounded-full bg-teal-800 px-6 text-white hover:bg-teal-900 dark:bg-teal-700 dark:hover:bg-teal-600" disabled={isCreating}>
+              <Plus className="mr-2 h-5 w-5" />
+              {isCreating ? "Creating..." : "Create notebook"}
+              <ArrowRight className="ml-3 h-4 w-4" />
+            </Button>
+            {!isGuest && (
+              <Button onClick={() => setIsJoinOpen(true)} size="lg" variant="outline" className="rounded-full border-stone-300 dark:border-border" disabled={isJoining}>
+                Join notebook
+              </Button>
+            )}
           </div>
-          <h3 className="text-lg font-medium text-gray-900 mb-2">Websites</h3>
-          <p className="text-gray-600">
-            Add web pages and online articles as sources
-          </p>
+          {isGuest && <p className="mt-3 text-xs text-stone-500 dark:text-muted-foreground">Guest notebooks stay in this browser. Sign up when you want to sync.</p>}
         </div>
-
-        <div className="bg-white rounded-lg border border-gray-200 p-6 text-center">
-          <div className="w-12 h-12 bg-purple-100 rounded-lg mx-auto mb-4 flex items-center justify-center">
-            <Video className="h-6 w-6 text-purple-600" />
-          </div>
-          <h3 className="text-lg font-medium text-gray-900 mb-2">Audio</h3>
-          <p className="text-gray-600">
-            Include multimedia content in your research
-          </p>
-        </div>
+        <ol className="space-y-3" aria-label="How to study with StudyPod">
+          {[
+            { icon: FileText, title: 'Bring your sources', body: 'Start with a PDF, pasted text, or a web page. Keep the material that matters together.' },
+            { icon: MessageCircle, title: 'Follow your questions', body: 'Ask about your sources and check the references as you build your understanding.' },
+            { icon: Headphones, title: 'Give your reading a voice', body: 'Choose sources for a podcast discussion or solo explanation. Read-aloud availability depends on your setup.' },
+          ].map(({ icon: Icon, title, body }, index) => (
+            <li key={title} className="flex gap-4 rounded-2xl border border-stone-200/80 bg-white p-5 dark:border-border dark:bg-background">
+              <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-teal-50 text-teal-800 dark:bg-teal-950 dark:text-teal-300"><Icon className="h-5 w-5" aria-hidden="true" /></div>
+              <div><p className="mb-1 text-xs font-medium text-stone-500 dark:text-muted-foreground">0{index + 1}</p><h3 className="font-semibold text-stone-900 dark:text-foreground">{title}</h3><p className="mt-1 text-sm leading-relaxed text-stone-600 dark:text-muted-foreground">{body}</p></div>
+            </li>
+          ))}
+        </ol>
       </div>
-
-      <div className="flex justify-center items-center space-x-4">
-        <Button
-          onClick={handleCreateNotebook}
-          size="lg"
-          className="bg-blue-600 hover:bg-blue-700 rounded-xl px-6"
-          disabled={isCreating}
-        >
-          <Upload className="h-5 w-5 mr-2" />
-          {isCreating ? "Creating..." : "Create notebook"}
-        </Button>
-        {!isGuest && (
-          <Button
-            onClick={() => setIsJoinOpen(true)}
-            size="lg"
-            variant="outline"
-            className="border-gray-300 dark:border-border text-foreground hover:bg-muted rounded-xl px-6"
-            disabled={isJoining}
-          >
-            Join notebook
-          </Button>
-        )}
-      </div>
-
       <Dialog open={isJoinOpen} onOpenChange={setIsJoinOpen}>
         <DialogContent className="sm:max-w-md bg-white dark:bg-card border border-border rounded-2xl shadow-xl">
           <DialogHeader>
@@ -184,7 +155,7 @@ const EmptyDashboard = () => {
           </form>
         </DialogContent>
       </Dialog>
-    </div>
+    </section>
   );
 };
 export default EmptyDashboard;

@@ -24,7 +24,7 @@ import { useSources } from "@/hooks/useSources";
 import { useSourceDelete } from "@/hooks/useSourceDelete";
 import { useWebsiteProcessing } from "@/hooks/useWebsiteProcessing";
 import { Citation } from "@/types/message";
-import { LocalSource } from "@/services/localStorageService";
+import { LocalSource, localStorageService } from "@/services/localStorageService";
 import { useDocumentProcessing } from "@/hooks/useDocumentProcessing";
 import { useDocuments } from "@/hooks/useDocuments";
 import { useToast } from "@/hooks/use-toast";
@@ -35,8 +35,11 @@ import {
   type SourceProcessingError,
 } from "@/lib/sources/sourceProcessing";
 import { formatDisplayTitle } from "@/lib/utils/displayTitle";
+import { useAuth } from "@/hooks/useAuth";
+import { useGuest } from "@/hooks/useGuest";
+import { clearUploadInterruption, ownsUploadInterruptionSource, readRecoverableUploadInterruptions, reconcileUploadInterruptions, subscribeUploadInterruptions, type UploadInterruption, type UploadInterruptionScope } from "@/lib/sources/sourceUploadInterruption";
 
-const AddSourcesDialog = React.lazy(() => import('./AddSourcesDialog'));
+import AddSourcesDialog from './AddSourcesDialog';
 const SourceContentViewer = React.lazy(() => import('@/components/chat/SourceContentViewer'));
 
 type Source = LocalSource;
@@ -72,6 +75,8 @@ interface SourcesSidebarProps {
   setSelectedCitation?: (citation: Citation | null) => void;
   activeSourceId?: string | null;
   onActiveSourceChange?: (sourceId: string | null) => void;
+  returnToCitationOrigin?: 'chat' | 'studio' | null;
+  onReturnToCitationOrigin?: () => void;
 }
 
 const SourcesSidebar = ({
@@ -80,7 +85,10 @@ const SourcesSidebar = ({
   onCitationClose,
   setSelectedCitation,
   onActiveSourceChange,
+  returnToCitationOrigin,
+  onReturnToCitationOrigin,
 }: SourcesSidebarProps) => {
+  const viewerHeadingRef = React.useRef<HTMLHeadingElement>(null);
   const [showAddSourcesDialog, setShowAddSourcesDialog] = useState(false);
   const [showDeleteDialog, setShowDeleteDialog] = useState(false);
   const [showRenameDialog, setShowRenameDialog] = useState(false);
@@ -89,9 +97,33 @@ const SourcesSidebar = ({
   const [selectedSourceForViewing, setSelectedSourceForViewing] =
     useState<Source | null>(null);
 
-  const { sources, isLoading } = useSources(notebookId);
+  const { sources, isLoading, isFetching, error: sourcesError, retrySources } = useSources(notebookId);
+  const { user, session } = useAuth();
+  const { isGuest, guestId } = useGuest();
+  const localNotebook = isGuest && notebookId ? localStorageService.getNotebook(notebookId) : null;
+  const interruptionScope = React.useMemo<UploadInterruptionScope | null>(() => {
+    if (!notebookId) return null;
+    if (isGuest) return guestId && localNotebook?.user_id === guestId
+      ? { kind: "guest", ownerId: guestId, notebookId } : null;
+    return session && user ? { ownerId: user.id, notebookId } : null;
+  }, [session, user?.id, notebookId, isGuest, guestId, localNotebook?.user_id]);
+  const scopeKey = interruptionScope ? JSON.stringify(interruptionScope) : "";
+  const [interruptionState, setInterruptionState] = useState<{ scopeKey: string; entries: UploadInterruption[] }>({ scopeKey: "", entries: [] });
+  const interruptions = interruptionState.scopeKey === scopeKey ? interruptionState.entries : [];
+  React.useEffect(() => {
+    const refresh = () => setInterruptionState({ scopeKey, entries: interruptionScope ? readRecoverableUploadInterruptions(interruptionScope) : [] });
+    refresh();
+    return subscribeUploadInterruptions(refresh);
+  }, [scopeKey, interruptionScope]);
+  React.useEffect(() => {
+    if (interruptionScope) reconcileUploadInterruptions(interruptionScope, sources, localNotebook);
+  }, [interruptionScope, sources, localNotebook?.id, localNotebook?.user_id]);
   const [searchQuery, setSearchQuery] = useState("");
   const [selectedType, setSelectedType] = useState<string>("all");
+
+  React.useEffect(() => {
+    if (selectedCitation) viewerHeadingRef.current?.focus();
+  }, [selectedCitation]);
 
   const filteredSources = React.useMemo(() => {
     if (!sources) return [];
@@ -236,19 +268,19 @@ const SourcesSidebar = ({
   const renderProcessingStatus = (status: string) => {
     switch (status) {
       case "uploading":
-        return <i className="fi fi-rr-upload h-4 w-4 animate-pulse text-blue-500"></i>;
+        return <i aria-hidden="true" className="fi fi-rr-upload h-4 w-4 animate-pulse text-blue-500"></i>;
       case "extracting":
       case "processing":
       case "indexing":
-        return <i className="fi fi-rr-spinner h-4 w-4 animate-spin text-blue-500"></i>;
+        return <i aria-hidden="true" className="fi fi-rr-spinner h-4 w-4 animate-spin text-blue-500"></i>;
       case "completed":
-        return <i className="fi fi-rr-check-circle h-4 w-4 text-green-500"></i>;
+        return <i aria-hidden="true" className="fi fi-rr-check-circle h-4 w-4 text-green-500"></i>;
       case "degraded":
-        return <i className="fi fi-rr-exclamation h-4 w-4 text-amber-500"></i>;
+        return <i aria-hidden="true" className="fi fi-rr-exclamation h-4 w-4 text-amber-500"></i>;
       case "failed":
-        return <i className="fi fi-rr-cross-circle h-4 w-4 text-red-500"></i>;
+        return <i aria-hidden="true" className="fi fi-rr-cross-circle h-4 w-4 text-red-500"></i>;
       case "pending":
-        return <i className="fi fi-rr-spinner h-4 w-4 animate-pulse text-gray-500"></i>;
+        return <i aria-hidden="true" className="fi fi-rr-spinner h-4 w-4 animate-pulse text-gray-500"></i>;
       default:
         return null;
     }
@@ -259,10 +291,18 @@ const SourcesSidebar = ({
     const status = getSourceProcessingStatus(source);
 
     if (status === "failed") {
+      const failureDetails = metadata.processingError
+        ? `${metadata.processingError.stage}: ${metadata.processingError.message}${metadata.processingError.retryable ? " — Retry or replace this source from its menu." : ""}`
+        : "Source processing failed. Retry or replace this source from its menu.";
       return (
-        <span className="text-[10px] font-medium rounded-full border border-red-300 bg-red-50 px-2 py-0.5 text-red-700 dark:border-red-900/60 dark:bg-red-950/40 dark:text-red-300">
+        <>
+        <span title={failureDetails} aria-label={`Failed: ${failureDetails}`} className="text-[10px] font-medium rounded-full border border-red-300 bg-red-50 px-2 py-0.5 text-red-700 dark:border-red-900/60 dark:bg-red-950/40 dark:text-red-300">
           Failed
         </span>
+        <p className="w-full line-clamp-2 break-words text-xs text-red-700 dark:text-red-300" title={failureDetails} aria-label={failureDetails}>
+          {failureDetails}
+        </p>
+        </>
       );
     }
 
@@ -421,12 +461,9 @@ const SourcesSidebar = ({
 
     console.log("SourcesSidebar: Created mock citation", mockCitation);
 
-    // Set the mock citation after a small delay to ensure state is clean
-    setTimeout(() => {
-      if (setSelectedCitation) {
-        setSelectedCitation(mockCitation);
-      }
-    }, 50);
+    // Keep source and citation selection in this event's React update. A delayed
+    // callback can reopen the reader after returning to the list or remounting.
+    setSelectedCitation?.(mockCitation);
   };
 
   const handleBackToSources = () => {
@@ -436,9 +473,19 @@ const SourcesSidebar = ({
     onCitationClose?.();
   };
 
+  const handleReturnToCitationOrigin = () => {
+    handleBackToSources();
+    onReturnToCitationOrigin?.();
+  };
+
   const confirmDelete = () => {
     if (selectedSource) {
-      deleteSource({ notebookId: notebookId || '', sourceId: selectedSource.id });
+      const sourceId = selectedSource.id;
+      deleteSource({ notebookId: notebookId || '', sourceId }, {
+        onSuccess: () => {
+          if (interruptionScope) clearUploadInterruption(interruptionScope, sourceId);
+        },
+      });
       setShowDeleteDialog(false);
       setSelectedSource(null);
     }
@@ -475,20 +522,18 @@ const SourcesSidebar = ({
       <div className="w-full bg-gray-50 dark:bg-background border-r border-gray-200 dark:border-border flex flex-col h-full overflow-hidden">
         <div className="p-4 border-b border-gray-200 dark:border-border flex-shrink-0">
           <div className="flex items-center justify-between">
-            <h2
-              className="text-lg font-medium text-gray-900 dark:text-foreground cursor-pointer hover:text-gray-700 dark:hover:text-zinc-300"
-              onClick={handleBackToSources}
-            >
-              Sources
+            <h2 ref={viewerHeadingRef} tabIndex={-1} className="min-w-0 break-words text-lg font-medium text-gray-900 dark:text-foreground outline-none">
+              Source: {selectedCitation.source_title}
             </h2>
-            <Button
-              variant="ghost"
-              onClick={handleBackToSources}
-              className="p-2 [&_svg]:!w-6 [&_svg]:!h-6"
-            >
-              <i className="fi fi-rr-arrow-left h-6 w-6"></i>
+            <Button variant="ghost" onClick={handleBackToSources} aria-label="Back to source list" className="min-h-11 min-w-11 p-2 [&_svg]:!w-6 [&_svg]:!h-6">
+              <i aria-hidden="true" className="fi fi-rr-arrow-left h-6 w-6"></i>
             </Button>
           </div>
+          {returnToCitationOrigin && onReturnToCitationOrigin && (
+            <Button variant="ghost" onClick={handleReturnToCitationOrigin} className="mt-2 min-h-11 px-2 text-sm">
+              Back to {returnToCitationOrigin === 'chat' ? 'Chat' : 'Studio'}
+            </Button>
+          )}
         </div>
 
         <React.Suspense fallback={<div className="flex flex-1 items-center justify-center text-sm text-muted-foreground">Loading source…</div>}>
@@ -517,30 +562,33 @@ const SourcesSidebar = ({
           <Button
             variant="outline"
             size="sm"
-            className="flex-1 bg-white dark:bg-card border-gray-200 dark:border-border text-gray-700 dark:text-foreground hover:bg-gray-50 dark:hover:bg-muted"
+            className="min-h-11 flex-1 bg-white dark:bg-card border-gray-200 dark:border-border text-gray-700 dark:text-foreground hover:bg-gray-50 dark:hover:bg-muted"
             onClick={() => setShowAddSourcesDialog(true)}
           >
-            <i className="fi fi-rr-plus h-4 w-4 mr-2"></i>
+            <i aria-hidden="true" className="fi fi-rr-plus h-4 w-4 mr-2"></i>
             Add
           </Button>
         </div>
 
         <div className="mt-3 space-y-2">
           <div className="relative">
-            <i className="fi fi-rr-search absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 text-xs"></i>
+            <i aria-hidden="true" className="fi fi-rr-search absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 text-xs"></i>
             <input
               type="text"
+              aria-label="Search sources"
               placeholder="Search library..."
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
-              className="w-full pl-8 pr-3 py-1.5 text-xs bg-gray-100 dark:bg-zinc-900 border-none rounded-lg focus:outline-none focus:ring-1 focus:ring-ring text-foreground placeholder-gray-400"
+              className="min-h-11 w-full pl-8 pr-12 py-2 text-sm bg-gray-100 dark:bg-zinc-900 border-none rounded-lg focus:outline-none focus:ring-2 focus:ring-ring text-foreground placeholder-gray-400"
             />
             {searchQuery && (
-              <button 
+              <button
+                type="button"
+                aria-label="Clear source search"
                 onClick={() => setSearchQuery("")} 
-                className="absolute right-2.5 top-1/2 -translate-y-1/2 text-gray-400 hover:text-foreground text-[10px]"
+                className="absolute right-0 top-1/2 flex min-h-11 min-w-11 -translate-y-1/2 items-center justify-center rounded-lg text-gray-600 hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring dark:text-gray-300"
               >
-                <i className="fi fi-rr-cross-small"></i>
+                <i aria-hidden="true" className="fi fi-rr-cross-small"></i>
               </button>
             )}
           </div>
@@ -556,8 +604,10 @@ const SourcesSidebar = ({
             ].map(type => (
               <button
                 key={type.id}
+                type="button"
+                aria-pressed={selectedType === type.id}
                 onClick={() => setSelectedType(type.id)}
-                className={`px-2.5 py-0.5 text-[10px] font-medium rounded-full transition-all shrink-0 border ${
+                className={`min-h-11 px-3 py-2 text-xs font-medium rounded-full transition-all shrink-0 border focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring ${
                   selectedType === type.id
                     ? "bg-foreground text-background border-foreground dark:bg-white dark:text-black dark:border-white"
                     : "bg-white text-muted-foreground border-gray-200 hover:text-foreground dark:bg-card dark:border-border"
@@ -572,19 +622,56 @@ const SourcesSidebar = ({
 
       <ScrollArea className="flex-1 h-full">
         <div className="p-4">
+          {interruptions.map(interruption => {
+            const source = sources.find(source => source.id === interruption.sourceId && source.notebook_id === notebookId &&
+              interruptionScope && ownsUploadInterruptionSource(interruptionScope, source as Source & { user_id?: string }, localNotebook));
+            return <div key={interruption.sourceId} role="alert" className="mb-3 rounded-md border border-amber-500 p-3 text-sm">
+              <p className="font-medium">Upload interrupted: {interruption.fileName}</p>
+              <p>{interruption.reason}</p>
+              {source ? <Button variant="outline" className="mt-2" disabled={isDeleting}
+                aria-label={`Remove interrupted source ${interruption.fileName}`}
+                onClick={() => { setSelectedSource(source); setShowDeleteDialog(true); }}>Remove interrupted source</Button>
+                : <p className="mt-2">Reconnect to load the source and remove it.</p>}
+            </div>;
+          })}
+          {sourcesError && sources.length > 0 && (
+            <div role="alert" className="mb-3 rounded-xl border border-amber-300 bg-amber-50 p-3 text-sm text-amber-950 dark:border-amber-900/60 dark:bg-amber-950/30 dark:text-amber-100">
+              <p>Could not refresh sources. Showing the last loaded list.</p>
+              <Button type="button" variant="outline" size="sm" className="mt-2" disabled={isFetching} onClick={() => void retrySources()}>
+                {isFetching ? "Retrying…" : "Retry loading sources"}
+              </Button>
+            </div>
+          )}
           {isLoading ? (
             <div className="text-center py-8">
-              <p className="text-sm text-gray-600 dark:text-gray-400">Loading sources...</p>
+              <p role="status" className="text-sm text-gray-600 dark:text-gray-400">Loading sources...</p>
+            </div>
+          ) : sourcesError && sources.length === 0 ? (
+            <div role="alert" className="rounded-xl border border-amber-300 bg-amber-50 p-4 text-sm text-amber-950 dark:border-amber-900/60 dark:bg-amber-950/30 dark:text-amber-100">
+              <p className="font-medium">Could not load sources</p>
+              <p className="mt-1">Your source list is unavailable. Try again before adding more material.</p>
+              <Button type="button" variant="outline" size="sm" className="mt-3" disabled={isFetching} onClick={() => void retrySources()}>
+                {isFetching ? "Retrying…" : "Retry loading sources"}
+              </Button>
             </div>
           ) : sources && sources.length > 0 ? (
             filteredSources.length > 0 ? (
               <div className="space-y-4">
                 {filteredSources.map((source) => (
                   <ContextMenu key={source.id}>
-                    <ContextMenuTrigger>
+                    <ContextMenuTrigger asChild>
                       <Card
-                        className="p-3 border border-gray-200 dark:border-border cursor-pointer bg-white dark:bg-card hover:bg-gray-50 dark:hover:bg-muted/50 transition-colors shadow-sm"
+                        role="button"
+                        tabIndex={0}
+                        aria-label={`Open source ${formatDisplayTitle(source.title, 'Untitled source')}`}
+                        className="min-h-14 p-3 border border-gray-200 dark:border-border cursor-pointer bg-white dark:bg-card hover:bg-gray-50 dark:hover:bg-muted/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring transition-colors shadow-sm"
                         onClick={() => handleSourceClick(source)}
+                        onKeyDown={(event) => {
+                          if (event.key === "Enter" || event.key === " ") {
+                            event.preventDefault();
+                            handleSourceClick(source);
+                          }
+                        }}
                       >
                         <div className="flex items-start justify-between space-x-3">
                           <div className="flex items-center space-x-2 flex-1 min-w-0">
@@ -611,7 +698,7 @@ const SourcesSidebar = ({
                         onClick={() => handleCreateEditableDocument(source)}
                         disabled={!source.content?.trim() || isCreatingDocument}
                       >
-                        <i className="fi fi-rr-document-signed h-4 w-4 mr-2"></i>
+                        <i aria-hidden="true" className="fi fi-rr-document-signed h-4 w-4 mr-2"></i>
                         Create editable document
                       </ContextMenuItem>
                       {(getSourceProcessingStatus(source) === "failed" || (
@@ -622,19 +709,19 @@ const SourcesSidebar = ({
                           onClick={() => handleRetrySource(source)}
                           disabled={retryingSourceId === source.id}
                         >
-                          <i className={"fi fi-rr-refresh h-4 w-4 mr-2 " + (retryingSourceId === source.id ? "animate-spin" : "")}></i>
+                          <i aria-hidden="true" className={"fi fi-rr-refresh h-4 w-4 mr-2 " + (retryingSourceId === source.id ? "animate-spin" : "")}></i>
                           {source.content?.trim() ? "Retry indexing" : "Retry / replace source"}
                         </ContextMenuItem>
                       )}
                       <ContextMenuItem onClick={() => handleRenameSource(source)}>
-                        <i className="fi fi-rr-edit h-4 w-4 mr-2"></i>
+                        <i aria-hidden="true" className="fi fi-rr-edit h-4 w-4 mr-2"></i>
                         Rename source
                       </ContextMenuItem>
                       <ContextMenuItem
                         onClick={() => handleRemoveSource(source)}
                         className="text-red-600 focus:text-red-600"
                       >
-                        <i className="fi fi-rr-trash h-4 w-4 mr-2"></i>
+                        <i aria-hidden="true" className="fi fi-rr-trash h-4 w-4 mr-2"></i>
                         Remove source
                       </ContextMenuItem>
                     </ContextMenuContent>
@@ -648,7 +735,9 @@ const SourcesSidebar = ({
             )
           ) : (
             <div className="text-center py-8 bg-white dark:bg-card border border-dashed border-gray-200 dark:border-border rounded-xl">
-              <p className="text-xs text-muted-foreground">No sources added yet. Click "Add" above to start uploading files, bookmarks, or web links.</p>
+              <p className="text-sm font-medium text-foreground">Bring your material into StudyPod</p>
+              <p className="mx-auto mt-2 max-w-xs text-xs text-muted-foreground">Upload a file, paste text, or add a web link to begin.</p>
+              <Button type="button" size="sm" onClick={() => setShowAddSourcesDialog(true)} className="mt-4 min-h-11 rounded-full bg-teal-800 px-5 text-white hover:bg-teal-900 dark:bg-teal-700 dark:hover:bg-teal-600">Add a source</Button>
             </div>
           )}
 
@@ -685,7 +774,7 @@ const SourcesSidebar = ({
                             >
                               {importingUrls[item.url] ? (
                                 <>
-                                  <i className="fi fi-rr-spinner h-3 w-3 animate-spin mr-1"></i>
+                                  <i aria-hidden="true" className="fi fi-rr-spinner h-3 w-3 animate-spin mr-1"></i>
                                   Adding...
                                 </>
                               ) : (
@@ -703,13 +792,11 @@ const SourcesSidebar = ({
       </ScrollArea>
 
       {showAddSourcesDialog && (
-        <React.Suspense fallback={null}>
           <AddSourcesDialog
             open={showAddSourcesDialog}
             onOpenChange={setShowAddSourcesDialog}
             notebookId={notebookId}
           />
-        </React.Suspense>
       )}
 
       <RenameSourceDialog

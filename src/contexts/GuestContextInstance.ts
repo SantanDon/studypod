@@ -15,6 +15,7 @@ export interface GuestContextType {
   remainingSources: number;
   remainingMessages: number;
   incrementUsage: (type: keyof GuestUsage, notebookId?: string) => void;
+  releaseSourceSlot: (notebookId: string) => void;
   getNotebookUsage: (notebookId: string) => { sources: number; messages: number };
   migrateToUser: () => Promise<void>;
   showAuthPrompt: (feature: string) => void;

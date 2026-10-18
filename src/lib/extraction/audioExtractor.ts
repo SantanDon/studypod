@@ -12,16 +12,26 @@ env.useBrowserCache = true;
 // Singleton to manage the model pipeline
 class SpeechRecognitionPipeline {
   static task = 'automatic-speech-recognition';
-  // The tiny Whisper checkpoint keeps first-run browser downloads manageable.
-  static model = 'onnx-community/whisper-tiny';
+  // Keep the smaller checkpoint as the default while a base candidate is
+  // evaluated against the same real recordings in an isolated browser build.
+  static model = import.meta.env.VITE_AUDIO_TRANSCRIPTION_MODEL === 'onnx-community/whisper-base'
+    ? 'onnx-community/whisper-base'
+    : 'onnx-community/whisper-tiny';
   static instance: unknown = null;
+  static loading: Promise<unknown> | null = null;
 
   static async getInstance(progress_callback?: (data: { status: string; progress?: number }) => void) {
     if (this.instance === null) {
       console.log(`Loading Whisper model: ${this.model}...`);
-      this.instance = await pipeline(this.task as "automatic-speech-recognition", this.model, { 
-        progress_callback 
-      });
+      if (!this.loading) {
+        this.loading = pipeline(this.task as "automatic-speech-recognition", this.model, {
+          progress_callback
+        }).then(instance => {
+          this.instance = instance;
+          return instance;
+        }).finally(() => { this.loading = null; });
+      }
+      await this.loading;
     }
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     return this.instance as any; // Cast back to any for legacy usage if necessary, but internal type is safe
@@ -46,8 +56,15 @@ export async function extractAudio(
 ): Promise<AudioExtractionResult> {
   
   const startTime = performance.now();
+  let url: string | undefined;
   
   try {
+    if (typeof AudioContext === 'undefined') {
+      throw new Error('Audio transcription is unavailable in this browser. Use a browser with Web Audio support or upload a text transcript instead.');
+    }
+    if (file.size === 0) {
+      throw new Error('The audio file is empty. Upload a recording containing speech or a text transcript instead.');
+    }
     if (onStatusUpdate) onStatusUpdate("Loading Whisper model...");
     
     // 1. Get the transcriber pipeline
@@ -64,22 +81,22 @@ export async function extractAudio(
     if (onStatusUpdate) onStatusUpdate("Transcribing audio (this may take a moment)...");
 
     // 2. Prepare input
-    const url = URL.createObjectURL(file);
+    url = URL.createObjectURL(file);
 
     // 3. Run transcription
     // Using chunk_length_s to handle longer files better
     const output = await transcriber(url, {
       chunk_length_s: 30,
       stride_length_s: 5,
-      language: 'en', // Default to English for now, can be 'auto'
       task: 'transcribe',
       return_timestamps: true
     });
 
-    URL.revokeObjectURL(url);
-
     const text = typeof output === 'string' ? output : 
-                 (output.text || (Array.isArray(output) ? output.map(c => c.text).join(' ') : ''));
+                 (output?.text || (Array.isArray(output) ? output.map(c => c.text || '').join(' ') : ''));
+    if (typeof text !== 'string' || !text.trim()) {
+      throw new Error('No speech transcript was produced. Try a clear recording in a supported audio format, or upload a text transcript instead.');
+    }
 
     const endTime = performance.now();
     const duration = (endTime - startTime) / 1000;
@@ -96,6 +113,8 @@ export async function extractAudio(
 
   } catch (error) {
     console.error("Audio extraction failed:", error);
-    throw new Error(`Audio extraction failed: ${error instanceof Error ? error.message : String(error)}`);
+    throw new Error(`Audio extraction failed: ${error instanceof Error ? error.message : String(error)} Check that the browser can download the Whisper model and decode this recording, or upload a text transcript instead.`);
+  } finally {
+    if (url) URL.revokeObjectURL(url);
   }
 }

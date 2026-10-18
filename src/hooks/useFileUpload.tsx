@@ -5,6 +5,7 @@ import { extractContent, getFileCategory } from "@/lib/extraction/documentExtrac
 import { validateDocumentContent } from "@/lib/extraction/contentValidator";
 import { useAuth } from "@/hooks/useAuth";
 import { API_BASE_URL, ApiService } from "@/services/apiService";
+import { SourceSaveError } from "@/lib/sources/sourceUploadInterruption";
 
 type UploadFileResult =
   | {
@@ -18,12 +19,14 @@ type UploadFileResult =
       readonly success: false;
       readonly error: string;
       readonly fileName: string;
+      readonly failureCode?: "SOURCE_SAVE_FAILED";
+      readonly failureStage?: "saving";
     };
 
 export const useFileUpload = () => {
   const [isUploading, setIsUploading] = useState(false);
   const { toast } = useToast();
-  const { session } = useAuth();
+  const { session, user } = useAuth();
 
   const uploadFile = async (
     file: File,
@@ -128,6 +131,12 @@ export const useFileUpload = () => {
           content = extractionResult.content || "";
           metadata = extractionResult.metadata || {};
           chunks = extractionResult.chunks || [];
+
+          if (metadata.extractionMethod === "failed" || metadata.extractionMethod === "image-ready") {
+            throw new Error(metadata.extractionMethod === "image-ready"
+              ? "Image text extraction is unavailable. Upload a text transcript or try again after signing in."
+              : content || `Failed to extract content from ${file.name}.`);
+          }
 
           // Check if the content is actually an error message from the client extractor
           // We look for common error phrases but only if the content is suspiciously short
@@ -296,7 +305,7 @@ export const useFileUpload = () => {
         }
       } catch (err) {
         console.error("Failed to persist extracted source text", err);
-        throw new Error("Extracted text could not be saved to your notebook. Please retry the upload.");
+        throw new SourceSaveError();
       }
 
       console.log("✅ File uploaded successfully with content:", {
@@ -307,16 +316,18 @@ export const useFileUpload = () => {
       });
 
       // Verify source was saved correctly
-      const verifySource = localStorageService.getSourceById(sourceId);
-      console.log(
-        `🔍 Verification - Source has content: ${!!verifySource?.content}, Length: ${verifySource?.content?.length || 0}`,
-      );
+      if (!session?.access_token) {
+        const verifySource = localStorageService.getSourceById(sourceId);
+        console.log(
+          `🔍 Verification - Source has content: ${!!verifySource?.content}, Length: ${verifySource?.content?.length || 0}`,
+        );
+      }
 
       return {
         filePath: blobUrl,
         content: content,
         chunks: chunks,
-        metadata: metadata,
+        metadata: payload.metadata,
         success: true
       };
     } catch (error: unknown) {
@@ -337,7 +348,8 @@ export const useFileUpload = () => {
       return { 
         success: false, 
         error: errorMessage,
-        fileName: file.name
+        fileName: file.name,
+        ...(error instanceof SourceSaveError ? { failureCode: error.code, failureStage: error.stage } : {}),
       };
     } finally {
       setIsUploading(false);
@@ -353,5 +365,6 @@ export const useFileUpload = () => {
     uploadFile,
     getFileUrl,
     isUploading,
+    ownerId: session && user ? user.id : undefined,
   };
 };

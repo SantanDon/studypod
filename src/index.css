@@ -190,3 +190,121 @@
     50% { opacity: 0.8; transform: scale(0.99); }
   }
 }
+
+/* Audio studio keeps listening and creation distinct inside the existing notebook UI. */
+.studypod-audio-studio {
+  --audio-paper: #f7f4ed;
+  --audio-ink: #172d32;
+  --audio-teal: #165e61;
+  --audio-action: #165e61;
+  --audio-mint: #d8ebe5;
+  --audio-line: #cbd8d2;
+}
+
+.dark .studypod-audio-studio {
+  --audio-paper: #17272b;
+  --audio-ink: #f1f5f0;
+  --audio-teal: #8bd3c5;
+  --audio-action: #165e61;
+  --audio-mint: #203b3b;
+  --audio-line: #395556;
+}
+
+:root:not(.dark) .studypod-audio-studio .podcast-card.studypod-audio-card,
+.light .studypod-audio-studio .podcast-card.studypod-audio-card,
+.dark .studypod-audio-studio .podcast-card.studypod-audio-card {
+  background: var(--audio-paper);
+  border-color: var(--audio-line);
+  box-shadow: 0 8px 28px rgba(23, 45, 50, 0.07);
+}
+
+.studypod-audio-studio .studypod-audio-card {
+  display: grid;
+  gap: 16px;
+  padding: 16px;
+}
+
+.studypod-audio-studio .studypod-listen,
+.studypod-audio-studio .studypod-create {
+  min-width: 0;
+  border: 1px solid var(--audio-line);
+  border-radius: 14px;
+  padding: 16px;
+}
+
+.studypod-audio-studio .studypod-listen {
+  background: var(--audio-mint);
+}
+
+.studypod-audio-studio .studypod-create {
+  background: var(--audio-paper);
+}
+
+.studypod-audio-studio .studypod-audio-section-heading {
+  margin-bottom: 16px;
+  color: var(--audio-ink);
+}
+
+.studypod-audio-studio .studypod-audio-eyebrow {
+  display: block;
+  margin-bottom: 4px;
+  color: var(--audio-teal);
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
+
+.studypod-audio-studio .studypod-audio-section-heading h3 {
+  font-size: 17px;
+  font-weight: 700;
+  line-height: 1.3;
+}
+
+.studypod-audio-studio .studypod-audio-section-heading p {
+  margin-top: 4px;
+  font-size: 12px;
+  line-height: 1.5;
+  opacity: 0.75;
+}
+
+.studypod-audio-studio .studypod-listen-history > div {
+  margin-top: 0;
+  border-top: 0;
+  padding-top: 0;
+}
+
+.studypod-audio-studio .studypod-listen-history button:focus-visible,
+.studypod-audio-studio .studypod-create button:focus-visible {
+  outline: 2px solid var(--audio-teal);
+  outline-offset: 2px;
+}
+
+.studypod-audio-studio .studypod-create .podcast-header {
+  margin-bottom: 14px;
+}
+
+.studypod-audio-studio .studypod-create .podcast-icon,
+.studypod-audio-studio .studypod-create .podcast-generate-btn {
+  background: var(--audio-action);
+  box-shadow: none;
+}
+
+.studypod-audio-studio .studypod-create .podcast-generate-btn {
+  min-height: 44px;
+}
+
+.studypod-audio-studio .studypod-create .player-footer {
+  margin-top: 0;
+}
+
+@media (max-width: 640px) {
+  .studypod-audio-studio .studypod-audio-card {
+    padding: 10px;
+  }
+
+  .studypod-audio-studio .studypod-listen,
+  .studypod-audio-studio .studypod-create {
+    padding: 12px;
+  }
+}

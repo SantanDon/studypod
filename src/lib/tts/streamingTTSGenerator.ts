@@ -1192,10 +1192,14 @@ class StreamingTTSGenerator {
       try {
         return await workerManager.synthesize(text, voice, speed, onProgress);
       } catch (error) {
+        // Cancellation rejects the pending worker request. Never retry that run,
+        // including when cancellation arrives during the retry backoff.
+        if (this.shouldCancel) throw error;
         lastError = error;
         if (attempt < 2) {
           onRetry();
           await new Promise((resolve) => setTimeout(resolve, 250));
+          if (this.shouldCancel) throw error;
         }
       }
     }

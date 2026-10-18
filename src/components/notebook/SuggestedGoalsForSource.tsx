@@ -3,6 +3,14 @@ import { useSuggestedGoals, SuggestedGoal } from '@/hooks/useResearchGoals';
 import { Button } from '@/components/ui/button';
 import { useToast } from '@/hooks/use-toast';
 import { FEATURE_FLAGS } from '@/config/featureFlags';
+import { useStudioIdentity } from '@/services/studioApiService';
+
+export function parseGoalChunkIndices(value: unknown): number[] {
+  try {
+    const parsed: unknown = typeof value === 'string' ? JSON.parse(value) : value;
+    return Array.isArray(parsed) ? parsed.filter((index): index is number => Number.isSafeInteger(index) && index >= 0) : [];
+  } catch { return []; }
+}
 
 interface SuggestedGoalsForSourceProps {
   notebookId: string;
@@ -18,8 +26,10 @@ const confidenceColor = (c: number) => {
 const SuggestedGoalsForSource: React.FC<SuggestedGoalsForSourceProps> = ({ notebookId, sourceId }) => {
   const { suggestions, computed, isLoading, rateLimited, retryIn, acceptSuggestion, isAccepting } = useSuggestedGoals(notebookId, sourceId);
   const { toast } = useToast();
+  const identity = useStudioIdentity(notebookId);
 
   if (!FEATURE_FLAGS.SUGGESTED_GOALS_ENABLED) return null;
+  if (!identity.authenticated) return <p className="p-3 text-xs text-muted-foreground">Sign in to get and save research goals suggested from this source.</p>;
 
   if (isLoading) {
     return (
@@ -40,7 +50,7 @@ const SuggestedGoalsForSource: React.FC<SuggestedGoalsForSourceProps> = ({ noteb
         <div className="text-amber-800">
           <p className="font-semibold">Cooldown active</p>
           <p className="text-[10px] text-amber-700 mt-0.5">
-            Suggestions were just generated. Try again in {retryIn}s or use ?force=true to refresh.
+            Suggestions were just generated. Try again in {retryIn}s.
           </p>
         </div>
       </div>
@@ -74,9 +84,7 @@ const SuggestedGoalsForSource: React.FC<SuggestedGoalsForSourceProps> = ({ noteb
         )}
       </div>
       {suggestions.map((s: SuggestedGoal) => {
-        const indices = typeof s.source_chunk_indices === 'string'
-          ? JSON.parse(s.source_chunk_indices || '[]')
-          : (s.source_chunk_indices || []);
+        const indices = parseGoalChunkIndices(s.source_chunk_indices);
         const accepted = s.status === 'accepted';
         return (
           <div
@@ -98,7 +106,7 @@ const SuggestedGoalsForSource: React.FC<SuggestedGoalsForSourceProps> = ({ noteb
                   <p className="text-[10.5px] text-gray-500 mt-1 leading-relaxed">{s.rationale}</p>
                 )}
                 <div className="flex items-center gap-1.5 mt-1.5 flex-wrap">
-                  {typeof s.confidence === 'number' && (
+                  {typeof s.confidence === 'number' && Number.isFinite(s.confidence) && s.confidence >= 0 && s.confidence <= 1 && (
                     <span className={`text-[9px] px-1.5 py-0.5 border rounded font-mono font-semibold ${confidenceColor(s.confidence)}`}>
                       {Math.round(s.confidence * 100)}% conf
                     </span>
@@ -114,11 +122,14 @@ const SuggestedGoalsForSource: React.FC<SuggestedGoalsForSourceProps> = ({ noteb
                 size="sm"
                 variant="ghost"
                 disabled={isAccepting || accepted}
+                aria-label={accepted ? 'Added' : 'Add'}
                 onClick={async () => {
                   try {
                     await acceptSuggestion(s.id);
+                    identity.assertCurrent();
                     toast({ title: accepted ? 'Goal added' : 'Suggestion accepted', description: s.title });
                   } catch (err: unknown) {
+                    try { identity.assertCurrent(); } catch { return; }
                     toast({ title: 'Failed to accept', description: err instanceof Error ? err.message : String(err), variant: 'destructive' });
                   }
                 }}
@@ -129,9 +140,9 @@ const SuggestedGoalsForSource: React.FC<SuggestedGoalsForSourceProps> = ({ noteb
                 }`}
               >
                 {accepted ? (
-                  <><i className="fi fi-rr-check text-[9px] mr-1"></i>Added</>
+                  <><i aria-hidden="true" className="fi fi-rr-check text-[9px] mr-1"></i>Added</>
                 ) : (
-                  <><i className="fi fi-rr-plus text-[9px] mr-1"></i>Add</>
+                  <><i aria-hidden="true" className="fi fi-rr-plus text-[9px] mr-1"></i>Add</>
                 )}
               </Button>
             </div>

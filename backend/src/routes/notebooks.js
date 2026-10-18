@@ -7,6 +7,7 @@ import { deepDiveBookmarks } from "../services/bookmarkDeepDiveService.js";
 import { brokerResearchGoals } from "../services/goalBrokerService.js";
 import { MemoryService } from "../services/memoryService.js";
 import { chatWithNotebook } from "../services/aiChatService.js";
+import { createChatRequestBudget } from "../utils/chatRequestBudget.js";
 import { researchNotebook } from "../services/researchService.js";
 import { discoverSources } from "../services/discoverService.js";
 import { MasticationService } from "../services/masticationService.js";
@@ -76,7 +77,7 @@ async function getNotebookOrRecover(
       `🛠️ JIT Recovery: Notebook ${id} missing. Attempting auto-provision...`,
     );
     try {
-      await dbHelpers.createNotebook(
+      await dbHelpers.recoverNotebookIfAbsent(
         id,
         userId,
         "Recovered Notebook",
@@ -1222,6 +1223,21 @@ router.post(
  * Human/Agent conversation endpoint powered by notebook context
  */
 router.post("/:id/chat", requireScope("chat:all"), async (req, res) => {
+  const hostedChat = process.env.VERCEL === "1";
+  const hostedResponseDeadline = Date.now() + 60_000;
+  // Leave 20 seconds of the hosted function window for persistence and delivery.
+  const requestBudget = createChatRequestBudget({ req, res,
+    ...(hostedChat ? { timeoutMs: 40_000 } : {}),
+  });
+  const notifyChatActivity = async (...args) => {
+    // A webhook allows 10 seconds; reserve another 2 seconds for the response.
+    // Skip optional notification rather than launch work after the response.
+    if (hostedChat && hostedResponseDeadline - Date.now() < 12_000) {
+      logger.warn("Skipping optional chat notification: insufficient hosted response reserve");
+      return;
+    }
+    await WebhookDispatcher.recordActivityAndNotify(...args);
+  };
   try {
     const {
       message,
@@ -1466,7 +1482,7 @@ router.post("/:id/chat", requireScope("chat:all"), async (req, res) => {
         );
       }
 
-      await WebhookDispatcher.recordActivityAndNotify(
+      await notifyChatActivity(
         notebookId,
         userId,
         callerIsAgent ? getActorName(req) : "human",
@@ -1486,7 +1502,7 @@ router.post("/:id/chat", requireScope("chat:all"), async (req, res) => {
     }
 
     try {
-      const chatResult = await chatWithNotebook({
+      const chatResult = await requestBudget.run(() => chatWithNotebook({
         notebook,
         sources: scopedSources,
         notes,
@@ -1495,7 +1511,8 @@ router.post("/:id/chat", requireScope("chat:all"), async (req, res) => {
         callerType: callerIsAgent ? "agent" : "human",
         responseStyle,
         allowWebFallback: requestedSourceIds.length === 0,
-      });
+        requestBudget,
+      }));
 
       // Persist the complete turn only after a response was generated.
       await dbHelpers.createChatMessage(
@@ -1512,7 +1529,7 @@ router.post("/:id/chat", requireScope("chat:all"), async (req, res) => {
         userId,
         "assistant",
         chatResult.answer,
-        chatResult.groundedSources,
+        { version: 1, sourceIds: chatResult.groundedSources || [], citations: chatResult.citations || [] },
       );
 
       let noteId = null;
@@ -1529,7 +1546,7 @@ router.post("/:id/chat", requireScope("chat:all"), async (req, res) => {
         );
       }
 
-      await WebhookDispatcher.recordActivityAndNotify(
+      await notifyChatActivity(
         notebookId,
         userId,
         callerIsAgent ? getActorName(req) : "human",
@@ -1548,6 +1565,11 @@ router.post("/:id/chat", requireScope("chat:all"), async (req, res) => {
         sourceScope: requestedSourceIds,
       });
     } catch (aiError) {
+      if (res.destroyed || requestBudget.signal.reason?.code === "CHAT_REQUEST_CANCELLED") return;
+      if (requestBudget.signal.aborted) {
+        return res.status(504).json({ code: "CHAT_TIMEOUT",
+          error: "The answer took too long to verify. Please try a more specific question." });
+      }
       logger.error("AI chat processing error:", aiError);
       if (aiError?.code === "NO_USABLE_SOURCES") {
         return res.status(422).json({
@@ -1562,6 +1584,12 @@ router.post("/:id/chat", requireScope("chat:all"), async (req, res) => {
           code: "PROVIDER_UNAVAILABLE",
         });
       }
+      if (aiError?.code === "GROUNDING_UNAVAILABLE") {
+        return res.status(422).json({
+          error: "The answer could not be verified against your sources. Please try a more specific question.",
+          code: "GROUNDING_UNAVAILABLE",
+        });
+      }
       res.status(500).json({ error: "AI processing failed" });
     }
   } catch (error) {
@@ -1574,6 +1602,8 @@ router.post("/:id/chat", requireScope("chat:all"), async (req, res) => {
       });
     }
     res.status(500).json({ error: "Failed to process chat" });
+  } finally {
+    requestBudget.dispose();
   }
 });
 
@@ -2298,7 +2328,7 @@ router.delete(
 
 /**
  * POST /api/notebooks/:id/research-goals/:goalId/artifacts
- * Link an artifact (note, mission result, etc.) to a goal
+ * Link a saved note or completed mission result to a goal
  */
 router.post(
   "/:id/research-goals/:goalId/artifacts",
@@ -2307,7 +2337,7 @@ router.post(
   async (req, res) => {
     try {
       const { artifactId } = req.body;
-      if (!artifactId)
+      if (typeof artifactId !== "string" || !artifactId.trim())
         return res.status(400).json({ error: "artifactId is required" });
       const goal = await dbHelpers.getGoalById(req.params.goalId);
       if (!goal || goal.notebookId !== req.params.id) {
@@ -2316,7 +2346,11 @@ router.post(
       const updated = await dbHelpers.linkArtifactToGoal(
         req.params.goalId,
         artifactId,
+        req.params.id,
+        req.user.userId,
       );
+      if (!updated)
+        return res.status(404).json({ error: "Artifact not found in this notebook" });
       res.json({ goal: updated });
     } catch (error) {
       logger.error("Failed to link artifact to goal:", error);
@@ -2402,29 +2436,12 @@ router.post(
   requireNotebookAccess,
   async (req, res) => {
     try {
-      const suggestions = await dbHelpers.getSignalQueueSuggestionsBySource(
-        req.params.sourceId,
+      const accepted = await dbHelpers.acceptSignalQueueSuggestion(
+        req.params.sourceId, req.params.id, req.user.userId, req.params.suggestionId,
       );
-      const suggestion = suggestions.find(
-        (s) => s.id === req.params.suggestionId,
-      );
-      if (!suggestion)
-        return res.status(404).json({ error: "Suggestion not found" });
-      const goalId = await dbHelpers.createGoal({
-        userId: req.user.userId,
-        notebookId: req.params.id,
-        title: suggestion.title,
-        description: suggestion.rationale,
-        sourceId: req.params.sourceId,
-        sourceChunkId:
-          Array.isArray(suggestion.sourceChunkIndices) &&
-          suggestion.sourceChunkIndices[0] != null
-            ? String(suggestion.sourceChunkIndices[0])
-            : null,
-        priority: "medium",
-        status: "active",
-      });
-      const goal = await dbHelpers.getGoalById(goalId);
+      if (!accepted) return res.status(404).json({ error: "Suggestion not found" });
+      const { goal, created } = accepted;
+      if (created)
       await dbHelpers.createActivityLog(
         req.params.id,
         req.user.userId,
@@ -2432,7 +2449,7 @@ router.post(
         "accept_suggested_goal",
         `Accepted suggested goal "${goal.title}"`,
       );
-      res.status(201).json({ goal });
+      res.status(created ? 201 : 200).json({ goal });
     } catch (error) {
       logger.error("Failed to accept suggested goal:", error);
       res.status(500).json({ error: "Failed to accept suggested goal" });

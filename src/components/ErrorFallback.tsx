@@ -1,8 +1,10 @@
-import React from 'react';
+import React, { useSyncExternalStore } from 'react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardFooter, CardHeader, CardTitle } from '@/components/ui/card';
 // import { AlertTriangle, RefreshCw, Home } from 'lucide-react'; // Removed Lucide imports
 import { useNavigate } from 'react-router-dom';
+import { isModuleLoadError, reloadAfterModuleFailure } from '@/lib/moduleLoadRecovery';
+import { hasActiveSourceUploads, subscribeUploadInterruptions } from '@/lib/sources/sourceUploadInterruption';
 
 export interface ErrorFallbackProps {
   error?: Error;
@@ -24,10 +26,24 @@ const ErrorFallback: React.FC<ErrorFallbackProps> = ({
   showDetails = import.meta.env.DEV,
 }) => {
   const navigate = useNavigate();
+  const activeUploads = useSyncExternalStore(subscribeUploadInterruptions, hasActiveSourceUploads, () => false);
 
   const handleGoHome = () => {
     navigate('/');
   };
+
+  if (isModuleLoadError(error)) {
+    return (
+      <div role="alert" className={variant === 'page'
+        ? 'min-h-screen flex flex-col items-center justify-center gap-4 p-6 text-center'
+        : 'flex flex-col items-center justify-center gap-4 rounded-lg border p-6 text-center'}>
+        <h2 className="text-lg font-semibold">Part of StudyPod could not load</h2>
+        <p className="max-w-md text-sm">Check your connection, then reload StudyPod to try loading it again. Reloading may discard unsaved edits.</p>
+        {activeUploads && <p className="max-w-md text-sm">Source uploads are still active or queued in this tab. Wait for them to finish before reloading so their original files are preserved.</p>}
+        <Button disabled={activeUploads} onClick={() => reloadAfterModuleFailure()}>Reload StudyPod</Button>
+      </div>
+    );
+  }
 
   if (variant === 'page') {
     return (

@@ -193,7 +193,8 @@ function cooldownProvider(name, durationMs = RATE_LIMIT_COOLDOWN_MS) {
   providerCooldowns.set(name, Date.now() + durationMs);
 }
 
-function waitForProviderCapacity(deadline) {
+function waitForProviderCapacity(deadline, signal) {
+  signal?.throwIfAborted();
   const timeoutMs = Math.max(0, deadline - Date.now());
   if (timeoutMs === 0) return Promise.resolve();
 
@@ -201,9 +202,11 @@ function waitForProviderCapacity(deadline) {
     let timer;
     const finish = () => {
       if (timer) clearTimeout(timer);
+      signal?.removeEventListener("abort", finish);
       capacityWaiters.delete(finish);
       resolve();
     };
+    signal?.addEventListener("abort", finish, { once: true });
     capacityWaiters.add(finish);
     timer = setTimeout(finish, timeoutMs);
   });
@@ -241,6 +244,7 @@ function getChatOutputTokenLimit(titan, messages, priority) {
 }
 
 async function fetchWithTimeout(url, options, timeoutMs = FETCH_TIMEOUT_MS) {
+  if (options.signal) return fetch(url, options);
   const controller = new AbortController();
   const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
   try {
@@ -347,6 +351,7 @@ async function makeOpenAIResponsesRequest(
   messages,
   priority,
   timeoutMs,
+  signal,
 ) {
   const instructions = messages
     .filter((message) => message.role === "system")
@@ -362,6 +367,7 @@ async function makeOpenAIResponsesRequest(
   const response = await fetchWithTimeout(
     titan.url,
     {
+      signal,
       method: "POST",
       headers: {
         Authorization: `Bearer ${titan.key}`,
@@ -403,6 +409,7 @@ async function makeChatCompletionsRequest(
   temperature,
   priority,
   timeoutMs,
+  signal,
 ) {
   const isNvidia = titan.provider === "nvidia";
   const systemContent = isNvidia
@@ -427,11 +434,15 @@ async function makeChatCompletionsRequest(
   const response = await fetchWithTimeout(
     titan.url,
     {
+      signal,
       method: "POST",
       headers,
       body: JSON.stringify({
         model: titan.model,
         messages: wireMessages,
+        // Interactive local tasks must produce the answer within the existing
+        // deadline instead of spending the budget on Qwen's default thinking.
+        ...(titan.provider === "ollama" ? { reasoning_effort: "none" } : {}),
         ...(isNvidia && systemContent ? { instructions: systemContent } : {}),
         temperature,
         max_tokens: priority === "context" ? 8_000 : 4_000,
@@ -457,7 +468,7 @@ async function makeChatCompletionsRequest(
   };
 }
 
-async function makeAnthropicRequest(titan, messages, temperature, timeoutMs) {
+async function makeAnthropicRequest(titan, messages, temperature, timeoutMs, signal) {
   const system = messages
     .filter((message) => message.role === "system")
     .map((message) => message.content)
@@ -472,6 +483,7 @@ async function makeAnthropicRequest(titan, messages, temperature, timeoutMs) {
   const response = await fetchWithTimeout(
     titan.url,
     {
+      signal,
       method: "POST",
       headers: {
         "x-api-key": titan.key,
@@ -505,18 +517,26 @@ async function makeAnthropicRequest(titan, messages, temperature, timeoutMs) {
   };
 }
 
-function requestProvider(titan, messages, temperature, priority, timeoutMs) {
-  if (titan.protocol === "responses")
-    return makeOpenAIResponsesRequest(titan, messages, priority, timeoutMs);
-  if (titan.protocol === "anthropic")
-    return makeAnthropicRequest(titan, messages, temperature, timeoutMs);
-  return makeChatCompletionsRequest(
-    titan,
-    messages,
-    temperature,
-    priority,
-    timeoutMs,
-  );
+async function requestProvider(titan, messages, temperature, priority, timeoutMs, signal) {
+  signal?.throwIfAborted();
+  const controller = new AbortController();
+  const abort = () => controller.abort(signal?.reason);
+  signal?.addEventListener("abort", abort, { once: true });
+  if (signal?.aborted) abort();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    let result;
+    if (titan.protocol === "responses")
+      result = await makeOpenAIResponsesRequest(titan, messages, priority, timeoutMs, controller.signal);
+    else if (titan.protocol === "anthropic")
+      result = await makeAnthropicRequest(titan, messages, temperature, timeoutMs, controller.signal);
+    else result = await makeChatCompletionsRequest(titan, messages, temperature, priority, timeoutMs, controller.signal);
+    controller.signal.throwIfAborted();
+    return result;
+  } finally {
+    clearTimeout(timer);
+    signal?.removeEventListener("abort", abort);
+  }
 }
 
 /**
@@ -526,15 +546,34 @@ export async function dispatchToTitan({
   messages,
   priority = "context",
   temperature = 0.7,
+  timeoutMs,
+  signal,
 }) {
+  signal?.throwIfAborted();
+  const budget = Number.isFinite(timeoutMs) ? Math.max(0, Math.min(TOTAL_TIMEOUT_MS, timeoutMs)) : TOTAL_TIMEOUT_MS;
+  const controller = new AbortController();
+  const abort = () => controller.abort(signal?.reason);
+  signal?.addEventListener("abort", abort, { once: true });
+  if (signal?.aborted) abort();
+  const timer = setTimeout(() => controller.abort(), budget);
+  try {
+  return await dispatchWithinDeadline({ messages, priority, temperature, deadline: Date.now() + budget, signal: controller.signal });
+  } finally {
+    clearTimeout(timer);
+    signal?.removeEventListener("abort", abort);
+  }
+}
+
+async function dispatchWithinDeadline({ messages, priority, temperature, deadline, signal }) {
+  signal.throwIfAborted();
   const chain = PRIORITY_CHAINS[priority] || PRIORITY_CHAINS.context;
-  const deadline = Date.now() + TOTAL_TIMEOUT_MS;
   const attempted = new Set();
 
   while (deadline - Date.now() >= 1_000) {
     let capacityBlocked = false;
 
     for (const name of chain) {
+      signal.throwIfAborted();
       if (attempted.has(name)) continue;
       const remainingMs = deadline - Date.now();
       if (remainingMs < 1_000) break;
@@ -557,10 +596,12 @@ export async function dispatchToTitan({
           temperature,
           priority,
           requestTimeoutMs,
+          signal,
         );
         logger.info(`[Titan] ${name} completed a request with ${titan.model}`);
         return result;
       } catch (error) {
+        signal.throwIfAborted();
         let handledError = error;
 
         if (
@@ -578,13 +619,15 @@ export async function dispatchToTitan({
               messages,
               temperature,
               priority,
-              requestTimeoutMs,
+              Math.min(FETCH_TIMEOUT_MS, Math.max(0, deadline - Date.now())),
+              signal,
             );
             logger.info(
               `[Titan] GROQ completed a request with fallback model ${GROQ_FALLBACK_MODEL}`,
             );
             return result;
           } catch (fallbackError) {
+            signal.throwIfAborted();
             handledError = fallbackError;
           }
         }
@@ -619,7 +662,8 @@ export async function dispatchToTitan({
 
     if (!capacityBlocked) break;
     logger.debug("[Titan] Waiting for bounded provider capacity.");
-    await waitForProviderCapacity(deadline);
+    await waitForProviderCapacity(deadline, signal);
+    signal.throwIfAborted();
   }
 
   logger.warn("[Titan] No configured provider completed the request.");

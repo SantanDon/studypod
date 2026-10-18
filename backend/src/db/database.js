@@ -2,11 +2,15 @@ import { createClient as createWebClient } from "@libsql/client/web";
 import { construct as drizzle } from "drizzle-orm/libsql/driver-core";
 import { migrate } from "drizzle-orm/libsql/migrator";
 import * as schema from "./schema.js";
+import { createGoalArtifactRepository } from "./goalArtifactRepository.js";
+import { ensureStudioSchema } from "./studioBootstrap.js";
+import { createSuggestedGoalsRepository, ensureSuggestedGoalSchema } from "./suggestedGoalsRepository.js";
 import dotenv from "dotenv";
 import { fileURLToPath } from "url";
 import { dirname, join } from "path";
 import { eq, sql, and, or, desc, asc, inArray, lt } from "drizzle-orm";
 import { logger } from "../utils/logger.js";
+import { recoverNotebookIfAbsent } from "./notebookRecovery.js";
 import { createSingleFlight } from "../utils/singleFlight.js";
 import { withDatabaseRetry } from "../utils/databaseRetry.js";
 
@@ -432,6 +436,17 @@ async function runDatabaseInitialization() {
     );
   }
 
+  // Historical notebook_members tables lack the declared foreign key.
+  // A delete trigger covers existing schemas and every notebook deletion path
+  // atomically, without rebuilding the table or changing membership data.
+  await db.run(sql`CREATE TRIGGER IF NOT EXISTS "notebook_members_notebook_delete"
+    AFTER DELETE ON "notebooks"
+    BEGIN
+      DELETE FROM "notebook_members" WHERE "notebook_id" = OLD."id";
+    END`);
+
+  await ensureStudioSchema(db);
+  await ensureSuggestedGoalSchema(db);
   logger.info("Database initialization complete.");
 }
 
@@ -736,6 +751,12 @@ export const dbHelpers = {
       sources: allSources.filter((s) => s.notebookId === nb.id),
       notes: allNotes.filter((n) => n.notebookId === nb.id),
     }));
+  },
+
+  async recoverNotebookIfAbsent(id, userId, title, description = null) {
+    const db = await getDatabase();
+    const joinCode = Math.random().toString(36).substring(2, 8).toUpperCase();
+    await recoverNotebookIfAbsent(db, id, userId, title, description, joinCode);
   },
 
   async createNotebook(id, userId, title, description = null) {
@@ -1345,22 +1366,10 @@ export const dbHelpers = {
     return await this.getGoalById(goalId);
   },
 
-  async linkArtifactToGoal(goalId, artifactId) {
-    const db = await getDatabase();
-    const goal = await this.getGoalById(goalId);
-    if (!goal) return null;
-    const ids = Array.from(
-      new Set([...(goal.linkedArtifactIds || []), artifactId]),
+  async linkArtifactToGoal(goalId, artifactId, notebookId, userId) {
+    return createGoalArtifactRepository(getDatabase).linkArtifactToGoal(
+      goalId, artifactId, notebookId, userId,
     );
-    await db
-      .update(schema.researchGoals)
-      .set({
-        linkedArtifactIds: JSON.stringify(ids),
-        lastActivityAt: new Date(),
-        updatedAt: new Date(),
-      })
-      .where(eq(schema.researchGoals.id, goalId));
-    return await this.getGoalById(goalId);
   },
 
   async computeGoalProgress(goalId) {
@@ -1396,69 +1405,7 @@ export const dbHelpers = {
     };
   },
 
-  // Signal queue suggestions (cache for active source)
-  async upsertSignalQueueSuggestion({
-    id,
-    sourceId,
-    notebookId,
-    userId,
-    title,
-    rationale,
-    sourceChunkIndices,
-    confidence = 0.5,
-    status = "pending",
-  }) {
-    const db = await getDatabase();
-    const existing = await db
-      .select()
-      .from(schema.signalQueueSuggestions)
-      .where(
-        and(
-          eq(schema.signalQueueSuggestions.sourceId, sourceId),
-          eq(schema.signalQueueSuggestions.title, title),
-        ),
-      )
-      .limit(1);
-    const indices = JSON.stringify(sourceChunkIndices || []);
-    if (existing[0]) {
-      await db
-        .update(schema.signalQueueSuggestions)
-        .set({
-          rationale,
-          sourceChunkIndices: indices,
-          confidence,
-          status,
-          updatedAt: new Date(),
-        })
-        .where(eq(schema.signalQueueSuggestions.id, existing[0].id));
-      return existing[0].id;
-    }
-    const sugId = id || "sug-" + Math.random().toString(36).substring(2, 12);
-    await db.insert(schema.signalQueueSuggestions).values({
-      id: sugId,
-      sourceId,
-      notebookId,
-      userId,
-      title,
-      rationale,
-      sourceChunkIndices: indices,
-      confidence,
-      status,
-    });
-    return sugId;
-  },
-
-  async getSignalQueueSuggestionsBySource(sourceId) {
-    const db = await getDatabase();
-    return await db
-      .select()
-      .from(schema.signalQueueSuggestions)
-      .where(eq(schema.signalQueueSuggestions.sourceId, sourceId))
-      .orderBy(
-        desc(schema.signalQueueSuggestions.confidence),
-        desc(schema.signalQueueSuggestions.createdAt),
-      );
-  },
+  ...createSuggestedGoalsRepository(getDatabase),
 
   // Sovereign Bridge - Activity Log
   async createActivityLog(

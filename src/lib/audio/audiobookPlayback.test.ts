@@ -69,6 +69,28 @@ const manifest = {
 } as Pick<AudiobookPlaybackManifest, "chapters">;
 
 describe("audiobookPlayback", () => {
+  it("restores durable rate and position in a fresh context without a local checkpoint", () => {
+    const initial = mergeAudiobookListenerState(null, null, "render-one");
+    expect(initial.updatedAt).toBe(new Date(0).toISOString());
+    const durable = {
+      renderId: "render-one",
+      currentChapterId: "chapter-three",
+      currentTimeSeconds: 18,
+      playbackRate: 1.5,
+      updatedAt: "2026-07-26T12:00:00.000Z",
+    };
+    const restored = mergeAudiobookListenerState(durable, initial, "render-one");
+    expect(restored).toMatchObject(durable);
+    expect(mergeAudiobookListenerState(restored, null, "render-one")).toMatchObject(durable);
+  });
+
+  it("keeps a genuinely newer local speed change during manifest refresh", () => {
+    const durable = { playbackRate: 1.5, currentTimeSeconds: 18, updatedAt: "2026-07-26T12:00:00.000Z" };
+    const local = { playbackRate: 1.75, currentTimeSeconds: 24, updatedAt: "2026-07-26T13:00:00.000Z" };
+    expect(mergeAudiobookListenerState(durable, local, "render-one")).toMatchObject(local);
+    expect(mergeAudiobookListenerState(local, durable, "render-one")).toMatchObject(local);
+  });
+
   it("merges newer local position with durable completed chapters", () => {
     const merged = mergeAudiobookListenerState(
       {

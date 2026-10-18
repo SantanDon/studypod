@@ -1,10 +1,13 @@
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { localStorageService } from "@/services/localStorageService";
 import { useToast } from "@/hooks/use-toast";
+import { useAuth } from "@/hooks/useAuth";
+import { ApiService } from "@/services/apiService";
 
-export const useSourceUpdate = () => {
+export const useSourceUpdate = (notebookId?: string) => {
   const queryClient = useQueryClient();
   const { toast } = useToast();
+  const { session } = useAuth();
 
   const updateSource = useMutation({
     mutationFn: async ({
@@ -14,31 +17,27 @@ export const useSourceUpdate = () => {
       sourceId: string;
       title: string;
     }) => {
-      console.log("Updating source:", sourceId, "with title:", title);
-
-      // Update the source in local storage
-      const updatedSource = localStorageService.updateSource(sourceId, {
-        title,
-      });
+      if (session?.access_token && !notebookId) {
+        throw new Error("Notebook required to rename this source");
+      }
+      const updatedSource = session?.access_token
+        ? await ApiService.updateSource(notebookId!, sourceId, { title }, session.access_token)
+        : localStorageService.updateSource(sourceId, { title });
 
       if (!updatedSource) {
-        console.error("Error updating source:", sourceId);
         throw new Error("Source not found");
       }
 
-      console.log("Source updated successfully");
       return updatedSource;
     },
     onSuccess: () => {
-      console.log("Update mutation success, invalidating queries");
-      queryClient.invalidateQueries({ queryKey: ["sources"] });
+      void queryClient.invalidateQueries({ queryKey: notebookId ? ["sources", notebookId] : ["sources"] });
       toast({
         title: "Source renamed",
         description: "The source has been successfully renamed.",
       });
     },
-    onError: (error) => {
-      console.error("Update mutation error:", error);
+    onError: () => {
       toast({
         title: "Error",
         description: "Failed to rename the source. Please try again.",
@@ -48,7 +47,7 @@ export const useSourceUpdate = () => {
   });
 
   return {
-    updateSource: updateSource.mutate,
+    updateSource: updateSource.mutateAsync,
     isUpdating: updateSource.isPending,
   };
 };

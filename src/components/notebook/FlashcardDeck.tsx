@@ -1,4 +1,5 @@
-import React, { useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
+import type { Flashcard } from '@/types/flashcard';
 import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
@@ -55,7 +56,9 @@ const FlashcardDeckComponent: React.FC<FlashcardDeckProps> = ({ notebookId }) =>
   const [selectedSourceId, setSelectedSourceId] = useState<string>('');
   const [numCards, setNumCards] = useState(5);
   const [reviewingDeckId, setReviewingDeckId] = useState<string | null>(null);
+  const [reviewCards, setReviewCards] = useState<Flashcard[]>([]);
   const [generateError, setGenerateError] = useState<string | null>(null);
+  const [generationSummary, setGenerationSummary] = useState<string | null>(null);
 
   const {
     decks,
@@ -65,12 +68,29 @@ const FlashcardDeckComponent: React.FC<FlashcardDeckProps> = ({ notebookId }) =>
     isCreatingDeck,
     deleteDeck,
     isDeletingDeck,
-    reviewCard,
+    reviewCardAsync,
+    scopeKey,
+    loadError,
+    mutationError,
     isReviewing,
     generateFromSource,
     getDueCards,
     getDeckStats,
   } = useFlashcards(notebookId);
+
+  const currentScopeRef = useRef(scopeKey);
+  currentScopeRef.current = scopeKey;
+
+  useEffect(() => {
+    setReviewingDeckId(null);
+    setReviewCards([]);
+    setIsCreateOpen(false);
+    setIsGenerateOpen(false);
+    setSelectedDeckId(null);
+    setSelectedSourceId('');
+    setGenerateError(null);
+    setGenerationSummary(null);
+  }, [scopeKey]);
 
   const { sources } = useSources(notebookId);
   const usableSources = sources.filter(isSourceUsableForGroundedWork);
@@ -99,18 +119,23 @@ const FlashcardDeckComponent: React.FC<FlashcardDeckProps> = ({ notebookId }) =>
     }
 
     setGenerateError(null);
+    setGenerationSummary(null);
+    const generationScope = scopeKey;
     
     try {
-      await generateFromSource(
+      const savedCards = await generateFromSource(
         selectedDeckId,
         source.id,
         source.title,
         source.content,
         numCards
       );
+      if (currentScopeRef.current !== generationScope) return;
+      setGenerationSummary(`Saved ${savedCards.length} of ${numCards} requested cards. Only source-backed cards were added.`);
       setIsGenerateOpen(false);
       setSelectedSourceId('');
     } catch (error) {
+      if (currentScopeRef.current !== generationScope) return;
       setGenerateError(
         error instanceof Error ? error.message : 'Failed to generate flashcards'
       );
@@ -118,20 +143,21 @@ const FlashcardDeckComponent: React.FC<FlashcardDeckProps> = ({ notebookId }) =>
   };
 
   const handleStartReview = (deckId: string) => {
+    setReviewCards(getDueCards(deckId).map(card => ({ ...card })));
     setReviewingDeckId(deckId);
   };
 
   const handleCloseReview = () => {
     setReviewingDeckId(null);
+    setReviewCards([]);
   };
 
   const handleReviewCard = (deckId: string, cardId: string, quality: 0 | 1 | 2 | 3 | 4 | 5) => {
-    reviewCard({ deckId, cardId, quality });
+    return reviewCardAsync({ deckId, cardId, quality });
   };
 
   if (reviewingDeckId) {
     const deck = decks.find(d => d.id === reviewingDeckId);
-    const dueCards = deck ? getDueCards(reviewingDeckId) : [];
     
     return (
       <div className="flex h-full min-h-[520px] flex-col p-4">
@@ -144,7 +170,8 @@ const FlashcardDeckComponent: React.FC<FlashcardDeckProps> = ({ notebookId }) =>
         </div>
         <div className="min-h-0 flex-1 overflow-hidden">
           <FlashcardView
-            cards={dueCards}
+            key={`${scopeKey}:${reviewingDeckId}`}
+            cards={reviewCards}
             deckId={reviewingDeckId}
             onReview={handleReviewCard}
             onClose={handleCloseReview}
@@ -157,6 +184,8 @@ const FlashcardDeckComponent: React.FC<FlashcardDeckProps> = ({ notebookId }) =>
 
   return (
     <div className="flex flex-col h-full">
+      {(loadError || mutationError) && <p role="alert" className="p-4 text-sm text-destructive">{loadError || mutationError}</p>}
+      {generationSummary && <p role="status" className="px-4 pt-4 text-sm text-muted-foreground">{generationSummary}</p>}
       <div className="p-4 border-b border-border">
         <div className="flex items-center justify-between mb-3">
           <h3 className="font-medium text-foreground flex items-center gap-2">
@@ -245,7 +274,7 @@ const FlashcardDeckComponent: React.FC<FlashcardDeckProps> = ({ notebookId }) =>
                 </div>
 
                 <div>
-                  <label className="text-sm font-medium mb-1 block">Number of Cards</label>
+                  <label className="text-sm font-medium mb-1 block">Target Number of Cards</label>
                   <Select value={String(numCards)} onValueChange={(v) => setNumCards(Number(v))}>
                     <SelectTrigger>
                       <SelectValue />
@@ -258,6 +287,8 @@ const FlashcardDeckComponent: React.FC<FlashcardDeckProps> = ({ notebookId }) =>
                     </SelectContent>
                   </Select>
                 </div>
+
+                <p className="text-xs text-muted-foreground">Card count is a target. Fewer source-backed cards may be saved.</p>
 
                 {generateError && (
                   <p className="text-sm text-red-600 dark:text-red-400">{generateError}</p>

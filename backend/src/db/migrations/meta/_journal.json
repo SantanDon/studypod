@@ -15,6 +15,20 @@
       "when": 1784368458808,
       "tag": "0001_document_workspace",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "6",
+      "when": 1791849600000,
+      "tag": "0002_private_studio",
+      "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "6",
+      "when": 1791936000000,
+      "tag": "0003_private_maps",
+      "breakpoints": true
     }
   ]
 }

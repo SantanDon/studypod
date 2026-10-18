@@ -46,16 +46,9 @@ export async function uploadPdfToServer(file: File): Promise<ExtractionResult> {
       // Create a more user-friendly error message
       const errorMessage = `Client-side PDF processing failed for "${file.name}". ${error instanceof Error ? error.message : String(error)}`;
       
-      return {
-        content: errorMessage,
-        metadata: {
-          pageCount: 0,
-          wordCount: 0,
-          charCount: errorMessage.length,
-          extractionMethod: "client-failed",
-        },
-        chunks: []
-      };
+      // Extraction errors are not source content. Reject so the upload flow
+      // cannot save this message and subsequently mark the PDF as ready.
+      throw new Error(errorMessage);
     }
   }
   

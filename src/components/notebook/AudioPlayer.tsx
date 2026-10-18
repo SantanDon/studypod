@@ -103,7 +103,7 @@ const AudioPlayer = ({
         </div>
         <DropdownMenu>
           <DropdownMenuTrigger asChild>
-            <Button variant="ghost" size="sm" disabled={isDeleting}>
+            <Button variant="ghost" size="sm" disabled={isDeleting} aria-label={`${title} audio options`}>
               {isDeleting ? (
                 <Loader2 className="h-4 w-4 animate-spin" />
               ) : (

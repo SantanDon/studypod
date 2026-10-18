@@ -10,7 +10,9 @@ A request such as `Read this whole PDF aloud`, `Make a podcast about planetary o
 
 `Check my podcast status`, `Cancel my podcast`, and `Download my audiobook` route to the corresponding status/cancellation/Studio controls. Download requests open the existing player/download view; they do not invent an artifact URL before an export is ready. Podcast audio can also play in the chat action card once a blob is available.
 
-Full narration requires a source with a server-side book manifest (`metadata.fileName` and chapter metadata) and the local audiobook runtime. A normal PDF upload lacking that manifest must first be imported through Audiobook Studio. An explicit chapter/page request opens the chapter selector rather than silently rendering the entire book.
+Full narration requires an available audiobook runtime. Existing imported books retain their book manifests. For a ready web/text/document source without a book manifest, a confirmed chat request prepares the complete **available source text** through that same owned extraction service and stores its narration manifest in nested metadata; it never substitutes the chat answer or source summary. The original source metadata is retained and the preparation is invalidated if its text changes. This is not certification that every page of an original PDF was extracted. An explicit chapter/page request opens selection rather than silently rendering the entire source.
+
+Requests such as `can u generate it as a audio book` now route to the confirmation card. Missing/unreachable narration services produce an explicit capability message, not a model claim that the whole application is text-only. Podcast depth controls are labelled separately: a brief/standard/deep-dive discussion is transformed commentary, while narration duration follows the source and reading speed. This remains a bounded audio-command integration; not every other Studio tool is yet callable from arbitrary chat wording.
 
 ## State, scoping and safety
 

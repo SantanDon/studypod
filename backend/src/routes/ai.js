@@ -41,6 +41,9 @@ function normalizeMessages(value) {
 }
 
 router.post('/generate', requireScope('chat:all'), async (req, res) => {
+  const controller = new AbortController();
+  const onClose = () => { if (!res.writableFinished) controller.abort(); };
+  res.on('close', onClose);
   try {
     const messages = normalizeMessages(req.body.messages);
     if (!messages) {
@@ -56,9 +59,14 @@ router.post('/generate', requireScope('chat:all'), async (req, res) => {
       ? Math.min(1.5, Math.max(0, parsedTemperature))
       : 0.7;
 
-    const result = await dispatchToTitan({ messages, priority, temperature });
+    const timeoutMs = req.body.timeoutMs;
+    if (timeoutMs !== undefined && (typeof timeoutMs !== 'number' || !Number.isFinite(timeoutMs) || timeoutMs <= 0)) {
+      return res.status(400).json({ error: 'timeoutMs must be a positive finite number' });
+    }
+    const result = await dispatchToTitan({ messages, priority, temperature, timeoutMs, signal: controller.signal });
     res.json(result);
   } catch (error) {
+    if (controller.signal.aborted) return;
     if (error.code === 'PROVIDER_UNAVAILABLE') {
       return res.status(503).json({
         error: 'No server AI provider is currently available. Configure OPENAI_API_KEY or another server provider.',
@@ -67,6 +75,8 @@ router.post('/generate', requireScope('chat:all'), async (req, res) => {
     }
     logger.error('Server AI generation failed:', error);
     res.status(500).json({ error: 'AI generation failed' });
+  } finally {
+    res.removeListener('close', onClose);
   }
 });
 

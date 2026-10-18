@@ -14,6 +14,8 @@ import { Textarea } from "@/components/ui/textarea";
 import { useAuth } from "@/hooks/useAuth";
 import { useToast } from "@/hooks/use-toast";
 import ApiService, { AgentMission } from "@/services/apiService";
+import { useQueryClient } from "@tanstack/react-query";
+import { useStudioIdentity } from "@/services/studioApiService";
 
 interface AgentMissionPanelProps {
   notebookId: string;
@@ -41,6 +43,11 @@ function resultSummary(mission: AgentMission) {
 const AgentMissionPanel = ({ notebookId }: AgentMissionPanelProps) => {
   const { session } = useAuth();
   const { toast } = useToast();
+  const queryClient = useQueryClient();
+  const identity = useStudioIdentity(notebookId);
+  const isCurrent = useCallback(() => {
+    try { identity.assertCurrent(); return true; } catch { return false; }
+  }, [identity.key, identity.ready]);
   const [missions, setMissions] = useState<AgentMission[]>([]);
   const [goal, setGoal] = useState("");
   const [loading, setLoading] = useState(true);
@@ -59,8 +66,13 @@ const AgentMissionPanel = ({ notebookId }: AgentMissionPanelProps) => {
       if (!quiet) setLoading(true);
       try {
         const response = await ApiService.fetchAgentMissions(notebookId, token);
+        if (!isCurrent()) return;
         setMissions(response.missions);
+        if (response.missions.some((mission) => mission.result?.noteId)) {
+          void queryClient.invalidateQueries({ queryKey: ['notes', notebookId] });
+        }
       } catch (error) {
+        if (!isCurrent()) return;
         if (!quiet) {
           toast({
             title: "Could not load missions",
@@ -70,15 +82,21 @@ const AgentMissionPanel = ({ notebookId }: AgentMissionPanelProps) => {
           });
         }
       } finally {
-        if (!quiet) setLoading(false);
+        if (!quiet && isCurrent()) setLoading(false);
       }
     },
-    [notebookId, toast, token],
+    [notebookId, toast, token, isCurrent, queryClient],
   );
 
   useEffect(() => {
-    void loadMissions();
-  }, [loadMissions]);
+    setMissions([]);
+    setGoal('');
+    setExpandedId(null);
+    setCreating(false);
+    setRunningId(null);
+  }, [identity.key]);
+
+  useEffect(() => { void loadMissions(); }, [loadMissions]);
 
   const hasRunningMission = missions.some(
     (mission) => mission.status === "running",
@@ -93,6 +111,7 @@ const AgentMissionPanel = ({ notebookId }: AgentMissionPanelProps) => {
   }, [hasRunningMission, loadMissions]);
 
   const runMission = async (mission: AgentMission) => {
+    if (!token || !isCurrent()) return;
     setRunningId(mission.id);
     setMissions((current) =>
       current.map((item) =>
@@ -101,6 +120,11 @@ const AgentMissionPanel = ({ notebookId }: AgentMissionPanelProps) => {
     );
     try {
       const response = await ApiService.runAgentMission(mission.id, token);
+      if (!isCurrent()) return;
+      if (response.mission.result?.noteId) {
+        await queryClient.invalidateQueries({ queryKey: ['notes', notebookId] });
+        if (!isCurrent()) return;
+      }
       setMissions((current) =>
         current.map((item) =>
           item.id === mission.id ? response.mission : item,
@@ -108,11 +132,13 @@ const AgentMissionPanel = ({ notebookId }: AgentMissionPanelProps) => {
       );
       setExpandedId(mission.id);
       toast({
-        title: "Mission completed",
-        description: "A grounded report was saved to this notebook as a note.",
+        title: response.mission.status === 'completed' ? "Mission completed" : "Mission updated",
+        description: response.mission.result?.noteId ? "Your report is available in this notebook's Notes." : "Check the saved mission result below.",
       });
     } catch (error) {
+      if (!isCurrent()) return;
       await loadMissions(true);
+      if (!isCurrent()) return;
       toast({
         title: "Mission could not complete",
         description:
@@ -122,11 +148,12 @@ const AgentMissionPanel = ({ notebookId }: AgentMissionPanelProps) => {
         variant: "destructive",
       });
     } finally {
-      setRunningId(null);
+      if (isCurrent()) setRunningId(null);
     }
   };
 
   const resumeAndRunMission = async (mission: AgentMission) => {
+    if (!token || !isCurrent()) return;
     setRunningId(mission.id);
     try {
       const response = await ApiService.updateAgentMission(
@@ -134,6 +161,7 @@ const AgentMissionPanel = ({ notebookId }: AgentMissionPanelProps) => {
         { status: "ready" },
         token,
       );
+      if (!isCurrent()) return;
       setMissions((current) =>
         current.map((item) =>
           item.id === mission.id ? response.mission : item,
@@ -141,7 +169,9 @@ const AgentMissionPanel = ({ notebookId }: AgentMissionPanelProps) => {
       );
       await runMission(response.mission);
     } catch (error) {
+      if (!isCurrent()) return;
       await loadMissions(true);
+      if (!isCurrent()) return;
       toast({
         title: "Mission could not resume",
         description:
@@ -155,7 +185,7 @@ const AgentMissionPanel = ({ notebookId }: AgentMissionPanelProps) => {
   const handleCreateAndRun = async (event: FormEvent) => {
     event.preventDefault();
     const trimmedGoal = goal.trim();
-    if (!trimmedGoal) return;
+    if (!trimmedGoal || !token || !isCurrent()) return;
 
     setCreating(true);
     try {
@@ -164,10 +194,12 @@ const AgentMissionPanel = ({ notebookId }: AgentMissionPanelProps) => {
         trimmedGoal,
         token,
       );
+      if (!isCurrent()) return;
       setGoal("");
       setMissions((current) => [mission, ...current]);
       await runMission(mission);
     } catch (error) {
+      if (!isCurrent()) return;
       toast({
         title: "Could not create mission",
         description:
@@ -175,7 +207,7 @@ const AgentMissionPanel = ({ notebookId }: AgentMissionPanelProps) => {
         variant: "destructive",
       });
     } finally {
-      setCreating(false);
+      if (isCurrent()) setCreating(false);
     }
   };
 
@@ -188,10 +220,12 @@ const AgentMissionPanel = ({ notebookId }: AgentMissionPanelProps) => {
       return;
     try {
       await ApiService.deleteAgentMission(mission.id, token);
+      if (!isCurrent()) return;
       setMissions((current) =>
         current.filter((item) => item.id !== mission.id),
       );
     } catch (error) {
+      if (!isCurrent()) return;
       toast({
         title: "Could not delete mission",
         description:
@@ -200,6 +234,8 @@ const AgentMissionPanel = ({ notebookId }: AgentMissionPanelProps) => {
       });
     }
   };
+
+  if (!token) return <p className="p-3 text-xs text-muted-foreground">Sign in to create research missions and save their reports to your notebook.</p>;
 
   return (
     <div className="space-y-3 rounded-xl border border-indigo-100 bg-indigo-50/30 p-3 dark:border-indigo-900/50 dark:bg-indigo-950/20">

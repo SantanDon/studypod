@@ -1,3 +1,4 @@
+import { prepareSourceNarration, sourceMetadata } from '@/lib/audio/sourceNarration';
 import { hasNarrationManifest, useStudioAudioCommands } from '@/lib/audio/studioAudioCommands';
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
@@ -41,6 +42,61 @@ import AudiobookDirectionPanel, {
 } from "./AudiobookDirectionPanel";
 import AudioPlayer from "./AudioPlayer";
 import AudiobookChapterPlayer from "./AudiobookChapterPlayer";
+import type { AudiobookPlaybackManifest } from "@/lib/audio/audiobookPlayback";
+
+// Saved renders are server resources, not browser worker jobs. Never insert a
+// recovered render into the job store or let discovery replace a new execution.
+export function useSavedAudiobookRender({
+  identity, fileName, hasLocalJob, authHeaders,
+}: {
+  identity: string;
+  fileName?: string;
+  hasLocalJob: boolean;
+  authHeaders: () => Record<string, string>;
+}) {
+  const enabled = Boolean(fileName && !hasLocalJob);
+  const scope = JSON.stringify([identity, fileName, hasLocalJob]);
+  const [result, setResult] = useState<{
+    scope: string; manifest: AudiobookPlaybackManifest | null;
+    loading: boolean; error: string | null;
+  } | null>(null);
+  const [revision, setRevision] = useState(0);
+
+  useEffect(() => {
+    if (!enabled) return;
+    const controller = new AbortController();
+    let current = true;
+    setResult({ scope, manifest: null, loading: true, error: null });
+    void (async () => {
+      try {
+        const response = await fetch(
+          `${API_BASE_URL}/audiobook/books/${encodeURIComponent(fileName!)}/playback-manifest`,
+          { headers: authHeaders(), credentials: "include", cache: "no-store", signal: controller.signal },
+        );
+        if (response.status === 404) {
+          if (current) setResult({ scope, manifest: null, loading: false, error: null });
+          return;
+        }
+        if (!response.ok) throw new Error("Could not check your saved audiobook. Try again.");
+        const manifest = await response.json() as AudiobookPlaybackManifest;
+        if (manifest.fileName !== fileName) throw new Error("The saved audiobook did not match this book.");
+        if (current) setResult({ scope, manifest: manifest.renderId ? manifest : null, loading: false, error: null });
+      } catch (error) {
+        if (current) setResult({ scope, manifest: null, loading: false,
+          error: error instanceof Error ? error.message : "Could not check your saved audiobook. Try again." });
+      }
+    })();
+    return () => { current = false; controller.abort(); };
+  }, [enabled, scope, fileName, authHeaders, revision]);
+
+  const active = enabled && result?.scope === scope ? result : null;
+  return {
+    manifest: active?.manifest ?? null,
+    loading: enabled && (active?.loading ?? true),
+    error: active?.error ?? null,
+    retry: () => setRevision(value => value + 1),
+  };
+}
 
 const pendingFullBookStarts = new Set<string>();
 
@@ -180,15 +236,8 @@ type FullBookJobStatus = {
 };
 
 const parseMetadata = (metadata: AudiobookSource["metadata"]): BookMetadata => {
-  if (!metadata) return {};
-  if (typeof metadata === "string") {
-    try {
-      return JSON.parse(metadata) as BookMetadata;
-    } catch {
-      return {};
-    }
-  }
-  return metadata;
+  const original = sourceMetadata(metadata);
+  return { ...original, ...sourceMetadata(original.narration) } as BookMetadata;
 };
 
 const formatListeningTime = (minutes?: number) => {
@@ -219,10 +268,12 @@ export default function AudiobookView({
   notebookId,
   onClose,
 }: AudiobookViewProps) {
-  const { sources, addSourceAsync } = useSources(notebookId);
+  const { sources, addSourceAsync, updateSourceAsync } = useSources(notebookId);
+  const currentSourcesRef = useRef(sources);
+  currentSourcesRef.current = sources;
   const { notebooks } = useNotebooks();
   const { updateNotebook } = useNotebookUpdate();
-  const { session } = useAuth();
+  const { session, user } = useAuth();
   const { guestId } = useGuest();
   const currentNotebook = notebooks.find(
     (notebook: { id: string }) => notebook.id === notebookId,
@@ -315,9 +366,15 @@ export default function AudiobookView({
     () => Object.values(jobs).filter((job) => job.notebookId === notebookId),
     [jobs, notebookId],
   );
+  const pollingJobIds = JSON.stringify(
+    notebookJobs
+      .filter((job) => job.status === "processing" || job.workerActive)
+      .map((job) => [job.bookId, job.jobId])
+      .sort((a, b) => a[0].localeCompare(b[0])),
+  );
   const effectiveProvider =
     selectedVoice === "mock_narrator" ? "mock" : selectedProvider;
-  const audiobookRuntimeAvailable = runtimeCapabilities?.enabled !== false;
+  const audiobookRuntimeAvailable = runtimeCapabilities?.enabled === true && runtimeCapabilities?.fullGeneration === true;
   const authToken = session?.access_token || guestId || "guest_audiobook_local";
   const authHeaders = useCallback(
     () => ({ Authorization: `Bearer ${authToken}` }),
@@ -327,6 +384,12 @@ export default function AudiobookView({
     () => ({ "Content-Type": "application/json", ...authHeaders() }),
     [authHeaders],
   );
+  const savedRender = useSavedAudiobookRender({
+    identity: JSON.stringify([user?.id || guestId, notebookId, selectedBook?.id]),
+    fileName: selectedBookMetadata.fileName,
+    hasLocalJob: Boolean(selectedBookJob),
+    authHeaders,
+  });
 
   const selectableVoices = useMemo(
     () =>
@@ -377,6 +440,7 @@ export default function AudiobookView({
       } catch (error) {
         if (shouldReportNetworkError(error, controller.signal)) {
           console.error("Failed to load audiobook voices", error);
+          setRuntimeCapabilities({ enabled: false, fullGeneration: false, reason: 'The narration service could not be reached. No audiobook has been created.' });
         }
       }
     };
@@ -436,20 +500,27 @@ export default function AudiobookView({
   useEffect(() => {
     // Poll active jobs plus cancelling ones until the truthful terminal
     // state (worker reported stopped) arrives; never infer completion locally.
-    const processingJobs = notebookJobs.filter(
-      (job) => job.status === "processing" || job.workerActive,
-    );
-    if (processingJobs.length === 0) return undefined;
+    const identities = JSON.parse(pollingJobIds) as [string, string][];
+    if (identities.length === 0) return undefined;
 
     let cancelled = false;
+    let polling = false;
+    const controller = new AbortController();
     const poll = async () => {
+      if (cancelled || polling) return;
+      polling = true;
+      try {
       await Promise.all(
-        processingJobs.map(async (job) => {
+        identities.map(async ([bookId, jobId]) => {
+          const job = useAudiobookStore.getState().jobs[bookId];
+          if (!job || job.jobId !== jobId || job.notebookId !== notebookId ||
+              (job.status !== "processing" && !job.workerActive)) return;
           try {
             const response = await fetch(
               `${API_BASE_URL}/audiobook/job-status/${job.jobId}`,
               {
                 headers: authHeaders(),
+                signal: controller.signal,
               },
             );
             if (response.status === 404) {
@@ -465,6 +536,8 @@ export default function AudiobookView({
             if (cancelled || !data.status) return;
             const currentJob = useAudiobookStore.getState().jobs[job.bookId];
             if (currentJob?.jobId !== job.jobId || currentJob.notebookId !== job.notebookId) return;
+            // A local pause/cancel action supersedes an already pending snapshot.
+            if (currentJob.status !== job.status || currentJob.cancelling !== job.cancelling) return;
 
             updateJob(job.bookId, {
               status: data.status,
@@ -529,19 +602,23 @@ export default function AudiobookView({
               }
             }
           } catch (error) {
-            console.error("Audiobook status check failed", error);
+            if (!cancelled) console.error("Audiobook status check failed", error);
           }
         }),
       );
+      } finally {
+        polling = false;
+      }
     };
 
     poll();
     const interval = window.setInterval(poll, 3000);
     return () => {
       cancelled = true;
+      controller.abort();
       window.clearInterval(interval);
     };
-  }, [authHeaders, clearJob, notebookJobs, updateJob]);
+  }, [authHeaders, clearJob, notebookId, pollingJobIds, updateJob]);
 
   const updateNotebookTitleIfNeeded = (title: string) => {
     if (!currentNotebook) return;
@@ -833,6 +910,7 @@ export default function AudiobookView({
 
   useEffect(() => {
     if (audioCommand?.kind !== 'audiobook' || audioCommand.phase !== 'queued' || !sources) return;
+    if (audioCommand.operation === 'generate' && runtimeCapabilities === null) return;
     const command = useStudioAudioCommands.getState().claim(notebookId, 'audiobook');
     if (!command) return;
     const finish = (ok: boolean, message: string) => useStudioAudioCommands.getState().finish(notebookId, command.id, ok, message);
@@ -881,7 +959,8 @@ export default function AudiobookView({
       })();
       return;
     }
-    const book = command.sourceIds.length === 1 ? ebooks.find((item) => item.id === command.sourceIds[0]) : undefined;
+    const book = command.sourceIds.length === 1 ? ebooks.find((item) => item.id === command.sourceIds[0]) ||
+      (command.operation === 'generate' ? sources.find(item => item.id === command.sourceIds[0] && item.notebook_id === notebookId) as AudiobookSource | undefined : undefined) : undefined;
     if (!book) { finish(false, 'Choose one imported document from this notebook. A chat summary cannot stand in for the full book.'); return; }
     setCurrentBookId(book.id);
     const existing = useAudiobookStore.getState().jobs[book.id];
@@ -890,8 +969,27 @@ export default function AudiobookView({
       return;
     }
     if (command.operation === 'resume' && (!existing || existing.notebookId !== notebookId || !['paused', 'failed', 'cancelled'].includes(existing.status))) { finish(false, 'There is no paused, failed or cancelled audiobook for this source to retry.'); return; }
+    if (command.operation === 'generate' && !audiobookRuntimeAvailable) {
+      finish(false, runtimeCapabilities?.reason || 'Full source read-aloud is not available on this server. No audio was created. Podcast discussion is a different tool, not a substitute.');
+      return;
+    }
+    const originalSource = sources.find(item => item.id === book.id);
+    if (command.operation === 'generate' && originalSource && (!hasNarrationManifest(originalSource) || sourceMetadata(originalSource.metadata).narration)) {
+      void (async () => {
+        try {
+          const prepared = await prepareSourceNarration({ source: originalSource, notebookId, apiBase: API_BASE_URL, headers: authHeaders() });
+          const latest = currentSourcesRef.current.find(item => item.id === originalSource.id && item.notebook_id === notebookId);
+          if (!latest || latest.content !== originalSource.content) throw new Error('The source changed while preparing narration. Review it and confirm again.');
+          const metadata = { ...sourceMetadata(latest.metadata), narration: prepared.narration };
+          await updateSourceAsync({ sourceId: latest.id, updates: { metadata } });
+          const ok = await generateFullBook({ ...latest, metadata: parseMetadata(metadata) } as AudiobookSource);
+          finish(ok, ok ? 'Full read-aloud requested for the selected source text. Follow its progress and download only when complete.' : 'The source was prepared, but narration did not start. Check the Studio message.');
+        } catch (error) { finish(false, error instanceof Error ? error.message : 'Could not prepare source narration. No completed audio is claimed.'); }
+      })();
+      return;
+    }
     void generateFullBook(book).then((ok) => finish(ok, ok ? 'Audio request accepted. Follow the chapter progress in chat or Studio; a full download is available only after completion.' : 'The audiobook did not start. Check the local runtime, source and Studio error message.')).catch(() => finish(false, 'The audiobook request failed. No completion is claimed.'));
-  }, [audioCommand, ebooks, sources, notebookId, setCurrentBookId, generateFullBook, jsonHeaders]);
+  }, [audioCommand, ebooks, sources, notebookId, setCurrentBookId, generateFullBook, jsonHeaders, authHeaders, updateSourceAsync, runtimeCapabilities, audiobookRuntimeAvailable]);
 
   const downloadAudio = async (url: string, fileName: string) => {
     try {
@@ -1096,26 +1194,32 @@ export default function AudiobookView({
 
       <ScrollArea className="min-h-0 flex-1">
         <div className="space-y-5 p-4 pb-10">
-          <div className="grid grid-cols-4 overflow-hidden rounded-xl border border-border bg-card text-center text-[11px]">
-            {[
-              ["1", "Book"],
-              ["2", "Direction"],
-              ["3", "Preview"],
-              ["4", "Create"],
-            ].map(([number, label], index) => (
-              <div
-                key={number}
-                className={`px-2 py-3 ${index > 0 ? "border-l border-border" : ""}`}
-              >
-                <span className="mr-1.5 inline-flex h-5 w-5 items-center justify-center rounded-full bg-primary/10 font-semibold text-primary">
-                  {number}
-                </span>
-                <span className="font-medium text-foreground">{label}</span>
-              </div>
-            ))}
-          </div>
+          {audiobookRuntimeAvailable && (
+            <div className="grid grid-cols-4 overflow-hidden rounded-xl border border-border bg-card text-center text-[11px]">
+              {[
+                ["1", "Book"],
+                ["2", "Direction"],
+                ["3", "Preview"],
+                ["4", "Create"],
+              ].map(([number, label], index) => (
+                <div
+                  key={number}
+                  className={`px-2 py-3 ${index > 0 ? "border-l border-border" : ""}`}
+                >
+                  <span className="mr-1.5 inline-flex h-5 w-5 items-center justify-center rounded-full bg-primary/10 font-semibold text-primary">
+                    {number}
+                  </span>
+                  <span className="font-medium text-foreground">{label}</span>
+                </div>
+              ))}
+            </div>
+          )}
 
-          {!audiobookRuntimeAvailable ? (
+          {runtimeCapabilities === null ? (
+            <Card className="p-6 text-center shadow-none" role="status">
+              Checking audiobook availability…
+            </Card>
+          ) : !audiobookRuntimeAvailable ? (
             <Card
               className="border-amber-200 bg-amber-50/70 p-6 text-center shadow-none dark:border-amber-900/70 dark:bg-amber-950/20"
               data-testid="audiobook-local-beta"
@@ -1124,16 +1228,16 @@ export default function AudiobookView({
                 <Headphones className="h-5 w-5" />
               </div>
               <h3 className="mt-4 text-base font-semibold">
-                Audiobook is a local beta
+                {runtimeCapabilities.localBeta ? "Audiobook is a local beta" : "Audiobook unavailable"}
               </h3>
-              <p className="mx-auto mt-2 max-w-md text-sm leading-6 text-muted-foreground">
+              {runtimeCapabilities.localBeta && (<p className="mx-auto mt-2 max-w-md text-sm leading-6 text-muted-foreground">
                 The complete book-to-audio workflow currently runs in the local
                 StudyPod app, where narration can continue safely and files
                 remain available after the job finishes.
-              </p>
+              </p>)}
               <p className="mx-auto mt-3 max-w-md rounded-lg border border-amber-200 bg-background/70 px-3 py-2 text-xs leading-5 text-muted-foreground dark:border-amber-900/70">
                 {runtimeCapabilities?.reason ||
-                  "Cloud audiobook rendering is not connected yet."}
+                  "Full-book narration is unavailable in this environment."}
               </p>
             </Card>
           ) : ebooks.length === 0 ? (
@@ -1288,7 +1392,21 @@ export default function AudiobookView({
                   className="p-4 shadow-sm"
                   data-testid="audiobook-create-panel"
                 >
-                  {!selectedBookJob && (
+                  {savedRender.loading && <p role="status" className="text-sm text-muted-foreground">Checking your saved audiobook…</p>}
+                  {savedRender.error && <div role="alert" className="space-y-3"><p className="text-sm">{savedRender.error}</p><Button variant="outline" onClick={savedRender.retry}>Retry saved audiobook</Button></div>}
+                  {savedRender.manifest && (
+                    <div className="space-y-4" data-testid="audiobook-saved-render">
+                      <h3 className="text-sm font-semibold">{savedRender.manifest.final?.ready ? "Audiobook ready" : "Saved audiobook"}</h3>
+                      <p className="text-xs text-muted-foreground">{savedRender.manifest.availableChapterCount} chapters ready. Continue listening below with your saved place and bookmarks.</p>
+                      {savedRender.manifest.final?.ready && savedRender.manifest.final.url && (
+                        <Button className="w-full" variant="outline" onClick={() => downloadAudio(savedRender.manifest!.final!.url!, `${selectedBookTitle.replace(/[^a-zA-Z0-9-_]/g, "_") || "audiobook"}.${savedRender.manifest!.final!.format || savedRender.manifest!.outputFormat || "mp3"}`)}>
+                          <Download />Download full {(savedRender.manifest.final.format || savedRender.manifest.outputFormat || "mp3").toUpperCase()}
+                        </Button>
+                      )}
+                      {!savedRender.manifest.activeJobId && <Button className="w-full" variant="ghost" onClick={() => generateFullBook(selectedBook)}><RefreshCcw />{savedRender.manifest.final?.ready ? "Create a new version" : "Resume generation"}</Button>}
+                    </div>
+                  )}
+                  {!selectedBookJob && !savedRender.loading && !savedRender.error && !savedRender.manifest && (
                     <>
                       <div className="flex items-start gap-3">
                         <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-primary/10 text-primary">
@@ -1538,20 +1656,24 @@ export default function AudiobookView({
               )}
 
               {selectedBook &&
-                selectedBookJob &&
-                (selectedBookJob.renderId ||
-                  selectedBookJob.playbackManifestUrl) && (
+                (selectedBookJob?.renderId || selectedBookJob?.playbackManifestUrl || savedRender.manifest?.renderId) && (
                   <AudiobookChapterPlayer
-                    key={`${selectedBook.id}:${selectedBookJob.renderId || selectedBookJob.jobId}`}
+                    key={`${selectedBook.id}:${selectedBookJob?.renderId || selectedBookJob?.jobId || savedRender.manifest?.renderId}`}
                     notebookId={notebookId}
                     sourceId={selectedBook.id}
-                    fileName={selectedBookJob.bookFileName}
-                    renderId={selectedBookJob.renderId}
+                    fileName={selectedBookJob?.bookFileName || savedRender.manifest?.fileName || selectedBookMetadata.fileName!}
+                    renderId={selectedBookJob?.renderId || savedRender.manifest?.renderId || undefined}
                     title={selectedBookTitle}
                     playbackManifestUrl={
-                      selectedBookJob.playbackManifestUrl
+                      selectedBookJob?.playbackManifestUrl
                     }
                     authHeaders={authHeaders}
+                    onAudioDeleted={() => {
+                      clearJob(selectedBook.id);
+                      setAudioUrl(null);
+                      setPlaybackMediaId(null);
+                      savedRender.retry();
+                    }}
                   />
                 )}
 

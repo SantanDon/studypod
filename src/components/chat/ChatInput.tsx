@@ -3,6 +3,7 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Carousel, CarouselContent, CarouselItem, CarouselNext, CarouselPrevious } from '@/components/ui/carousel';
 import { useToast } from '@/hooks/use-toast';
+import { Loader2, Send } from 'lucide-react';
 
 /**
  * ChatInput Component
@@ -89,12 +90,13 @@ const ChatInput: React.FC<ChatInputProps> = ({
   const shouldShowExamples = !disabled && !isLoading && !message.trim() && exampleQuestions.length > 0;
 
   return (
-    <div className="p-6 border-t border-border flex-shrink-0 bg-background">
+    <div className="p-6 border-t border-border flex-shrink-0 bg-[#F7F4ED] dark:bg-[#1B2B31]">
       <div className="max-w-4xl mx-auto">
         <div className="flex space-x-4">
-          <div className="flex-1 relative">
+          <div className="min-w-0 flex-1 relative">
             <Input
               ref={inputRef}
+              aria-label="Chat message"
               placeholder={placeholder}
               value={message}
               onChange={(e) => onMessageChange(e.target.value)}
@@ -102,21 +104,24 @@ const ChatInput: React.FC<ChatInputProps> = ({
               onPaste={handlePaste}
               onDrop={handleDrop}
               onDragOver={(e) => e.preventDefault()}
-              className="pr-12"
+              className={message ? 'pr-3' : 'pr-20'}
               disabled={disabled || isLoading}
             />
-            <div className="absolute right-3 top-1/2 transform -translate-y-1/2 text-sm text-muted-foreground">
-              {sourceCount} source{sourceCount !== 1 ? 's' : ''}
-            </div>
+            {!message && (
+              <div className="pointer-events-none absolute right-3 top-1/2 transform -translate-y-1/2 text-sm text-muted-foreground">
+                {sourceCount} source{sourceCount !== 1 ? 's' : ''}
+              </div>
+            )}
           </div>
           <Button
             onClick={onSend}
+            aria-label="Send message"
             disabled={!message.trim() || disabled || isLoading}
           >
             {isLoading ? (
-              <i className="fi fi-rr-spinner h-4 w-4 animate-spin"></i>
+              <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" />
             ) : (
-              <i className="fi fi-rr-paper-plane-top h-4 w-4"></i>
+              <Send className="h-4 w-4" aria-hidden="true" />
             )}
           </Button>
         </div>

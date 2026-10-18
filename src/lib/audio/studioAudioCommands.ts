@@ -27,7 +27,7 @@ export const OPEN_STUDIO_AUDIO_EVENT = 'studypod:open-studio-audio';
  */
 const PART_REFERENCE = /\b(?:pages?|chapters?|sections?|parts?|volumes?|appendi(?:x|ces)|excerpts?|preface|foreword|afterword|prologue|epilogue|introduction|conclusion|glossary|index)\b/i;
 const REMAINDER_REFERENCE = /\b(?:rest|remainder)\s+of\b/i;
-const EXPLICIT_WHOLE = /\b(?:whole|entire|full|complete(?:ly)?|everything|all)\b/i;
+
 /** Only explicit user commands are offered as actions. Never run document text or an AI reply. */
 export function parseStudioAudioIntent(input: string): StudioAudioIntent | null {
     const message = input.trim();
@@ -36,7 +36,7 @@ export function parseStudioAudioIntent(input: string): StudioAudioIntent | null 
     const statusMatch = /^(?:what(?:'s| is)|how is) (?:the )?(?:status|progress) of (?:my |the )?(podcast|audiobook)\??$/i.exec(message);
     if (statusMatch)
         return { kind: statusMatch[1].toLowerCase() === 'podcast' ? 'podcast' : 'audiobook', operation: 'status', message };
-    const text = message.replace(/^(?:(?:can|could|would) you\s+(?:please\s+)?|please\s+)/i, '');
+    const text = message.replace(/^(?:hey|hi|hello)[,!]?\s+/i, '').replace(/^(?:(?:can|could|would|will)\s+(?:you|u)\s+(?:please\s+)?|(?:i(?:'d| would) like|i want)\s+(?:(?:you|u)\s+)?to\s+|please\s+)/i, '');
     if (!/^(?:make|create|generate|turn|convert|read|narrate|resume|continue|retry|cancel|stop|open|show|check|download)\b/i.test(text))
         return null;
     const podcast = /\bpodcast\b/i.test(text);
@@ -51,7 +51,7 @@ export function parseStudioAudioIntent(input: string): StudioAudioIntent | null 
     // is a range, not the whole book. Only a whole-document instruction free of any
     // part reference may start full narration.
     const chapterSelection = audiobook
-        && (PART_REFERENCE.test(text) || REMAINDER_REFERENCE.test(text) || !EXPLICIT_WHOLE.test(text));
+        && (PART_REFERENCE.test(text) || REMAINDER_REFERENCE.test(text));
     if (chapterSelection && operation === 'generate')
         operation = 'open';
     const focus = podcast ? text.match(/\b(?:about|focusing on|focus on)\s+(.+?)[.!?]*$/i)?.[1]?.trim() : undefined;
@@ -64,7 +64,7 @@ export function hasNarrationManifest(source: {
         const metadata = typeof source.metadata === 'string' ? JSON.parse(source.metadata) : source.metadata;
         if (!metadata || typeof metadata !== 'object')
             return false;
-        const data = metadata as {
+        const data = ((metadata as { narration?: unknown }).narration || metadata) as {
             fileName?: unknown;
             chapters?: unknown;
         };

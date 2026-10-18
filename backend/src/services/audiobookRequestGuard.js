@@ -4,11 +4,11 @@ export function isOwnedAudiobookManifest(manifest, ownerId) {
         typeof manifest?.ownerId === 'string' && manifest.ownerId === ownerId;
 }
 /** Serializes admission only, not rendering; uses the app's existing durable jobs after admission. */
-export function createAudiobookAdmissionGuard({ ownerFor, fileFor }) {
+export function createAudiobookAdmissionGuard({ ownerFor, fileFor, rawFileFor = (req) => req.body?.fileName }) {
     const admitting = new Set();
     return (req, res, next) => {
         const owner = ownerFor(req);
-        const rawFile = req.body?.fileName;
+        const rawFile = rawFileFor(req);
         if (!owner)
             return res.status(401).json({ error: 'Authentication required' });
         if (typeof rawFile !== 'string' || !rawFile.trim() || rawFile.length > 255) {

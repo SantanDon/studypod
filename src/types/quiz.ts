@@ -24,6 +24,8 @@ export interface Quiz {
 }
 
 export interface QuizResult {
+  correctAnswer?: number;
+  explanation?: string;
   questionId: string;
   selectedAnswer: number;
   isCorrect: boolean;
@@ -31,6 +33,7 @@ export interface QuizResult {
 }
 
 export interface QuizSession {
+  attemptId: string;
   quiz: Quiz;
   results: QuizResult[];
   currentQuestionIndex: number;
@@ -39,6 +42,9 @@ export interface QuizSession {
 }
 
 export interface QuizHistory {
+  id?: string;
+  startedAt?: string;
+  results?: QuizResult[];
   quizId: string;
   notebookId: string;
   title: string;

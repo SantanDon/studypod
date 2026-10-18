@@ -107,46 +107,50 @@ export function buildPodcastSourceContext(
   }));
   if (!prepared.length) return "";
 
+  if (!Number.isSafeInteger(maxChars) || maxChars < 500 || maxChars > 100_000) {
+    throw new Error('Podcast context budget must be an integer between 500 and 100000 characters.');
+  }
   const tokens = focusTokens(focus);
-  const sourceBudget = Math.max(1_500, Math.floor(maxChars / prepared.length));
+  const sourceBudget = Math.floor((maxChars - (prepared.length - 1) * 2) / prepared.length);
+  if (sourceBudget < 300) throw new Error('Too many sources for a useful podcast excerpt. Select fewer sources or a narrower focus.');
+
+  const sample = (text: string, budget: number): string => {
+    if (text.length <= budget) return text;
+    const omitted = '\n[... excerpt gap ...]\n';
+    const size = Math.floor((budget - omitted.length * 2) / 3);
+    if (size < 10) return '[Excerpt unavailable: select a narrower focus.]'.slice(0, budget);
+    const middle = Math.floor((text.length - size) / 2);
+    return text.slice(0, size) + omitted + text.slice(middle, middle + size) + omitted + text.slice(-size);
+  };
+  const evenly = (sections: Section[], count: number): Section[] => {
+    if (sections.length <= count) return sections;
+    if (count === 1) return [sections[0]];
+    return Array.from({ length: count }, (_, i) => sections[Math.round(i * (sections.length - 1) / (count - 1))]);
+  };
   const outputs = prepared.map(({ source, sections }) => {
-    const title = source.title?.trim() || "Source";
-    const outline = sections.map((section) => section.heading).join(" · ");
-    const header = `SOURCE: ${title}\nSTRUCTURE: ${outline}\n`;
-    const bodyBudget = Math.max(500, sourceBudget - header.length - 100);
-
-    if (focus.trim()) {
-      const ranked = sections
-        .map((section) => ({
-          section,
-          score: sectionScore(section, focus, tokens),
-        }))
-        .sort((a, b) => b.score - a.score);
-      const selected = ranked.filter((item) => item.score > 0).slice(0, 4);
-      const chosen = selected.length ? selected : ranked.slice(0, Math.min(4, ranked.length));
-      const perSection = Math.max(500, Math.floor(bodyBudget / Math.max(1, chosen.length)));
-      return (
-        header +
-        chosen
-          .map(
-            ({ section }) =>
-              `\n[${section.heading}]\n${relevantWindow(section.text, tokens, perSection)}`,
-          )
-          .join("\n")
-      ).slice(0, sourceBudget);
-    }
-
-    const perSection = Math.max(350, Math.floor(bodyBudget / sections.length));
-    return (
-      header +
-      sections
-        .map(
-          (section) =>
-            `\n[${section.heading}]\n${section.text.slice(0, perSection)}`,
-        )
-        .join("\n")
-    ).slice(0, sourceBudget);
+    const title = (source.title?.trim() || 'Source').slice(0, Math.min(200, sourceBudget / 5));
+    const outline = sections.map(section => section.heading).join(' · ').slice(0, Math.min(500, sourceBudget / 5));
+    const header = `SOURCE: ${title}\nSTRUCTURE: ${outline}\nCOVERAGE: selected evidence excerpts; not a certificate of full-document coverage.\n`;
+    const bodyBudget = sourceBudget - header.length;
+    const maximumSections = Math.max(1, Math.floor(bodyBudget / 160));
+    const ranked = tokens.length ? sections.map(section => ({ section, score: sectionScore(section, focus, tokens) })).sort((a,b) => b.score-a.score) : [];
+    const relevant = ranked.filter(item => item.score > 0);
+    const chosen = tokens.length
+      ? (relevant.length ? relevant : ranked).slice(0, Math.min(4, maximumSections)).map(item => item.section)
+      : evenly(sections, maximumSections);
+    const perSection = Math.floor((bodyBudget - Math.max(0, chosen.length - 1) * 2) / Math.max(1, chosen.length));
+    const body = chosen.map(section => {
+      const label = `[${section.heading.slice(0, 65)}]\n`;
+      const budget = Math.max(0, perSection - label.length);
+      if (tokens.length && section.text.length > budget) {
+        const note = '\n[focused excerpt; other text omitted]';
+        return label + relevantWindow(section.text, tokens, Math.max(0,budget-note.length)) + note;
+      }
+      return label + sample(section.text, budget);
+    }).join('\n\n');
+    return header + body;
   });
-
-  return outputs.join("\n\n").slice(0, maxChars);
+  const result = outputs.join('\n\n');
+  if (result.length > maxChars) throw new Error('Podcast source selection exceeded its context budget. Select fewer sources.');
+  return result;
 }

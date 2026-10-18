@@ -11,6 +11,20 @@ export interface ComparisonResult {
   sharedKeywords: string[];
 }
 
+export const COMPARISON_CHARACTER_LIMIT = 3000;
+
+export function comparisonSourceText(source: Pick<LocalSource, 'content' | 'summary'>): string {
+  return (source.content || source.summary || '').slice(0, COMPARISON_CHARACTER_LIMIT);
+}
+
+export function isComparisonResult(value: unknown): value is ComparisonResult {
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) return false;
+  const result = value as Record<string, unknown>;
+  return ['commonThemes', 'uniquePointsSource1', 'uniquePointsSource2', 'contradictions', 'sharedKeywords']
+    .every((key) => Array.isArray(result[key]) &&
+      (result[key] as unknown[]).every((item) => typeof item === 'string' && item.trim().length > 0));
+}
+
 export function extractKeywords(text: string): string[] {
   if (!text) return [];
   const words = text.toLowerCase().match(/\b[a-z]{4,}\b/g) || [];
@@ -62,7 +76,7 @@ export function useSourceComparison(sources: LocalSource[]) {
   }, [source1, source2]);
 
   const handleCompare = async () => {
-    if (!source1 || !source2) return;
+    if (!source1 || !source2 || source1.id === source2.id || isAnalyzing) return;
 
     setIsAnalyzing(true);
     setError(null);
@@ -72,10 +86,10 @@ export function useSourceComparison(sources: LocalSource[]) {
       const prompt = `Analyze and compare these two sources. Provide a structured comparison.
 
 SOURCE 1 - "${source1.title}":
-${source1.content?.slice(0, 3000) || source1.summary || "No content available"}
+${comparisonSourceText(source1) || "No content available"}
 
 SOURCE 2 - "${source2.title}":
-${source2.content?.slice(0, 3000) || source2.summary || "No content available"}
+${comparisonSourceText(source2) || "No content available"}
 
 Provide your analysis in the following JSON format only, no other text:
 {
@@ -106,16 +120,10 @@ Respond with ONLY the JSON, no markdown formatting.`;
         temperature: 0.3,
       });
 
-      const result = parseJsonResponse<ComparisonResult>(response, (obj): obj is ComparisonResult => {
-        if (typeof obj !== 'object' || obj === null) return false;
-        const r = obj as Record<string, unknown>;
-        return Array.isArray(r.commonThemes) && 
-               Array.isArray(r.uniquePointsSource1) && 
-               Array.isArray(r.uniquePointsSource2);
-      });
+      const result = parseJsonResponse<ComparisonResult>(response, isComparisonResult);
       
       if (!result) {
-        throw new Error("Failed to parse comparison result");
+        throw new Error('StudyPod could not read a complete comparison from the model. Select Compare evidence to try again, or check the original sources below.');
       }
       
       setComparisonResult(result);
@@ -129,9 +137,15 @@ Respond with ONLY the JSON, no markdown formatting.`;
 
   const canCompare = selectedSource1 && selectedSource2 && selectedSource1 !== selectedSource2;
 
+  const selectSource = (setter: (id: string) => void) => (id: string) => {
+    setter(id);
+    setComparisonResult(null);
+    setError(null);
+  };
+
   return {
-    selectedSource1, setSelectedSource1,
-    selectedSource2, setSelectedSource2,
+    selectedSource1, setSelectedSource1: selectSource(setSelectedSource1),
+    selectedSource2, setSelectedSource2: selectSource(setSelectedSource2),
     isAnalyzing,
     comparisonResult,
     error,

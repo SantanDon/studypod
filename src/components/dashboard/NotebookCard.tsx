@@ -74,7 +74,7 @@ const NotebookCard = ({
                 <Trash2 className="h-4 w-4" />
               </button>
             </AlertDialogTrigger>
-            <AlertDialogContent>
+            <AlertDialogContent onClick={event => event.stopPropagation()}>
               <AlertDialogHeader>
                 <AlertDialogTitle>Delete this notebook?</AlertDialogTitle>
                 <AlertDialogDescription>

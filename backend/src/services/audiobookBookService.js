@@ -19,6 +19,27 @@ export const SUPPORTED_BOOK_EXTENSIONS = [
 
 const DEFAULT_SYNTHETIC_CHAPTER_SIZE = 12_000;
 const MANIFEST_SCHEMA_VERSION = 2;
+const MANIFEST_RENAME_RETRY_DELAYS_MS = [20, 40, 80, 160];
+const MANIFEST_RENAME_CONTENTION_CODES = new Set(["EPERM", "EACCES", "EBUSY"]);
+
+async function publishManifest(temporaryPath, manifestPath) {
+  // Retry atomic replacement only. Backoff yields the event loop, and the
+  // caller retains its writer lock until publication settles.
+  for (let attempt = 0; ; attempt += 1) {
+    try {
+      await fs.promises.rename(temporaryPath, manifestPath);
+      return;
+    } catch (error) {
+      if (
+        !MANIFEST_RENAME_CONTENTION_CODES.has(error?.code) ||
+        attempt >= MANIFEST_RENAME_RETRY_DELAYS_MS.length
+      ) {
+        throw error;
+      }
+      await new Promise((resolve) => setTimeout(resolve, MANIFEST_RENAME_RETRY_DELAYS_MS[attempt]));
+    }
+  }
+}
 
 export function sanitizeFileName(fileName = "book") {
   const raw = String(fileName ?? "book");
@@ -36,7 +57,7 @@ export function uniqueSafeFileName(originalName) {
   const safe = sanitizeFileName(originalName);
   const parsed = path.parse(safe);
   const suffix = randomUUID().replace(/-/g, "").slice(0, 16);
-  return `${parsed.name}_${suffix}${parsed.ext}`;
+  return sanitizeFileName(`${parsed.name.slice(0, 63)}_${suffix}${parsed.ext}`);
 }
 
 export function displayTitleFromFileName(fileName = "Book") {
@@ -60,7 +81,7 @@ export function manifestPathFor(manifestDir, fileName) {
   return path.join(manifestDir, `${safe}.manifest.json`);
 }
 
-export function saveBookManifest(manifestDir, manifest) {
+function prepareManifestPublication(manifestDir, manifest) {
   if (!manifest || typeof manifest !== "object") {
     throw new TypeError("saveBookManifest requires a manifest object");
   }
@@ -86,6 +107,11 @@ export function saveBookManifest(manifestDir, manifest) {
   // Unique same-directory temporary file; the rename below is the only write
   // to the live path, so a failure can never truncate the previous manifest.
   const temporaryPath = `${manifestPath}.${process.pid}.${randomUUID()}.tmp`;
+  return { manifestPath, temporaryPath, payload };
+}
+
+export function saveBookManifest(manifestDir, manifest) {
+  const { manifestPath, temporaryPath, payload } = prepareManifestPublication(manifestDir, manifest);
   const discardTemp = () => {
     try {
       fs.unlinkSync(temporaryPath);
@@ -100,6 +126,19 @@ export function saveBookManifest(manifestDir, manifest) {
     // the temporary file is removed, and the caller sees the original error
     // and may retry. No in-place copy is attempted.
     discardTemp();
+    throw error;
+  }
+  return manifestPath;
+}
+
+export async function saveBookManifestAsync(manifestDir, manifest) {
+  const { manifestPath, temporaryPath, payload } = prepareManifestPublication(manifestDir, manifest);
+  try {
+    await fs.promises.writeFile(temporaryPath, payload, "utf8");
+    await publishManifest(temporaryPath, manifestPath);
+  } catch (error) {
+    // Never delete a good destination or conceal a permanent publication fault.
+    await fs.promises.unlink(temporaryPath).catch(() => {});
     throw error;
   }
   return manifestPath;

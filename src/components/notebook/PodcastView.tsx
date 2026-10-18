@@ -19,7 +19,7 @@ import { Label } from "@/components/ui/label";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { useSources } from "@/hooks/useSources";
 import { generatePodcastScript } from "@/lib/podcastGenerator";
-import { buildPodcastSourceContext } from "@/lib/podcastSourceContext";
+import { buildPodcastEvidenceContext } from "@/lib/podcastGenerator";
 import { useToast } from "@/hooks/use-toast";
 import TTSProviderSettings from "./TTSProviderSettings";
 import TTSSettingsDialog from "./TTSSettingsDialog";
@@ -58,23 +58,49 @@ import { PodcastHistory } from "./PodcastHistory";
 import { usePodcastHistory } from "@/hooks/usePodcastHistory";
 import { useNotes } from "@/hooks/useNotes";
 import {
+  clearPlaybackCheckpoint,
   getResumableTime,
   loadPlaybackCheckpoint,
 } from "@/lib/audio/playbackProgress";
-import { indexedDBService } from "@/services/indexedDBService";
+import type { PodcastSave } from '@/services/podcastApiService';
+import type { Citation } from "@/types/message";
+import type { Source } from "@/hooks/useSources";
 import { isSourceUsableForGroundedWork } from "@/lib/sources/sourceProcessing";
 
 let podcastPreparation: { notebookId: string; cancelled: boolean } | null = null;
 
 interface PodcastViewProps {
   notebookId?: string;
+  onOpenSource?: (citation: Citation) => void;
 }
 
-const PodcastView: React.FC<PodcastViewProps> = ({ notebookId }) => {
+const PodcastView: React.FC<PodcastViewProps> = ({ notebookId, onOpenSource }) => {
   const safeNotebookId = notebookId || "";
   const audioCommand = useStudioAudioCommands((state) => state.requests[safeNotebookId]);
-  const { sources } = useSources(safeNotebookId);
-  const usableSources = React.useMemo(() => (sources || []).filter(isSourceUsableForGroundedWork), [sources]);
+  const { sources, isLoading: sourcesLoading, isFetching: sourcesFetching, error: sourcesError, retrySources } = useSources(safeNotebookId);
+  const openRecordedSource = (source: Source) => {
+    if (!onOpenSource || source.notebook_id !== safeNotebookId) return;
+    onOpenSource({
+      citation_id: -1,
+      source_id: source.id,
+      source_title: source.title,
+      source_type: source.type,
+      chunk_index: 0,
+      excerpt: "Full document view",
+    });
+  };
+  const usableSources = React.useMemo(() => sources.filter(isSourceUsableForGroundedWork), [sources]);
+  const skippedSourceCount = sources.length - usableSources.length;
+  const sourceScopeMessage = sourcesLoading
+    ? "Checking which sources are ready for audio."
+    : sourcesError
+      ? "Could not check source readiness. Try again when your sources load."
+      : sources.length === 0
+        ? "Add a source to this notebook before creating audio."
+        : usableSources.length === 0
+          ? "No sources are ready for audio yet. Wait for processing or add another source."
+          : `Draws on excerpts from all ${usableSources.length} ready ${usableSources.length === 1 ? "source" : "sources"} in this notebook.${skippedSourceCount ? ` ${skippedSourceCount} ${skippedSourceCount === 1 ? "other source is" : "other sources are"} not ready and will be skipped.` : ""}`;
+  const cannotCreateAudio = sourcesLoading || Boolean(sourcesError) || usableSources.length === 0;
   const { notes } = useNotes(safeNotebookId);
   const { toast } = useToast();
 
@@ -100,12 +126,19 @@ const PodcastView: React.FC<PodcastViewProps> = ({ notebookId }) => {
   const [isProviderSettingsOpen, setIsProviderSettingsOpen] = useState(false);
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const [showAudioLab, setShowAudioLab] = useState(false);
+  const customizeAudioRef = useRef<HTMLButtonElement>(null);
+  const customizeHeadingRef = useRef<HTMLHeadingElement>(null);
+  useEffect(() => {
+    if (showAudioLab) requestAnimationFrame(() => customizeHeadingRef.current?.focus());
+  }, [showAudioLab]);
   const [isStarting, setIsStarting] = useState(false);
-  const [usingKokoro, setUsingKokoro] = useState(false);
   const [audioValidation, setAudioValidation] =
     useState<AudioValidationResult | null>(null);
   const restoredAudioUrlRef = useRef<string | null>(null);
+  const restoredAudioNotebookRef = useRef<string | null>(null);
   const restoredPodcastRef = useRef<string | null>(null);
+  const requestedPodcastRef = useRef<string | null>(null);
+  const requestedPodcastId = new URLSearchParams(window.location.search).get("episode");
   const finalizingScriptRef = useRef<unknown>(null);
 
   // Customization state
@@ -121,7 +154,53 @@ const PodcastView: React.FC<PodcastViewProps> = ({ notebookId }) => {
   );
   const [podcastFocus, setPodcastFocus] = useState("");
 
-  const { savePodcast, podcasts } = usePodcastHistory(safeNotebookId);
+  const { savePodcast, podcasts, loadAudio, scopeKey, assertCurrent } = usePodcastHistory(safeNotebookId);
+  const deletedPodcastRef = useRef<string | null>(null);
+  useEffect(() => {
+    // AudioPlayer saves its last position during effect cleanup. Clear a deleted
+    // episode after that unmount commit so it cannot regain a resume checkpoint.
+    if (deletedPodcastRef.current) {
+      clearPlaybackCheckpoint(deletedPodcastRef.current);
+      deletedPodcastRef.current = null;
+    }
+  }, [currentPodcastId]);
+  const handleDeletedPodcast = (podcastId: string) => {
+    // A completed deletion must not reset a newer episode or notebook.
+    const current = usePodcastGenerationStore.getState();
+    if (current.notebookId !== safeNotebookId || current.podcastId !== podcastId) return;
+    if (restoredAudioUrlRef.current) {
+      URL.revokeObjectURL(restoredAudioUrlRef.current);
+      restoredAudioUrlRef.current = null;
+      restoredAudioNotebookRef.current = null;
+    }
+    restoredPodcastRef.current = null;
+    if (requestedPodcastRef.current === podcastId) requestedPodcastRef.current = null;
+    deletedPodcastRef.current = podcastId;
+    current.reset();
+  };
+  const generationSourcesRef = useRef(new WeakMap<object, string[]>());
+  const [pendingSave, setPendingSave] = useState<{
+    input: PodcastSave; url: string; scope: string; isCurrent: () => boolean; error: string;
+  } | null>(null);
+  const [isRetryingSave, setIsRetryingSave] = useState(false);
+
+  const retrySave = async () => {
+    if (!pendingSave || pendingSave.scope !== scopeKey || isRetryingSave) return;
+    setIsRetryingSave(true);
+    try {
+      assertCurrent();
+      if (!pendingSave.isCurrent()) throw new Error('This generation is no longer active.');
+      const saved = await savePodcast(pendingSave.input);
+      assertCurrent();
+      if (!pendingSave.isCurrent()) return;
+      setFinalAudio(pendingSave.url, safeNotebookId, saved.title, saved.id);
+      setPendingSave(null);
+    } catch (error) {
+      setPendingSave(current => current === pendingSave ? { ...current, error: error instanceof Error ? error.message : 'Could not save this episode.' } : current);
+    } finally {
+      setIsRetryingSave(false);
+    }
+  };
 
   // Sync local voice choices with saved configuration on load
   useEffect(() => {
@@ -134,9 +213,19 @@ const PodcastView: React.FC<PodcastViewProps> = ({ notebookId }) => {
   // Generation continues in background via the singleton generator and global store
   useEffect(() => {
     return () => {
-      if (restoredAudioUrlRef.current) {
-        URL.revokeObjectURL(restoredAudioUrlRef.current);
+      const restoredUrl = restoredAudioUrlRef.current;
+      if (restoredUrl) {
+        // This view owns the restored blob URL. Do not leave a revoked URL in the
+        // global player, or clear a newer episode/generation from another view.
+        usePodcastGenerationStore.setState((state) =>
+          state.notebookId === restoredAudioNotebookRef.current &&
+          state.audioUrl === restoredUrl
+            ? { audioUrl: null }
+            : state,
+        );
+        URL.revokeObjectURL(restoredUrl);
         restoredAudioUrlRef.current = null;
+        restoredAudioNotebookRef.current = null;
       }
       // Only stop active playback, not generation
       // The generator singleton keeps running in background
@@ -160,25 +249,27 @@ const PodcastView: React.FC<PodcastViewProps> = ({ notebookId }) => {
     }
   }, [safeNotebookId, isGenerating, rehydrateState]);
 
-  // Reopen the most recently played unfinished episode after a full page exit.
+  // An explicit dashboard link selects its owned saved episode. Otherwise reopen the
+  // most recently played unfinished episode. Both paths only prepare the player.
   useEffect(() => {
-    if (
-      !safeNotebookId ||
-      finalAudioUrl ||
-      isGenerating ||
-      !podcasts?.length ||
-      restoredPodcastRef.current
-    ) {
-      return;
-    }
+    if (!safeNotebookId || isGenerating || !podcasts?.length) return;
 
-    const resumable = podcasts
+    const requested = requestedPodcastId
+      ? podcasts.find((podcast) => podcast.id === requestedPodcastId)
+      : null;
+    if (requestedPodcastId && !requested) return;
+    if (requested && requestedPodcastRef.current === requested.id) return;
+    if (!requested && (finalAudioUrl || restoredPodcastRef.current)) return;
+
+    const resumable = requested || podcasts
       .map((podcast) => {
         const checkpoint = loadPlaybackCheckpoint(podcast.id);
         return {
           podcast,
           checkpoint,
-          resumeAt: getResumableTime(checkpoint, podcast.duration),
+          resumeAt: checkpoint?.kind === "podcast"
+            ? getResumableTime(checkpoint, podcast.duration)
+            : 0,
         };
       })
       .filter((item) => item.resumeAt > 0 && item.checkpoint)
@@ -186,47 +277,54 @@ const PodcastView: React.FC<PodcastViewProps> = ({ notebookId }) => {
         (a, b) =>
           new Date(b.checkpoint!.updatedAt).getTime() -
           new Date(a.checkpoint!.updatedAt).getTime(),
-      )[0];
+      )[0]?.podcast;
 
     if (!resumable) return;
 
     let cancelled = false;
-    restoredPodcastRef.current = resumable.podcast.id;
-    void indexedDBService
-      .getAudio(resumable.podcast.audio_blob_id)
+    let loaded = false;
+    if (requested) requestedPodcastRef.current = requested.id;
+    restoredPodcastRef.current = resumable.id;
+    void loadAudio(resumable)
       .then((blob) => {
-        if (cancelled || !blob) {
-          if (!blob) restoredPodcastRef.current = null;
-          return;
-        }
+        if (cancelled || !blob) return;
         const url = URL.createObjectURL(blob);
+        if (restoredAudioUrlRef.current && restoredAudioUrlRef.current !== url) {
+          URL.revokeObjectURL(restoredAudioUrlRef.current);
+        }
         restoredAudioUrlRef.current = url;
-        setFinalAudio(
-          url,
-          safeNotebookId,
-          resumable.podcast.title,
-          resumable.podcast.id,
-        );
+        restoredAudioNotebookRef.current = safeNotebookId;
+        loaded = true;
+        setFinalAudio(url, safeNotebookId, resumable.title, resumable.id);
       })
       .catch((error) => {
+        if (cancelled) return;
         restoredPodcastRef.current = null;
-        console.warn("[PodcastView] Could not restore saved episode:", error);
+        if (requested) requestedPodcastRef.current = null;
+        if (requested) {
+          toast({
+            title: "Could not open saved episode",
+            description: error instanceof Error ? error.message : "Try opening it from saved audio overviews.",
+            variant: "destructive",
+          });
+        } else {
+          console.warn("[PodcastView] Could not restore saved episode:", error);
+        }
       });
 
     return () => {
       cancelled = true;
+      if (!loaded) {
+        if (restoredPodcastRef.current === resumable.id) restoredPodcastRef.current = null;
+        if (requested && requestedPodcastRef.current === requested.id) requestedPodcastRef.current = null;
+      }
     };
-  }, [finalAudioUrl, isGenerating, podcasts, safeNotebookId, setFinalAudio]);
+  }, [finalAudioUrl, isGenerating, podcasts, safeNotebookId, setFinalAudio, loadAudio, requestedPodcastId, toast]);
 
   // Handle progress updates
   const handleProgress = useCallback(
     (prog: StreamingProgress) => {
       updateProgress(prog);
-
-      // Track which TTS engine is being used
-      if (prog.usingKokoro !== undefined) {
-        setUsingKokoro(prog.usingKokoro);
-      }
 
       if (prog.phase === "complete") {
         toast({
@@ -289,56 +387,47 @@ const PodcastView: React.FC<PodcastViewProps> = ({ notebookId }) => {
             );
 
             if (combined) {
-              // Validate the combined audio in background
-              AudioValidator.validateBlob(
-                await fetch(combined).then((r) => r.blob()),
-              )
-                .then((v) => {
-                  if (usePodcastGenerationStore.getState().notebookId !== safeNotebookId) return;
-                  setAudioValidation(v);
-                  if (!v.hasSpeech) {
-                    console.warn(
-                      "[PodcastView] Audio validation detected possible silent output",
-                      v.issues,
-                    );
-                    toast({
-                      title: "Audio Quality Warning",
-                      description:
-                        v.issues[0] ||
-                        "Generated audio may be silent. Try different voice settings.",
-                      variant: "destructive",
-                    });
-                  } else {
-                    console.info("[PodcastView] Audio validated successfully");
-                  }
-                })
-                .catch((e) =>
-                  console.warn("[PodcastView] Validation error:", e),
-                );
-
-              // AUTO-SAVE to History (only for Kokoro which produces actual audio files)
-              const scriptTitle = ownedScript.title || "Audio Overview";
-
+              // Fail closed before publication: this check belongs to this exact run.
+              let blob: Blob;
+              let duration: number;
               try {
-                // Fetch the blob from the URL
                 const response = await fetch(combined);
-                const blob = await response.blob();
+                if (!response.ok) throw new Error('Could not read the generated audio.');
+                blob = await response.blob();
                 if (!isCurrent()) { URL.revokeObjectURL(combined); return; }
-
-                console.log("[PodcastView] Auto-save check:", {
-                  scriptTitle,
-                  blobSize: blob.size,
-                  blobType: blob.type,
+                const validation = await AudioValidator.validateBlob(blob);
+                if (!isCurrent()) { URL.revokeObjectURL(combined); return; }
+                if (!validation.valid || !validation.hasSpeech) {
+                  throw new Error(validation.issues[0] || 'Generated audio is silent or could not be decoded.');
+                }
+                setAudioValidation(validation);
+                duration = validation.duration;
+              } catch (error) {
+                URL.revokeObjectURL(combined);
+                if (!isCurrent()) return;
+                setAudioValidation(null);
+                usePodcastGenerationStore.getState().cancelGeneration();
+                updateProgress({ phase: 'error', currentSegment: 0, totalSegments: ownedScript.segments.length, percentage: 0, message: 'Generated audio failed its signal check. Retry from Studio.', canPlay: false });
+                toast({
+                  title: 'Audio check failed',
+                  description: `${error instanceof Error ? error.message : 'Could not check the generated audio.'} Retry from Studio; if it happens again, try another voice.`,
+                  variant: 'destructive',
                 });
+                return;
+              }
 
-                // Only save if we have a meaningful audio blob (> 1000 bytes and audio type)
-                if (blob.size > 1000 && blob.type.startsWith("audio/")) {
-                  console.log("[PodcastView] Saving podcast to history...");
-                  const savedPodcast = await savePodcast({
-                    title: scriptTitle,
-                    blob,
-                    duration: result.totalDuration,
-                  });
+              const scriptTitle = ownedScript.title || "Audio Overview";
+              const saveInput: PodcastSave = {
+                id: crypto.randomUUID(), title: scriptTitle, blob,
+                duration, script: ownedScript,
+                sourceIds: generationSourcesRef.current.get(ownedScript) || [],
+              };
+              try {
+                if (!isCurrent()) { URL.revokeObjectURL(combined); return; }
+                assertCurrent();
+                if (blob.size > 1000 && blob.type.startsWith("audio/") && saveInput.sourceIds.length) {
+                  const savedPodcast = await savePodcast(saveInput);
+                  assertCurrent();
                   if (!isCurrent()) { URL.revokeObjectURL(combined); return; }
                   setFinalAudio(
                     combined,
@@ -346,37 +435,22 @@ const PodcastView: React.FC<PodcastViewProps> = ({ notebookId }) => {
                     scriptTitle,
                     savedPodcast.id,
                   );
-                  console.log("[PodcastView] Podcast saved successfully!");
+                  setPendingSave(null);
                 } else {
-                  setFinalAudio(combined, safeNotebookId, scriptTitle);
-                  console.warn(
-                    "[PodcastView] Skipping auto-save: invalid blob",
-                    { size: blob.size, type: blob.type },
-                  );
+                  throw new Error('The generated episode is missing valid audio or source information.');
                 }
               } catch (e) {
                 if (!isCurrent()) { URL.revokeObjectURL(combined); return; }
-                setFinalAudio(combined, safeNotebookId, scriptTitle);
-                console.error("[PodcastView] Auto-save failed:", e);
+                setPendingSave({ input: saveInput, url: combined, scope: scopeKey, isCurrent,
+                  error: e instanceof Error ? e.message : 'Could not save this episode.' });
                 toast({
-                  title: "Auto-save Failed",
-                  description: "Could not save podcast to history.",
+                  title: "Episode needs saving",
+                  description: "Your audio is ready in this page. Retry saving before closing it.",
                   variant: "destructive",
                 });
               }
             } else {
-              // Web Speech mode - no saveable audio, but we can still play via segment sequencer
-              console.log(
-                "[PodcastView] Web Speech mode - audio plays directly, cannot be saved",
-              );
-              // Set a marker URL so the UI knows generation is complete
-              // The AudioPlayer will need to use the segment sequencer for playback
-              setFinalAudio("webspeech_fallback");
-              toast({
-                title: "Podcast Ready",
-                description:
-                  "Using browser speech. Audio cannot be saved in this mode.",
-              });
+              throw new Error('No audio file was produced for validation.');
             }
           })
           .catch((err) => {
@@ -393,7 +467,7 @@ const PodcastView: React.FC<PodcastViewProps> = ({ notebookId }) => {
           });
       }
     },
-    [safeNotebookId, setAudioReady, setFinalAudio, savePodcast, toast],
+    [safeNotebookId, setAudioReady, setFinalAudio, updateProgress, savePodcast, toast, scopeKey, assertCurrent],
   );
 
   // Generate podcast
@@ -436,7 +510,7 @@ const PodcastView: React.FC<PodcastViewProps> = ({ notebookId }) => {
         return (voice?.gender as "male" | "female") || "female";
       };
 
-      const combinedContent = buildPodcastSourceContext(generationSources, {
+      const combinedContent = buildPodcastEvidenceContext(generationSources, {
         focus: generationFocus,
         maxChars: 12000,
       });
@@ -475,18 +549,21 @@ const PodcastView: React.FC<PodcastViewProps> = ({ notebookId }) => {
       if (!generatedScript.segments?.length) throw new Error('The podcast script has no spoken segments');
       // Inject our custom names and metadata into the script before starting
       generatedScript.metadata = {
+        ...generatedScript.metadata,
         host1Name: host1,
         host2Name: host2,
         type: podcastType,
         format: podcastFormat,
       };
 
+      generationSourcesRef.current.set(generatedScript, generationSources.map(source => source.id));
       startGeneration(safeNotebookId, generatedScript, {
         host1Name: host1,
         host2Name: host2,
         type: podcastType,
         format: podcastFormat,
       });
+      setAudioValidation(null);
 
       setIsStarting(false);
       setShowAudioLab(false);
@@ -576,6 +653,32 @@ const PodcastView: React.FC<PodcastViewProps> = ({ notebookId }) => {
     return `~${Math.floor(seconds / 60)}m ${seconds % 60}s`;
   };
 
+  if (pendingSave && pendingSave.scope === scopeKey) {
+    return <div className="podcast-card podcast-player-container studypod-audio-card">
+      <section className="studypod-listen" aria-labelledby="studypod-unsaved-listen-heading">
+        <div className="studypod-audio-section-heading">
+          <span className="studypod-audio-eyebrow">Listen</span>
+          <h3 id="studypod-unsaved-listen-heading">Current audio overview</h3>
+          <p>Listen or download while this page remains open. Save before closing or reloading.</p>
+        </div>
+        <AudioPlayer audioUrl={pendingSave.url} title={pendingSave.input.title} allowDelete={false} />
+      </section>
+      <section className="studypod-create" aria-labelledby="studypod-unsaved-save-heading">
+        <div className="studypod-audio-section-heading">
+          <span className="studypod-audio-eyebrow">Save</span>
+          <h3 id="studypod-unsaved-save-heading">Episode needs saving</h3>
+        </div>
+        <p role="alert">{pendingSave.error}</p>
+        <button type="button" disabled={isRetryingSave} onClick={() => void retrySave()}>
+          {isRetryingSave ? 'Saving podcast...' : 'Retry saving podcast'}
+        </button>
+        <button type="button" disabled={isRetryingSave} onClick={() => {
+          URL.revokeObjectURL(pendingSave.url); setPendingSave(null); handleCancel();
+        }}>Discard unsaved episode</button>
+      </section>
+    </div>;
+  }
+
   // Minimized view during generation
   if (isGenerating && isMinimized) {
     return (
@@ -624,7 +727,48 @@ const PodcastView: React.FC<PodcastViewProps> = ({ notebookId }) => {
   // Initial state - no script & no audio
   if (!finalAudioUrl && !isGenerating) {
     return (
-      <div className="podcast-card">
+      <div className="podcast-card studypod-audio-card">
+        <section className="studypod-listen" aria-labelledby="studypod-listen-heading">
+          <div className="studypod-audio-section-heading">
+            <span className="studypod-audio-eyebrow">Listen</span>
+            <h3 id="studypod-listen-heading">Saved audio overviews</h3>
+            <p>Pick up an episode you created for this notebook.</p>
+          </div>
+          <div className="studypod-listen-history">
+            <PodcastHistory
+              notebookId={safeNotebookId}
+              sources={sources}
+              sourcesLoading={sourcesLoading}
+              sourcesError={sourcesError}
+              sourcesFetching={sourcesFetching}
+              retrySources={() => { void retrySources(); }}
+              onOpenSource={onOpenSource ? openRecordedSource : undefined}
+              onPlay={(url, title, podcastId) => {
+                if (
+                  restoredAudioUrlRef.current &&
+                  restoredAudioUrlRef.current !== url
+                ) {
+                  URL.revokeObjectURL(restoredAudioUrlRef.current);
+                }
+                restoredAudioUrlRef.current = url;
+                restoredAudioNotebookRef.current = safeNotebookId;
+                restoredPodcastRef.current = podcastId;
+                setFinalAudio(url, safeNotebookId, title, podcastId);
+              }}
+              onDeleted={handleDeletedPodcast}
+              currentAudioUrl={finalAudioUrl}
+              currentPodcastId={currentPodcastId}
+            />
+          </div>
+        </section>
+
+        <section className="studypod-create" aria-labelledby="studypod-create-heading">
+          <div className="studypod-audio-section-heading">
+            <span className="studypod-audio-eyebrow">Create</span>
+            <h3 id="studypod-create-heading">New audio overview</h3>
+            <p>Create a guided reading of selected source passages, with brief host introductions.</p>
+            <p id="studypod-audio-source-scope" role="status" aria-live="polite">{sourceScopeMessage}</p>
+          </div>
         <div className="podcast-header">
           <div className="podcast-icon">
             <FontAwesomeIcon icon={faMicrophone} />
@@ -632,25 +776,25 @@ const PodcastView: React.FC<PodcastViewProps> = ({ notebookId }) => {
           <div className="podcast-title-section">
             <h3 className="podcast-title">Audio Overview</h3>
             <p className="podcast-subtitle">
-              AI-generated podcast from your sources
+              Selected source passages read in their original words, with short introductions.
             </p>
           </div>
         </div>
 
-        <div className="podcast-provider">
-          <span className="provider-label">Engine</span>
-          <span className="provider-value">Kokoro TTS (High Quality)</span>
-        </div>
-
         {showAudioLab ? (
-          <div className="audio-lab-overlay glassmorphism">
+          <div id="studypod-audio-customize" className="audio-lab-overlay glassmorphism">
             <div className="audio-lab-header">
-              <h4>
-                <FontAwesomeIcon icon={faFlask} /> Audio Lab
+              <h4 ref={customizeHeadingRef} tabIndex={-1}>
+                <FontAwesomeIcon icon={faFlask} aria-hidden="true" /> Customize audio
               </h4>
               <button
+                type="button"
                 className="close-lab"
-                onClick={() => setShowAudioLab(false)}
+                aria-label="Close audio customization"
+                onClick={() => {
+                  setShowAudioLab(false);
+                  requestAnimationFrame(() => customizeAudioRef.current?.focus());
+                }}
               >
                 <FontAwesomeIcon icon={faXmark} />
               </button>
@@ -670,137 +814,11 @@ const PodcastView: React.FC<PodcastViewProps> = ({ notebookId }) => {
                 }
                 className="w-full"
               >
-                <TabsList className="grid w-full grid-cols-2">
-                  <TabsTrigger value="dialogue">Podcast (Dialogue)</TabsTrigger>
-                  <TabsTrigger value="solo">Solo Explainer</TabsTrigger>
+                <TabsList className="audio-format-tabs-list grid w-full grid-cols-2">
+                  <TabsTrigger value="dialogue">Two-host reading</TabsTrigger>
+                  <TabsTrigger value="solo">Solo reading</TabsTrigger>
                 </TabsList>
               </Tabs>
-            </div>
-
-            <div
-              className="audio-lab-grid"
-              style={{
-                gridTemplateColumns:
-                  podcastFormat === "solo" ? "1fr" : "1fr 1fr",
-                gap: "16px",
-                marginBottom: "24px",
-              }}
-            >
-              <div className="flex flex-col gap-4">
-                <div className="lab-input-group">
-                  <Label htmlFor="host1">
-                    <FontAwesomeIcon icon={faKeyboard} />{" "}
-                    {podcastFormat === "solo" ? "Narrator Name" : "Host 1 Name"}
-                  </Label>
-                  <Input
-                    id="host1"
-                    value={host1}
-                    onChange={(e) => setHost1(e.target.value)}
-                    placeholder="e.g. Alex"
-                    className="lab-input"
-                  />
-                </div>
-                <div className="lab-input-group">
-                  <Label htmlFor="host1Voice">
-                    <FontAwesomeIcon icon={faMicrophone} />{" "}
-                    {podcastFormat === "solo"
-                      ? "Narrator Voice"
-                      : "Host 1 Voice"}
-                  </Label>
-                  <Select value={host1Voice} onValueChange={setHost1Voice}>
-                    <SelectTrigger className="lab-input flex items-center justify-between text-left text-slate-100">
-                      <SelectValue placeholder="Select voice" />
-                    </SelectTrigger>
-                    <SelectContent className="bg-slate-900 border-slate-800 text-slate-100 max-h-[250px] overflow-y-auto z-[100]">
-                      <div className="px-2 py-1.5 text-xs font-semibold text-slate-400">
-                        Male Voices
-                      </div>
-                      {Object.entries(KOKORO_VOICES)
-                        .filter(([_, v]) => v.gender === "male")
-                        .map(([id, voice]) => (
-                          <SelectItem
-                            key={id}
-                            value={id}
-                            className="cursor-pointer hover:bg-slate-800 focus:bg-slate-800 text-slate-200"
-                          >
-                            {voice.name}
-                          </SelectItem>
-                        ))}
-                      <div className="px-2 py-1.5 text-xs font-semibold text-slate-400 mt-2">
-                        Female Voices
-                      </div>
-                      {Object.entries(KOKORO_VOICES)
-                        .filter(([_, v]) => v.gender === "female")
-                        .map(([id, voice]) => (
-                          <SelectItem
-                            key={id}
-                            value={id}
-                            className="cursor-pointer hover:bg-slate-800 focus:bg-slate-800 text-slate-200"
-                          >
-                            {voice.name}
-                          </SelectItem>
-                        ))}
-                    </SelectContent>
-                  </Select>
-                </div>
-              </div>
-
-              {podcastFormat === "dialogue" && (
-                <div className="flex flex-col gap-4">
-                  <div className="lab-input-group">
-                    <Label htmlFor="host2">
-                      <FontAwesomeIcon icon={faKeyboard} /> Host 2 Name
-                    </Label>
-                    <Input
-                      id="host2"
-                      value={host2}
-                      onChange={(e) => setHost2(e.target.value)}
-                      placeholder="e.g. Sarah"
-                      className="lab-input"
-                    />
-                  </div>
-                  <div className="lab-input-group">
-                    <Label htmlFor="host2Voice">
-                      <FontAwesomeIcon icon={faMicrophone} /> Host 2 Voice
-                    </Label>
-                    <Select value={host2Voice} onValueChange={setHost2Voice}>
-                      <SelectTrigger className="lab-input flex items-center justify-between text-left text-slate-100">
-                        <SelectValue placeholder="Select voice" />
-                      </SelectTrigger>
-                      <SelectContent className="bg-slate-900 border-slate-800 text-slate-100 max-h-[250px] overflow-y-auto z-[100]">
-                        <div className="px-2 py-1.5 text-xs font-semibold text-slate-400">
-                          Female Voices
-                        </div>
-                        {Object.entries(KOKORO_VOICES)
-                          .filter(([_, v]) => v.gender === "female")
-                          .map(([id, voice]) => (
-                            <SelectItem
-                              key={id}
-                              value={id}
-                              className="cursor-pointer hover:bg-slate-800 focus:bg-slate-800 text-slate-200"
-                            >
-                              {voice.name}
-                            </SelectItem>
-                          ))}
-                        <div className="px-2 py-1.5 text-xs font-semibold text-slate-400 mt-2">
-                          Male Voices
-                        </div>
-                        {Object.entries(KOKORO_VOICES)
-                          .filter(([_, v]) => v.gender === "male")
-                          .map(([id, voice]) => (
-                            <SelectItem
-                              key={id}
-                              value={id}
-                              className="cursor-pointer hover:bg-slate-800 focus:bg-slate-800 text-slate-200"
-                            >
-                              {voice.name}
-                            </SelectItem>
-                          ))}
-                      </SelectContent>
-                    </Select>
-                  </div>
-                </div>
-              )}
             </div>
 
             <div
@@ -819,15 +837,14 @@ const PodcastView: React.FC<PodcastViewProps> = ({ notebookId }) => {
                 maxLength={500}
               />
               <p className="lab-hint">
-                Optional. Leave blank for a balanced overview across a long book,
-                or name a book, chapter, concept, or question for the hosts to
-                explore.
+                Optional. Name a book, chapter, concept, or question to help select
+                passages. A long source may be covered only in part.
               </p>
             </div>
 
             <div className="lab-length-selector">
               <Label>
-                <FontAwesomeIcon icon={faHourglassHalf} /> Episode Style
+                <FontAwesomeIcon icon={faHourglassHalf} /> Passage coverage
               </Label>
               <Tabs
                 value={podcastType}
@@ -844,42 +861,175 @@ const PodcastView: React.FC<PodcastViewProps> = ({ notebookId }) => {
               </Tabs>
               <p className="lab-hint">
                 {podcastType === "brief" &&
-                  "~2-3 mins podcast covering highlights."}
+                  "A shorter selection of complete source passages."}
                 {podcastType === "standard" &&
-                  "~7-10 mins educational deep dive."}
+                  "A standard selection of complete source passages. Length depends on the source."}
                 {podcastType === "deep-dive" &&
-                  "15+ mins comprehensive masterclass."}
+                  "A broader selection of complete source passages where available."}
               </p>
             </div>
+
+            <details className="audio-voice-disclosure">
+              <summary>
+                <span>{podcastFormat === "solo" ? "Narrator and voice settings" : "Host and voice settings"}</span>
+                <span className="audio-voice-disclosure-note">
+                  {podcastFormat === "solo" ? "Optional · customize narration" : "Optional · customize speakers"}
+                </span>
+              </summary>
+              <div
+                className={`audio-lab-grid${podcastFormat === "solo" ? " audio-lab-grid--solo" : ""}`}
+              >
+                <div className="flex flex-col gap-4">
+                  <div className="lab-input-group">
+                    <Label htmlFor="host1">
+                      <FontAwesomeIcon icon={faKeyboard} />{" "}
+                      {podcastFormat === "solo" ? "Narrator Name" : "Host 1 Name"}
+                    </Label>
+                    <Input
+                      id="host1"
+                      value={host1}
+                      onChange={(e) => setHost1(e.target.value)}
+                      placeholder="e.g. Alex"
+                      className="lab-input"
+                    />
+                  </div>
+                  <div className="lab-input-group">
+                    <Label htmlFor="host1Voice">
+                      <FontAwesomeIcon icon={faMicrophone} />{" "}
+                      {podcastFormat === "solo"
+                        ? "Narrator Voice"
+                        : "Host 1 Voice"}
+                    </Label>
+                    <Select value={host1Voice} onValueChange={setHost1Voice}>
+                      <SelectTrigger id="host1Voice" className="lab-input audio-voice-select flex items-center justify-between text-left text-slate-100">
+                        <SelectValue placeholder="Select voice" />
+                      </SelectTrigger>
+                      <SelectContent className="bg-slate-900 border-slate-800 text-slate-100 max-h-[250px] overflow-y-auto z-[100]">
+                        <div className="px-2 py-1.5 text-xs font-semibold text-slate-400">
+                          Male Voices
+                        </div>
+                        {Object.entries(KOKORO_VOICES)
+                          .filter(([_, v]) => v.gender === "male")
+                          .map(([id, voice]) => (
+                            <SelectItem
+                              key={id}
+                              value={id}
+                              className="cursor-pointer hover:bg-slate-800 focus:bg-slate-800 text-slate-200"
+                            >
+                              {voice.name}
+                            </SelectItem>
+                          ))}
+                        <div className="px-2 py-1.5 text-xs font-semibold text-slate-400 mt-2">
+                          Female Voices
+                        </div>
+                        {Object.entries(KOKORO_VOICES)
+                          .filter(([_, v]) => v.gender === "female")
+                          .map(([id, voice]) => (
+                            <SelectItem
+                              key={id}
+                              value={id}
+                              className="cursor-pointer hover:bg-slate-800 focus:bg-slate-800 text-slate-200"
+                            >
+                              {voice.name}
+                            </SelectItem>
+                          ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                </div>
+
+                {podcastFormat === "dialogue" && (
+                  <div className="flex flex-col gap-4">
+                    <div className="lab-input-group">
+                      <Label htmlFor="host2">
+                        <FontAwesomeIcon icon={faKeyboard} /> Host 2 Name
+                      </Label>
+                      <Input
+                        id="host2"
+                        value={host2}
+                        onChange={(e) => setHost2(e.target.value)}
+                        placeholder="e.g. Sarah"
+                        className="lab-input"
+                      />
+                    </div>
+                    <div className="lab-input-group">
+                      <Label htmlFor="host2Voice">
+                        <FontAwesomeIcon icon={faMicrophone} /> Host 2 Voice
+                      </Label>
+                      <Select value={host2Voice} onValueChange={setHost2Voice}>
+                        <SelectTrigger id="host2Voice" className="lab-input audio-voice-select flex items-center justify-between text-left text-slate-100">
+                          <SelectValue placeholder="Select voice" />
+                        </SelectTrigger>
+                        <SelectContent className="bg-slate-900 border-slate-800 text-slate-100 max-h-[250px] overflow-y-auto z-[100]">
+                          <div className="px-2 py-1.5 text-xs font-semibold text-slate-400">
+                            Female Voices
+                          </div>
+                          {Object.entries(KOKORO_VOICES)
+                            .filter(([_, v]) => v.gender === "female")
+                            .map(([id, voice]) => (
+                              <SelectItem
+                                key={id}
+                                value={id}
+                                className="cursor-pointer hover:bg-slate-800 focus:bg-slate-800 text-slate-200"
+                              >
+                                {voice.name}
+                              </SelectItem>
+                            ))}
+                          <div className="px-2 py-1.5 text-xs font-semibold text-slate-400 mt-2">
+                            Male Voices
+                          </div>
+                          {Object.entries(KOKORO_VOICES)
+                            .filter(([_, v]) => v.gender === "male")
+                            .map(([id, voice]) => (
+                              <SelectItem
+                                key={id}
+                                value={id}
+                                className="cursor-pointer hover:bg-slate-800 focus:bg-slate-800 text-slate-200"
+                              >
+                                {voice.name}
+                              </SelectItem>
+                            ))}
+                        </SelectContent>
+                      </Select>
+                    </div>
+                  </div>
+                )}
+              </div>
+            </details>
 
             <button
               className={`podcast-generate-btn ${isStarting ? "loading" : ""}`}
               onClick={() => { void handleGenerate(); }}
-              disabled={usableSources.length === 0 || isStarting}
+              disabled={cannotCreateAudio || isStarting}
+              aria-describedby="studypod-audio-source-scope"
               data-testid="btn-start-production"
             >
               {isStarting ? (
                 <>
                   <FontAwesomeIcon icon={faArrowsRotate} spin />
-                  Processing...
+                  Preparing script...
                 </>
               ) : (
                 <>
                   <FontAwesomeIcon icon={faPlay} />
-                  Start Production
+                  Create audio overview
                 </>
               )}
             </button>
           </div>
         ) : (
           <button
+            ref={customizeAudioRef}
+            type="button"
             className="podcast-generate-btn"
             onClick={() => setShowAudioLab(true)}
-            disabled={usableSources.length === 0}
+            aria-expanded={false}
+            disabled={cannotCreateAudio}
+            aria-describedby="studypod-audio-source-scope"
             data-testid="btn-generate-podcast"
           >
             <FontAwesomeIcon icon={faPlay} />
-            Generate Podcast
+            Customize audio
           </button>
         )}
 
@@ -888,32 +1038,16 @@ const PodcastView: React.FC<PodcastViewProps> = ({ notebookId }) => {
             className="podcast-settings-btn"
             onClick={() => setIsProviderSettingsOpen(true)}
           >
-            <FontAwesomeIcon icon={faGear} /> Audio Studio
+            <FontAwesomeIcon icon={faGear} /> Voice and provider settings
           </button>
         </div>
+        </section>
 
         <TTSProviderSettings
           isOpen={isProviderSettingsOpen}
           onClose={() => setIsProviderSettingsOpen(false)}
         />
 
-        {/* Podcast History */}
-        <PodcastHistory
-          notebookId={safeNotebookId}
-          onPlay={(url, title, podcastId) => {
-            if (
-              restoredAudioUrlRef.current &&
-              restoredAudioUrlRef.current !== url
-            ) {
-              URL.revokeObjectURL(restoredAudioUrlRef.current);
-            }
-            restoredAudioUrlRef.current = url;
-            restoredPodcastRef.current = podcastId;
-            setFinalAudio(url, safeNotebookId, title, podcastId);
-          }}
-          currentAudioUrl={finalAudioUrl}
-          currentPodcastId={currentPodcastId}
-        />
       </div>
     );
   }
@@ -977,9 +1111,7 @@ const PodcastView: React.FC<PodcastViewProps> = ({ notebookId }) => {
         </div>
 
         <p className="generating-hint">
-          {usingKokoro
-            ? "Generating high-quality audio in background (page stays responsive!)"
-            : "Using browser's built-in voice for fast generation"}
+          Preparing audio segments. Keep this page open until the episode is saved.
         </p>
       </div>
     );
@@ -987,7 +1119,13 @@ const PodcastView: React.FC<PodcastViewProps> = ({ notebookId }) => {
 
   // Final Player state - Generation Complete
   return (
-    <div className="podcast-card podcast-player-container">
+    <div className="podcast-card podcast-player-container studypod-audio-card">
+      <section className="studypod-listen" aria-labelledby="studypod-current-listen-heading">
+        <div className="studypod-audio-section-heading">
+          <span className="studypod-audio-eyebrow">Listen</span>
+          <h3 id="studypod-current-listen-heading">Current audio overview</h3>
+          <p>Listen here, then return to another saved episode below.</p>
+        </div>
       <AudioPlayer
         audioUrl={finalAudioUrl!}
         title={script?.title || "Audio Overview"}
@@ -1003,15 +1141,6 @@ const PodcastView: React.FC<PodcastViewProps> = ({ notebookId }) => {
           usePodcastGenerationStore.getState().reset();
         }}
       />
-
-      <div className="player-footer">
-        <button className="footer-btn" onClick={() => { void handleGenerate(); }}>
-          <FontAwesomeIcon icon={faArrowsRotate} /> Regenerate
-        </button>
-        <button className="footer-btn" onClick={() => setIsSettingsOpen(true)}>
-          <FontAwesomeIcon icon={faGear} /> Settings
-        </button>
-      </div>
 
       {audioValidation && !audioValidation.hasSpeech && (
         <div className="podcast-validation-warning">
@@ -1030,11 +1159,55 @@ const PodcastView: React.FC<PodcastViewProps> = ({ notebookId }) => {
             ✓
           </span>
           <span className="validation-text">
-            Audio verified ({audioValidation.duration.toFixed(0)}s,{" "}
+            Audio signal detected ({audioValidation.duration.toFixed(0)}s,{" "}
             {audioValidation.sampleRate / 1000}kHz)
           </span>
         </div>
       )}
+
+      <div className="studypod-listen-history">
+        <PodcastHistory
+          notebookId={safeNotebookId}
+          sources={sources}
+          sourcesLoading={sourcesLoading}
+          sourcesError={sourcesError}
+          sourcesFetching={sourcesFetching}
+          retrySources={() => { void retrySources(); }}
+          onOpenSource={onOpenSource ? openRecordedSource : undefined}
+          onPlay={(url, title, podcastId) => {
+            if (
+              restoredAudioUrlRef.current &&
+              restoredAudioUrlRef.current !== url
+            ) {
+              URL.revokeObjectURL(restoredAudioUrlRef.current);
+            }
+            restoredAudioUrlRef.current = url;
+            restoredAudioNotebookRef.current = safeNotebookId;
+            restoredPodcastRef.current = podcastId;
+            setFinalAudio(url, safeNotebookId, title, podcastId);
+          }}
+          onDeleted={handleDeletedPodcast}
+          currentAudioUrl={finalAudioUrl}
+          currentPodcastId={currentPodcastId}
+        />
+      </div>
+      </section>
+
+      <section className="studypod-create studypod-create-again" aria-labelledby="studypod-create-again-heading">
+        <div className="studypod-audio-section-heading">
+          <span className="studypod-audio-eyebrow">Create</span>
+          <h3 id="studypod-create-again-heading">Make another overview</h3>
+          <p id="studypod-audio-regenerate-scope" role="status" aria-live="polite">{sourceScopeMessage}</p>
+        </div>
+        <div className="player-footer">
+          <button className="footer-btn" onClick={() => { void handleGenerate(); }} disabled={cannotCreateAudio || isStarting} aria-describedby="studypod-audio-regenerate-scope">
+            <FontAwesomeIcon icon={faArrowsRotate} /> Regenerate overview
+          </button>
+          <button className="footer-btn" onClick={() => setIsSettingsOpen(true)}>
+            <FontAwesomeIcon icon={faGear} /> Settings
+          </button>
+        </div>
+      </section>
 
       <TTSSettingsDialog
         isOpen={isSettingsOpen}
@@ -1045,23 +1218,6 @@ const PodcastView: React.FC<PodcastViewProps> = ({ notebookId }) => {
         onClose={() => setIsProviderSettingsOpen(false)}
       />
 
-      {/* Podcast History */}
-      <PodcastHistory
-        notebookId={safeNotebookId}
-        onPlay={(url, title, podcastId) => {
-          if (
-            restoredAudioUrlRef.current &&
-            restoredAudioUrlRef.current !== url
-          ) {
-            URL.revokeObjectURL(restoredAudioUrlRef.current);
-          }
-          restoredAudioUrlRef.current = url;
-          restoredPodcastRef.current = podcastId;
-          setFinalAudio(url, safeNotebookId, title, podcastId);
-        }}
-        currentAudioUrl={finalAudioUrl}
-        currentPodcastId={currentPodcastId}
-      />
     </div>
   );
 };

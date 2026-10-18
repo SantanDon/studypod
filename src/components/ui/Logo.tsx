@@ -1,5 +1,4 @@
-import { FontAwesomeIcon } from "@fortawesome/react-fontawesome";
-import { faBookOpen } from "@fortawesome/free-solid-svg-icons";
+import { AudioLines, BookOpen } from "lucide-react";
 
 interface LogoProps {
   size?: "sm" | "md" | "lg";
@@ -7,28 +6,12 @@ interface LogoProps {
 }
 
 const Logo = ({ size = "md", className = "" }: LogoProps) => {
-  const sizeClasses = {
-    sm: "w-6 h-6",
-    md: "w-8 h-8",
-    lg: "w-12 h-12",
-  };
-
-  const iconSizes = {
-    sm: "text-xs",
-    md: "text-sm",
-    lg: "text-xl",
-  };
-
+  const sizes = { sm: "h-6 w-6", md: "h-9 w-9", lg: "h-12 w-12" };
   return (
-    <div
-      className={`${sizeClasses[size]} bg-gradient-to-br from-blue-600 to-indigo-700 rounded-lg flex items-center justify-center shadow-md ${className}`}
-    >
-      <FontAwesomeIcon
-        icon={faBookOpen}
-        className={`${iconSizes[size]} text-white`}
-      />
+    <div aria-hidden="true" className={`${sizes[size]} relative flex shrink-0 items-center justify-center rounded-xl bg-teal-800 text-white ${className}`}>
+      <BookOpen className="h-[55%] w-[55%]" strokeWidth={1.8} />
+      <AudioLines className="absolute -bottom-1 -right-1 h-[45%] w-[45%] rounded bg-[#faf8f3] p-0.5 text-teal-800 dark:bg-background dark:text-teal-300" />
     </div>
   );
 };
-
 export default Logo;

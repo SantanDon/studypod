@@ -27,6 +27,26 @@ const extensionOf = (fileName: string) => {
   return dot >= 0 ? normalized.slice(dot) : "";
 };
 
+export const detectUploadSourceType = (
+  file: Pick<File, "name" | "type">,
+): "pdf" | "doc" | "audio" | "image" | "ebook" | "text" => {
+  // Browsers can leave MIME types blank or report application/octet-stream.
+  // Use the validated filename format before falling back to MIME hints.
+  const extension = extensionOf(file.name);
+  if (extension === ".pdf") return "pdf";
+  if (extension === ".docx") return "doc";
+  if ([".mp3", ".wav", ".m4a"].includes(extension)) return "audio";
+  if (extension === ".epub") return "ebook";
+  if ([".txt", ".md", ".markdown"].includes(extension)) return "text";
+  const mime = file.type.toLowerCase();
+  if (mime.includes("pdf")) return "pdf";
+  if (mime.includes("wordprocessingml")) return "doc";
+  if (mime.startsWith("audio/")) return "audio";
+  if (mime.startsWith("image/")) return "image";
+  if (mime === "application/epub+zip") return "ebook";
+  return "text";
+};
+
 export const validateSourceFiles = (files: File[]) => {
   const accepted: File[] = [];
   const rejected: RejectedSourceFile[] = [];

@@ -5,6 +5,7 @@ import SourceComparisonView from '@/components/notebook/SourceComparisonView';
 import { useSourceComparison } from '@/components/notebook/hooks/useSourceComparison';
 
 vi.mock('@/components/notebook/hooks/useSourceComparison', () => ({
+  COMPARISON_CHARACTER_LIMIT: 3000,
   useSourceComparison: vi.fn(),
 }));
 

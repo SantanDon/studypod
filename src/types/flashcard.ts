@@ -17,6 +17,7 @@ export interface Flashcard {
 }
 
 export interface FlashcardDeck {
+  version?: number;
   id: string;
   notebookId: string;
   name: string;

@@ -6,6 +6,7 @@
 
 import { TTSProvider, TTSVoice, TTSRequest, TTSResponse } from './ttsService';
 import { KokoroVoiceId } from './kokoroTTSProvider';
+import { generateCompleteKokoroAudio } from './kokoroTokenGeneration';
 
 // Premium voices with enhanced quality - more options than base
 export interface PremiumVoiceInfo {
@@ -115,7 +116,7 @@ export class KokoroPremiumTTSProvider implements TTSProvider {
       const voice = request.voice as KokoroVoiceId || this.PREMIUM_HOST_VOICES.host1;
 
       // Enhanced settings for premium quality
-      const result = await this.kokoroInstance.generate(request.text, {
+      const result = await generateCompleteKokoroAudio(this.kokoroInstance, request.text, {
         voice: voice,
         speed: request.speed || 0.9, // Slightly slower for more natural delivery
       });

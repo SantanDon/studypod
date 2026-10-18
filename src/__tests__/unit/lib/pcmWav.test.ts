@@ -27,6 +27,10 @@ function wav(values: number[], { format = 3, bits = 32, rate = 24000, channels =
 }
 const samples = (buffer: ArrayBuffer) => { const v = new DataView(buffer); return Array.from({ length: (buffer.byteLength - 44) / 2 }, (_, i) => v.getInt16(44 + i * 2, true)); };
 describe('podcast WAV fallback integrity', () => {
+    it('preserves every signed PCM16 sample exactly', () => {
+        const values = Array.from({ length: 65536 }, (_, i) => i - 32768);
+        expect(samples(concatenatePcmWav([{ buffer: wav(values, { format: 1, bits: 16 }) }]))).toEqual(values);
+    });
     it('converts float sample values to PCM16 rather than copying float bit patterns', () => {
         const result = concatenatePcmWav([{ buffer: wav([0, 0.5, -0.5, 1, -1]) }]);
         expect(new DataView(result).getUint16(20, true)).toBe(1);

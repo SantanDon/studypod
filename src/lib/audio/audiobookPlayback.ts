@@ -159,6 +159,16 @@ export function loadLocalAudiobookProgress(
   }
 }
 
+export function clearLocalAudiobookProgress(
+  fileName: string,
+  storage?: Pick<Storage, "removeItem"> | null,
+) {
+  try {
+    const target = storage === undefined ? (typeof window !== "undefined" ? window.localStorage : null) : storage;
+    target?.removeItem(audiobookProgressStorageKey(fileName));
+  } catch { /* Storage may be unavailable, including its getter. */ }
+}
+
 export function saveLocalAudiobookProgress(
   fileName: string,
   listenerState: Partial<AudiobookListenerState>,
@@ -205,10 +215,9 @@ export function mergeAudiobookListenerState(
       normalizedLocal.progressPercent,
       newer.progressPercent,
     ),
-    updatedAt:
-      newer.updatedAt === new Date(0).toISOString()
-        ? new Date().toISOString()
-        : newer.updatedAt,
+    // Merging is not a listening event: an empty client must remain older
+    // than durable progress fetched by a fresh browser context.
+    updatedAt: newer.updatedAt,
   };
 }
 

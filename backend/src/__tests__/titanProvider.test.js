@@ -10,6 +10,22 @@ const log = vi.hoisted(() => ({
 vi.mock("../utils/logger.js", () => ({ logger: log }));
 
 describe("Titan provider configuration", () => {
+  it("disables default Ollama thinking for bounded interactive responses", async () => {
+    for (const name of ["OPENAI_API_KEY", "TOKENLLM7_KEY", "NVIDIA_API_KEY", "GEMINI_API_KEY", "ANTHROPIC_API_KEY", "GROQ_API_KEY", "VITE_GROQ_API_KEY"]) vi.stubEnv(name, "");
+    vi.stubEnv("OVHCLOUD_ENABLED", "false");
+    vi.stubEnv("TOKENLLM7_ENABLED", "false");
+    vi.stubEnv("OLLAMA_BASE_URL", "http://127.0.0.1:11434");
+    vi.stubEnv("OLLAMA_MODEL", "qwen3.5:9b");
+    let requestBody;
+    vi.stubGlobal("fetch", vi.fn(async (_url, options) => {
+      requestBody = JSON.parse(options.body);
+      return { ok: true, json: async () => ({ choices: [{ message: { content: "17 blue trays" } }] }) };
+    }));
+    const { dispatchToTitan } = await import("../services/titanProvider.js?ollama-interactive-test");
+    const result = await dispatchToTitan({ messages: [{ role: "user", content: "How many trays?" }], priority: "context" });
+    expect(requestBody.reasoning_effort).toBe("none");
+    expect(result.answer).toBe("17 blue trays");
+  });
   afterEach(() => {
     vi.unstubAllEnvs();
     vi.unstubAllGlobals();

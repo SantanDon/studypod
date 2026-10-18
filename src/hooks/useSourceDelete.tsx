@@ -3,11 +3,13 @@ import { localStorageService } from "@/services/localStorageService";
 import { useAuth } from "@/hooks/useAuth";
 import { useToast } from "@/hooks/use-toast";
 import { ApiService } from "@/services/apiService";
+import { useGuest } from "@/hooks/useGuest";
 
 export const useSourceDelete = () => {
   const queryClient = useQueryClient();
   const { session } = useAuth();
   const { toast } = useToast();
+  const { isGuest, releaseSourceSlot } = useGuest();
 
   const deleteSource = useMutation({
     mutationFn: async ({ notebookId, sourceId }: { notebookId: string, sourceId: string }) => {
@@ -32,6 +34,7 @@ export const useSourceDelete = () => {
             console.error("Error deleting source from local storage");
             throw new Error("Failed to delete source");
           }
+          if (isGuest) releaseSourceSlot(notebookId);
         }
 
         console.log("Source deleted successfully");

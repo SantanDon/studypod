@@ -487,7 +487,10 @@ class LocalStorageService {
       ...updates,
       updated_at: new Date().toISOString(),
     };
-    this.saveToStorage("sources", sources);
+    const result = this.saveToStorage("sources", sources);
+    if (!result.success) {
+      throw new Error(`Failed to update source: ${result.error || "Storage unavailable"}`);
+    }
     return sources[index];
   }
 
@@ -496,7 +499,10 @@ class LocalStorageService {
     const sourceToDelete = sources.find((s) => s.id === id);
     const filtered = sources.filter((s) => s.id !== id);
     if (filtered.length === sources.length) return false;
-    this.saveToStorage("sources", filtered);
+    const result = this.saveToStorage("sources", filtered);
+    if (!result.success) {
+      throw new Error(`Failed to delete source: ${result.error || "Storage unavailable"}`);
+    }
     
     // Trigger sync for the notebook that contained this source
     if (sourceToDelete) {

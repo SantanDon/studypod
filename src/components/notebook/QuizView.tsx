@@ -17,6 +17,8 @@ interface QuizViewProps {
   onCancel?: () => void;
   isLastQuestion: boolean;
   timeLimit?: number;
+  isCompleting?: boolean;
+  completionError?: string | null;
 }
 
 const QuizView: React.FC<QuizViewProps> = ({
@@ -28,6 +30,8 @@ const QuizView: React.FC<QuizViewProps> = ({
   onComplete,
   onCancel,
   isLastQuestion,
+  isCompleting = false,
+  completionError,
 }) => {
   const [selectedAnswer, setSelectedAnswer] = useState<number | null>(null);
   const [result, setResult] = useState<QuizResult | null>(null);
@@ -238,10 +242,13 @@ const QuizView: React.FC<QuizViewProps> = ({
               Submit Answer
             </Button>
           ) : (
-            <Button onClick={handleNext} size="lg">
-              {isLastQuestion ? 'See Results' : 'Next Question'}
-              <i className="fi fi-rr-angle-right h-4 w-4 ml-2"></i>
+            <>
+            {completionError && <p role="alert" className="text-sm text-destructive">{completionError}</p>}
+            <Button onClick={handleNext} size="lg" disabled={isCompleting} aria-label={isCompleting ? 'Saving results…' : isLastQuestion ? 'See Results' : 'Next Question'}>
+              {isCompleting ? 'Saving results…' : isLastQuestion ? 'See Results' : 'Next Question'}
+              <i aria-hidden="true" className="fi fi-rr-angle-right h-4 w-4 ml-2"></i>
             </Button>
+            </>
           )}
         </div>
       </div>

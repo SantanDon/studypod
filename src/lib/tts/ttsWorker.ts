@@ -39,18 +39,21 @@ export type ProgressCallback = (message: string, percentage: number) => void;
 class TTSWorkerManager {
   private worker: Worker | null = null;
   private isReady = false;
-  private isInitializing = false;
   private pendingRequests = new Map<string, {
     resolve: (result: SynthesisResult) => void;
     reject: (error: Error) => void;
+    timer: ReturnType<typeof setTimeout>;
   }>();
   private progressCallbacks = new Map<string, ProgressCallback>();
   private initPromise: Promise<void> | null = null;
+  private initialization: {
+    resolve: () => void;
+    reject: (error: Error) => void;
+    timer: ReturnType<typeof setTimeout>;
+    onProgress?: ProgressCallback;
+  } | null = null;
   private webgpuAvailable: boolean | null = null;
 
-  /**
-   * Check if Web Workers with SharedArrayBuffer are supported
-   */
   static isSupported(): boolean {
     try {
       // Check for Worker support
@@ -68,187 +71,172 @@ class TTSWorkerManager {
     }
   }
 
-  /**
-   * Initialize the worker
-   */
   async initialize(onProgress?: ProgressCallback): Promise<void> {
     if (this.isReady) return;
     if (this.initPromise) return this.initPromise;
 
-    this.initPromise = this._doInitialize(onProgress);
-    return this.initPromise;
+    const worker = new Worker(
+      new URL('./ttsWorkerScript.ts', import.meta.url),
+      { type: 'module' },
+    );
+    this.worker = worker;
+    worker.onmessage = (event: MessageEvent<TTSWorkerResponse>) => {
+      if (this.worker === worker) this.handleWorkerMessage(event.data);
+    };
+    worker.onerror = (event) => {
+      if (this.worker === worker) {
+        this.disposeWorker(new Error(event.message || 'Worker error'));
+      }
+    };
+    worker.onmessageerror = () => {
+      if (this.worker === worker) {
+        this.disposeWorker(new Error('Worker response could not be decoded'));
+      }
+    };
+
+    const promise = new Promise<void>((resolve, reject) => {
+      const timer = setTimeout(() => {
+        if (this.worker === worker) {
+          this.disposeWorker(new Error('Worker initialization timeout - model loading took too long. This may be due to slow network or large model size.'));
+        }
+      }, 120000);
+      this.initialization = { resolve, reject, timer, onProgress };
+    });
+    this.initPromise = promise;
+    try {
+      worker.postMessage({ type: 'init' } as TTSWorkerRequest);
+    } catch (error) {
+      this.disposeWorker(this.asError(error));
+    }
+    return promise;
   }
 
-  private async _doInitialize(onProgress?: ProgressCallback): Promise<void> {
-    if (this.isInitializing) return;
-    this.isInitializing = true;
+  private asError(error: unknown): Error {
+    return error instanceof Error ? error : new Error(String(error));
+  }
 
-    try {
-      // Create worker from the worker script
-      this.worker = new Worker(
-        new URL('./ttsWorkerScript.ts', import.meta.url),
-        { type: 'module' }
-      );
+  private settleInitialization(error?: Error): void {
+    const initialization = this.initialization;
+    if (!initialization) return;
+    this.initialization = null;
+    this.initPromise = null;
+    clearTimeout(initialization.timer);
+    if (error) initialization.reject(error);
+    else initialization.resolve();
+  }
 
-      // Set up message handler
-      this.worker.onmessage = (event: MessageEvent<TTSWorkerResponse>) => {
-        this.handleWorkerMessage(event.data);
-      };
+  private settleRequest(
+    id: string,
+    outcome: { result: SynthesisResult } | { error: Error },
+  ): void {
+    const request = this.pendingRequests.get(id);
+    if (!request) return;
+    this.pendingRequests.delete(id);
+    this.progressCallbacks.delete(id);
+    clearTimeout(request.timer);
+    if ('error' in outcome) request.reject(outcome.error);
+    else request.resolve(outcome.result);
+  }
 
-      this.worker.onerror = (error) => {
-        console.error('TTS Worker error:', error);
-        this.handleWorkerError(new Error(error.message || 'Worker error'));
-      };
-
-      // Wait for worker to be ready
-      await new Promise<void>((resolve, reject) => {
-        const timeout = setTimeout(() => {
-          reject(new Error('Worker initialization timeout - model loading took too long. This may be due to slow network or large model size.'));
-        }, 120000); // 120 second timeout for model loading (increased for slow connections)
-
-        const originalHandler = this.worker!.onmessage;
-        this.worker!.onmessage = (event: MessageEvent<TTSWorkerResponse>) => {
-          const data = event.data;
-          
-          if (data.type === 'progress' && onProgress) {
-            onProgress(data.message || '', data.percentage || 0);
-          }
-          
-          if (data.type === 'ready') {
-            clearTimeout(timeout);
-            this.isReady = true;
-            this.worker!.onmessage = originalHandler;
-            resolve();
-          } else if (data.type === 'error' && !this.isReady) {
-            clearTimeout(timeout);
-            reject(new Error(data.message || 'Initialization failed'));
-          }
-          
-          // Also call original handler
-          if (originalHandler) {
-            originalHandler.call(this.worker, event);
-          }
-        };
-
-        // Send init message
-        this.worker!.postMessage({ type: 'init' } as TTSWorkerRequest);
-      });
-
-    } catch (error) {
-      this.isInitializing = false;
-      this.initPromise = null;
-      throw error;
+  private rejectRequests(error: Error): void {
+    for (const id of this.pendingRequests.keys()) {
+      this.settleRequest(id, { error });
     }
   }
 
+  private disposeWorker(error: Error): void {
+    const worker = this.worker;
+    // Invalidate identity before termination: queued callbacks cannot revive readiness.
+    this.worker = null;
+    this.isReady = false;
+    this.settleInitialization(error);
+    this.rejectRequests(error);
+    if (worker) {
+      worker.onmessage = null;
+      worker.onerror = null;
+      worker.onmessageerror = null;
+      worker.terminate();
+    }
+  }
 
-  /**
-   * Handle messages from the worker
-   */
   private handleWorkerMessage(data: TTSWorkerResponse): void {
     const { type, id, audioData, duration, message, percentage, webgpuAvailable } = data;
-
     switch (type) {
+      case 'ready':
+        if (this.initialization) {
+          this.isReady = true;
+          this.settleInitialization();
+        }
+        break;
       case 'audio':
         if (id && this.pendingRequests.has(id)) {
-          const { resolve } = this.pendingRequests.get(id)!;
-          this.pendingRequests.delete(id);
-          this.progressCallbacks.delete(id);
-
-          if (audioData) {
-            const blob = new Blob([audioData], { type: 'audio/wav' });
-            const url = URL.createObjectURL(blob);
-            resolve({
-              audioBlob: blob,
-              audioUrl: url,
-              duration: duration || 0,
+          if (!(audioData instanceof ArrayBuffer) || audioData.byteLength === 0) {
+            this.settleRequest(id, { error: new Error('Worker returned missing or empty audio data') });
+            break;
+          }
+          try {
+            const audioBlob = new Blob([audioData], { type: 'audio/wav' });
+            const audioUrl = URL.createObjectURL(audioBlob);
+            this.settleRequest(id, {
+              result: { audioBlob, audioUrl, duration: duration || 0 },
             });
+          } catch (error) {
+            this.settleRequest(id, { error: this.asError(error) });
           }
         }
         break;
-
       case 'error':
-        if (id && this.pendingRequests.has(id)) {
-          const { reject } = this.pendingRequests.get(id)!;
-          this.pendingRequests.delete(id);
-          this.progressCallbacks.delete(id);
-          reject(new Error(message || 'Synthesis failed'));
-        }
+        if (id) this.settleRequest(id, { error: new Error(message || 'Synthesis failed') });
+        else this.disposeWorker(new Error(message || 'Worker failed'));
         break;
-
       case 'progress':
-        if (id && this.progressCallbacks.has(id)) {
-          const callback = this.progressCallbacks.get(id)!;
-          callback(message || '', percentage || 0);
-        }
+        if (id) this.progressCallbacks.get(id)?.(message || '', percentage || 0);
+        else this.initialization?.onProgress?.(message || '', percentage || 0);
         break;
-
       case 'webgpu-status':
         this.webgpuAvailable = webgpuAvailable || false;
         break;
     }
   }
 
-  /**
-   * Handle worker errors
-   */
-  private handleWorkerError(error: Error): void {
-    // Reject all pending requests
-    for (const [, { reject }] of this.pendingRequests) {
-      reject(error);
-    }
-    this.pendingRequests.clear();
-    this.progressCallbacks.clear();
-  }
-
-  /**
-   * Synthesize text to audio
-   */
   async synthesize(
     text: string,
     voice: string,
     speed: number = 1.0,
-    onProgress?: ProgressCallback
+    onProgress?: ProgressCallback,
   ): Promise<SynthesisResult> {
-    if (!this.worker || !this.isReady) {
+    const worker = this.worker;
+    if (!worker || !this.isReady) {
       throw new Error('Worker not initialized. Call initialize() first.');
     }
-
     const id = `synth-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
-
     return new Promise((resolve, reject) => {
-      this.pendingRequests.set(id, { resolve, reject });
-      
-      if (onProgress) {
-        this.progressCallbacks.set(id, onProgress);
+      const timer = setTimeout(() => {
+        if (this.worker === worker && this.pendingRequests.has(id)) {
+          // Terminate a stalled worker rather than queue retries behind stuck inference.
+          this.disposeWorker(new Error('Worker synthesis timeout - audio generation exceeded 120 seconds. Please retry.'));
+        }
+      }, 120000);
+      this.pendingRequests.set(id, { resolve, reject, timer });
+      if (onProgress) this.progressCallbacks.set(id, onProgress);
+      try {
+        worker.postMessage({ type: 'synthesize', id, text, voice, speed } as TTSWorkerRequest);
+      } catch (error) {
+        this.disposeWorker(this.asError(error));
       }
-
-      this.worker!.postMessage({
-        type: 'synthesize',
-        id,
-        text,
-        voice,
-        speed,
-      } as TTSWorkerRequest);
     });
   }
 
-  /**
-   * Cancel ongoing synthesis
-   */
   cancel(): void {
-    if (this.worker) {
-      this.worker.postMessage({ type: 'cancel' } as TTSWorkerRequest);
+    // Preserve the initialized worker and the existing synthesis-only cancel contract.
+    try {
+      this.worker?.postMessage({ type: 'cancel' } as TTSWorkerRequest);
+    } catch (error) {
+      this.disposeWorker(this.asError(error));
+    } finally {
+      this.rejectRequests(new Error('Cancelled'));
     }
-    
-    // Reject all pending requests
-    for (const [, { reject }] of this.pendingRequests) {
-      reject(new Error('Cancelled'));
-    }
-    this.pendingRequests.clear();
-    this.progressCallbacks.clear();
   }
-
   /**
    * Check if WebGPU is available
    */
@@ -279,19 +267,9 @@ class TTSWorkerManager {
     return this.isReady;
   }
 
-  /**
-   * Terminate the worker
-   */
+  /** Terminate the worker and settle every operation owned by it. */
   terminate(): void {
-    if (this.worker) {
-      this.worker.terminate();
-      this.worker = null;
-    }
-    this.isReady = false;
-    this.isInitializing = false;
-    this.initPromise = null;
-    this.pendingRequests.clear();
-    this.progressCallbacks.clear();
+    this.disposeWorker(new Error('Worker terminated'));
   }
 }
 

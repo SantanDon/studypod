@@ -1,26 +1,8 @@
-import { useState, useCallback } from 'react';
+import { useState, useCallback, useEffect } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { Flashcard, FlashcardDeck, FlashcardStats } from '@/types/flashcard';
 import { generateFlashcards } from '@/lib/flashcards/flashcardGenerator';
-
-const STORAGE_KEY = 'flashcard_decks';
-
-function generateId(): string {
-  return Date.now().toString(36) + Math.random().toString(36).substr(2);
-}
-
-function getDecksFromStorage(): FlashcardDeck[] {
-  try {
-    const data = localStorage.getItem(STORAGE_KEY);
-    return data ? JSON.parse(data) : [];
-  } catch {
-    return [];
-  }
-}
-
-function saveDecksToStorage(decks: FlashcardDeck[]): void {
-  localStorage.setItem(STORAGE_KEY, JSON.stringify(decks));
-}
+import { useStudioIdentity, studioApi, readGuestStudio, writeGuestStudio } from '@/services/studioApiService';
 
 function calculateNextReview(card: Flashcard, quality: number): { nextReview: string; interval: number; easeFactor: number } {
   let { easeFactor, interval } = card;
@@ -51,151 +33,102 @@ function calculateNextReview(card: Flashcard, quality: number): { nextReview: st
 
 export function useFlashcards(notebookId?: string) {
   const queryClient = useQueryClient();
+  const identity = useStudioIdentity(notebookId);
+  const api = studioApi(identity.token);
+  const queryKey = ['flashcard-decks', identity.owner, notebookId];
   const [generatingProgress, setGeneratingProgress] = useState<string | null>(null);
-
-  const { data: decks = [], isLoading } = useQuery({
-    queryKey: ['flashcard-decks', notebookId],
-    queryFn: () => {
-      const allDecks = getDecksFromStorage();
-      return notebookId 
-        ? allDecks.filter(d => d.notebookId === notebookId)
-        : allDecks;
+  const query = useQuery({
+    queryKey,
+    queryFn: async () => {
+      identity.assertCurrent();
+      const result = identity.authenticated
+        ? await api.decks(notebookId!)
+        : readGuestStudio<FlashcardDeck>(identity.owner, 'decks').filter(d => !notebookId || d.notebookId === notebookId);
+      identity.assertCurrent();
+      return result;
     },
-    enabled: true,
+    enabled: identity.ready && (!identity.authenticated || !!notebookId),
   });
-
+  const decks = query.data || [];
+  const isLoading = query.isLoading;
+  const refresh = () => queryClient.invalidateQueries({ queryKey });
+  const findDeck = (deckId: string) => {
+    identity.assertCurrent();
+    const deck = (queryClient.getQueryData<FlashcardDeck[]>(queryKey) || decks).find(d => d.id === deckId);
+    if (!deck) throw new Error('Deck not found. Reload the notebook and try again.');
+    return deck;
+  };
+  const saveCards = async (deckId: string, edit: (cards: Flashcard[]) => Flashcard[]) => {
+    const deck = findDeck(deckId);
+    const cards = edit(deck.cards);
+    let saved: FlashcardDeck;
+    if (identity.authenticated) saved = await api.updateDeck(deck, cards);
+    else {
+      saved = { ...deck, cards, updatedAt: new Date().toISOString() };
+      const all = readGuestStudio<FlashcardDeck>(identity.owner, 'decks');
+      writeGuestStudio(identity.owner, 'decks', all.map(d => d.id === deck.id ? saved : d));
+    }
+    identity.assertCurrent();
+    queryClient.setQueryData<FlashcardDeck[]>(queryKey, old => (old || []).map(d => d.id === saved.id ? saved : d));
+    return saved;
+  };
   const createDeckMutation = useMutation({
-    mutationFn: async (data: { name: string; notebookId: string }) => {
-      const allDecks = getDecksFromStorage();
-      const newDeck: FlashcardDeck = {
-        id: generateId(),
-        notebookId: data.notebookId,
-        name: data.name,
-        cards: [],
-        createdAt: new Date().toISOString(),
-        updatedAt: new Date().toISOString(),
+    mutationFn: async ({ name, notebookId: id }: { name: string; notebookId: string }) => {
+      identity.assertCurrent();
+      const deck = identity.authenticated ? await api.createDeck(id, name) : {
+        id: crypto.randomUUID(), notebookId: id, name, cards: [],
+        createdAt: new Date().toISOString(), updatedAt: new Date().toISOString(),
       };
-      allDecks.push(newDeck);
-      saveDecksToStorage(allDecks);
-      return newDeck;
-    },
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['flashcard-decks'] });
-    },
+      identity.assertCurrent();
+      if (!identity.authenticated) writeGuestStudio(identity.owner, 'decks', [...readGuestStudio<FlashcardDeck>(identity.owner, 'decks'), deck]);
+      return deck;
+    }, onSuccess: refresh,
   });
-
   const deleteDeckMutation = useMutation({
-    mutationFn: async (deckId: string) => {
-      const allDecks = getDecksFromStorage();
-      const filtered = allDecks.filter(d => d.id !== deckId);
-      saveDecksToStorage(filtered);
-      return deckId;
-    },
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['flashcard-decks'] });
-    },
+    mutationFn: async (id: string) => {
+      const deck = findDeck(id);
+      if (identity.authenticated) await api.deleteDeck(deck);
+      identity.assertCurrent();
+      if (!identity.authenticated) writeGuestStudio(identity.owner, 'decks', readGuestStudio<FlashcardDeck>(identity.owner, 'decks').filter(d => d.id !== id));
+      return id;
+    }, onSuccess: refresh,
   });
-
   const addCardsMutation = useMutation({
-    mutationFn: async ({ deckId, cards }: { deckId: string; cards: Flashcard[] }) => {
-      const allDecks = getDecksFromStorage();
-      const deckIndex = allDecks.findIndex(d => d.id === deckId);
-      if (deckIndex === -1) throw new Error('Deck not found');
-      
-      allDecks[deckIndex].cards.push(...cards);
-      allDecks[deckIndex].updatedAt = new Date().toISOString();
-      saveDecksToStorage(allDecks);
-      return allDecks[deckIndex];
-    },
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['flashcard-decks'] });
-    },
+    mutationFn: ({ deckId, cards }: { deckId: string; cards: Flashcard[] }) => saveCards(deckId, old => [...old, ...cards]), onSuccess: refresh,
   });
-
   const updateCardMutation = useMutation({
-    mutationFn: async ({ deckId, cardId, updates }: { 
-      deckId: string; 
-      cardId: string; 
-      updates: Partial<Flashcard>;
-    }) => {
-      const allDecks = getDecksFromStorage();
-      const deckIndex = allDecks.findIndex(d => d.id === deckId);
-      if (deckIndex === -1) throw new Error('Deck not found');
-      
-      const cardIndex = allDecks[deckIndex].cards.findIndex(c => c.id === cardId);
-      if (cardIndex === -1) throw new Error('Card not found');
-      
-      allDecks[deckIndex].cards[cardIndex] = {
-        ...allDecks[deckIndex].cards[cardIndex],
-        ...updates,
-      };
-      allDecks[deckIndex].updatedAt = new Date().toISOString();
-      saveDecksToStorage(allDecks);
-      return allDecks[deckIndex].cards[cardIndex];
-    },
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['flashcard-decks'] });
-    },
+    mutationFn: async ({ deckId, cardId, updates }: { deckId: string; cardId: string; updates: Partial<Flashcard> }) => {
+      const saved = await saveCards(deckId, old => {
+        if (!old.some(c => c.id === cardId)) throw new Error('Card not found');
+        return old.map(c => c.id === cardId ? { ...c, ...updates, id: c.id } : c);
+      });
+      return saved.cards.find(c => c.id === cardId)!;
+    }, onSuccess: refresh,
   });
-
   const deleteCardMutation = useMutation({
     mutationFn: async ({ deckId, cardId }: { deckId: string; cardId: string }) => {
-      const allDecks = getDecksFromStorage();
-      const deckIndex = allDecks.findIndex(d => d.id === deckId);
-      if (deckIndex === -1) throw new Error('Deck not found');
-      
-      allDecks[deckIndex].cards = allDecks[deckIndex].cards.filter(c => c.id !== cardId);
-      allDecks[deckIndex].updatedAt = new Date().toISOString();
-      saveDecksToStorage(allDecks);
-      return cardId;
-    },
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['flashcard-decks'] });
-    },
+      await saveCards(deckId, old => old.filter(c => c.id !== cardId)); return cardId;
+    }, onSuccess: refresh,
   });
-
   const reviewCardMutation = useMutation({
-    mutationFn: async ({ 
-      deckId, 
-      cardId, 
-      quality 
-    }: { 
-      deckId: string; 
-      cardId: string; 
-      quality: 0 | 1 | 2 | 3 | 4 | 5;
-    }) => {
-      const allDecks = getDecksFromStorage();
-      const deckIndex = allDecks.findIndex(d => d.id === deckId);
-      if (deckIndex === -1) throw new Error('Deck not found');
-      
-      const cardIndex = allDecks[deckIndex].cards.findIndex(c => c.id === cardId);
-      if (cardIndex === -1) throw new Error('Card not found');
-      
-      const card = allDecks[deckIndex].cards[cardIndex];
-      const { nextReview, interval, easeFactor } = calculateNextReview(card, quality);
-      
-      const isCorrect = quality >= 3;
-      
-      allDecks[deckIndex].cards[cardIndex] = {
-        ...card,
-        lastReviewed: new Date().toISOString(),
-        nextReview,
-        interval,
-        easeFactor,
-        correctCount: isCorrect ? card.correctCount + 1 : card.correctCount,
-        incorrectCount: isCorrect ? card.incorrectCount : card.incorrectCount + 1,
-        difficulty: quality >= 4 ? 'easy' : quality >= 2 ? 'medium' : 'hard',
-      };
-      
-      allDecks[deckIndex].updatedAt = new Date().toISOString();
-      saveDecksToStorage(allDecks);
-      return allDecks[deckIndex].cards[cardIndex];
-    },
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['flashcard-decks'] });
-    },
+    mutationFn: async ({ deckId, cardId, quality }: { deckId: string; cardId: string; quality: 0 | 1 | 2 | 3 | 4 | 5 }) => {
+      const saved = await saveCards(deckId, old => {
+        if (!old.some(c => c.id === cardId)) throw new Error('Card not found');
+        return old.map(card => card.id !== cardId ? card : {
+          ...card, ...calculateNextReview(card, quality), lastReviewed: new Date().toISOString(),
+          correctCount: card.correctCount + (quality >= 3 ? 1 : 0),
+          incorrectCount: card.incorrectCount + (quality < 3 ? 1 : 0),
+          difficulty: quality >= 4 ? 'easy' : quality >= 2 ? 'medium' : 'hard',
+        });
+      });
+      return saved.cards.find(c => c.id === cardId)!;
+    }, onSuccess: refresh,
   });
-
+  useEffect(() => {
+    setGeneratingProgress(null);
+    createDeckMutation.reset(); deleteDeckMutation.reset(); addCardsMutation.reset();
+    updateCardMutation.reset(); deleteCardMutation.reset(); reviewCardMutation.reset();
+  }, [identity.key]);
   const generateFromSource = useCallback(async (
     deckId: string,
     sourceId: string,
@@ -211,17 +144,18 @@ export function useFlashcards(notebookId?: string) {
         numCards,
         sourceId,
         sourceTitle,
-        setGeneratingProgress
+        progress => { try { identity.assertCurrent(); setGeneratingProgress(progress); } catch { /* stale generation */ } }
       );
       
+      identity.assertCurrent();
       await addCardsMutation.mutateAsync({ deckId, cards });
-      setGeneratingProgress(null);
+      try { identity.assertCurrent(); setGeneratingProgress(null); } catch { /* stale generation */ }
       return cards;
     } catch (error) {
-      setGeneratingProgress(null);
+      try { identity.assertCurrent(); setGeneratingProgress(null); } catch { /* stale generation */ }
       throw error;
     }
-  }, [addCardsMutation]);
+  }, [addCardsMutation, identity.key]);
 
   const getDueCards = useCallback((deckId: string): Flashcard[] => {
     const deck = decks.find(d => d.id === deckId);
@@ -265,14 +199,18 @@ export function useFlashcards(notebookId?: string) {
 
   return {
     decks,
+    scopeKey: identity.key,
     isLoading,
     generatingProgress,
+    loadError: query.error?.message || null,
+    mutationError: [createDeckMutation, deleteDeckMutation, addCardsMutation, updateCardMutation, deleteCardMutation, reviewCardMutation].find(m => m.error)?.error?.message || null,
     
     createDeck: createDeckMutation.mutate,
     createDeckAsync: createDeckMutation.mutateAsync,
     isCreatingDeck: createDeckMutation.isPending,
     
     deleteDeck: deleteDeckMutation.mutate,
+    deleteDeckAsync: deleteDeckMutation.mutateAsync,
     isDeletingDeck: deleteDeckMutation.isPending,
     
     addCards: addCardsMutation.mutate,
@@ -280,9 +218,11 @@ export function useFlashcards(notebookId?: string) {
     isAddingCards: addCardsMutation.isPending,
     
     updateCard: updateCardMutation.mutate,
+    updateCardAsync: updateCardMutation.mutateAsync,
     isUpdatingCard: updateCardMutation.isPending,
     
     deleteCard: deleteCardMutation.mutate,
+    deleteCardAsync: deleteCardMutation.mutateAsync,
     isDeletingCard: deleteCardMutation.isPending,
     
     reviewCard: reviewCardMutation.mutate,

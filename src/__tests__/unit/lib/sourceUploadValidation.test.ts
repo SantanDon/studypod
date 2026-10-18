@@ -4,6 +4,7 @@ import {
   SOURCE_UPLOAD_MAX_FILES,
   SOURCE_UPLOAD_MAX_TOTAL_BYTES,
   formatUploadSize,
+  detectUploadSourceType,
   validateSourceFiles,
 } from "@/lib/sources/sourceUploadValidation";
 
@@ -15,6 +16,21 @@ const makeFile = (
   new File([content], name, { type: "application/octet-stream", lastModified });
 
 describe("sourceUploadValidation", () => {
+  it.each(["", "application/octet-stream"])(
+    "routes supported files correctly when the browser reports MIME %j",
+    (type) => {
+      for (const [name, expected] of [
+        ["lecture.MP3", "audio"], ["lecture.wav", "audio"],
+        ["lecture.m4a", "audio"], ["paper.PDF", "pdf"],
+        ["notes.docx", "doc"], ["book.epub", "ebook"],
+        ["notes.md", "text"], ["notes.markdown", "text"],
+        ["notes.txt", "text"],
+      ]) {
+        expect(detectUploadSourceType({ name, type })).toBe(expected);
+      }
+    },
+  );
+
   it("accepts supported source formats case-insensitively", () => {
     const files = [
       makeFile("paper.PDF"),

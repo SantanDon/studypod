@@ -1,3 +1,4 @@
+import { measureAcceptancePhase } from "../utils/acceptanceTiming.js";
 import jwt from "jsonwebtoken";
 import { createHash } from "crypto";
 import { dbHelpers } from "../db/database.js";
@@ -116,7 +117,7 @@ export async function authenticateToken(req, res, next) {
       }
 
       await dbHelpers.touchApiKey(keyRow.id);
-      const user = await dbHelpers.getUserById(keyRow.userId);
+      const user = await measureAcceptancePhase("auth-lookup", () => dbHelpers.getUserById(keyRow.userId));
       if (!user) {
         return res.status(401).json({ error: "User not found" });
       }
@@ -190,7 +191,7 @@ export async function authenticateToken(req, res, next) {
       return res.status(403).json({ error: "Invalid access token" });
     }
 
-    const existing = await dbHelpers.getUserById(userId);
+    const existing = await measureAcceptancePhase("auth-lookup", () => dbHelpers.getUserById(userId));
     if (!existing) {
       // Reject tokens for accounts removed since the credential was issued.
       logger.warn(`Rejected token for missing user ${userId}`);

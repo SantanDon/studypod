@@ -39,5 +39,9 @@ export const ollamaModelMap: Record<OllamaTask, string> = {
 };
 
 export function getModelForTask(task: OllamaTask): string {
+  // Keep self-hosted generation tasks on the model chosen by the operator.
+  // Embeddings require their own model and must never use a generation model.
+  const configuredModel = import.meta.env.VITE_OLLAMA_MODEL?.trim();
+  if (task !== "embeddings" && configuredModel) return configuredModel;
   return ollamaModelMap[task] ?? ollamaModelMap.chat;
 }

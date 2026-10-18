@@ -56,7 +56,7 @@
     },
     "api/**": {
       "maxDuration": 60,
-      "includeFiles": "backend/src/{routes,middleware,db,utils,services}/**",
+      "includeFiles": "backend/src/{routes,middleware,db,utils,services,generated}/**",
       "excludeFiles": "{uploads,.cache,dist,public,backend/python,node_modules/{kokoro-js,@huggingface,onnxruntime-*,@img,sharp,canvas,@ffmpeg,@hocuspocus}}/**"
     }
   },

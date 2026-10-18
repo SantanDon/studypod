@@ -1,4 +1,6 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
+import { useStudioIdentity } from '@/services/studioApiService';
+import type { Quiz, QuizHistory } from '@/types/quiz';
 import { useNotes, Note } from '@/hooks/useNotes';
 import { useNotebooks } from '@/hooks/useNotebooks';
 import { useSources } from '@/hooks/useSources';
@@ -9,6 +11,7 @@ import { QuizConfig } from '../QuizSelector';
 import { isSourceUsableForGroundedWork } from '@/lib/sources/sourceProcessing';
 
 export function useStudioSidebar(notebookId?: string) {
+  const identity = useStudioIdentity(notebookId);
   const [editingNote, setEditingNote] = useState<Note | null>(null);
   const [isCreatingNote, setIsCreatingNote] = useState(false);
   const [isQuizSectionOpen, setIsQuizSectionOpen] = useState(false);
@@ -16,26 +19,39 @@ export function useStudioSidebar(notebookId?: string) {
   const [isConceptMapSectionOpen, setIsConceptMapSectionOpen] = useState(false);
   const [isComparisonOpen, setIsComparisonOpen] = useState(false);
   const [showQuizResults, setShowQuizResults] = useState(false);
+  const [noteError, setNoteError] = useState<string | null>(null);
+  useEffect(() => {
+    setEditingNote(null);
+    setIsCreatingNote(false);
+    setShowQuizResults(false);
+    setNoteError(null);
+    setIsConceptMapSectionOpen(false);
+    setIsComparisonOpen(false);
+  }, [identity.key]);
 
   const {
     notes,
     isLoading,
-    createNote,
-    updateNote,
-    deleteNote,
+    createNoteAsync,
+    updateNoteAsync,
+    deleteNoteAsync,
     isCreating,
     isUpdating,
     isDeleting
   } = useNotes(notebookId);
 
   const { notebooks } = useNotebooks();
-  const { sources } = useSources(notebookId);
+  const { sources, isLoading: sourcesLoading, isFetching: sourcesFetching, error: sourcesError, retrySources } = useSources(notebookId);
   const usableSources = (sources || []).filter(isSourceUsableForGroundedWork);
 
   const {
     currentSession,
     isGenerating,
     generationError,
+    isCompleting,
+    completionError,
+    savedQuizzes, quizHistory, quizzesError, historyError, isLoadingQuizzes, isLoadingHistory,
+    openQuiz, reopenAttempt,
     generateQuiz,
     answerQuestion,
     nextQuestion,
@@ -51,62 +67,82 @@ export function useStudioSidebar(notebookId?: string) {
   const {
     conceptMaps,
     generatingProgress,
-    generateMap,
+    generateMapAsync,
     isGenerating: isGeneratingMap,
-    deleteMap,
+    deleteMapAsync,
     isDeleting: isDeletingMap,
+    loadError: mapLoadError,
+    mutationError: mapMutationError,
   } = useConceptMap(notebookId);
 
   const notebook = notebooks?.find((n: { id: string }) => n.id === notebookId);
 
-  const handleGenerateConceptMap = () => {
+  const handleGenerateConceptMap = async () => {
     if (!notebookId || usableSources.length === 0) return;
     
     const combinedContent = usableSources
       .map(s => `${s.title}:\n${s.content || s.summary || ''}`)
       .join('\n\n');
     
-    generateMap({
+    try { await generateMapAsync({
       content: combinedContent,
       title: notebook?.title || 'Concept Map',
       notebookId,
-    });
+    }); } catch { /* The map hook exposes the failure without losing saved maps. */ }
+  };
+
+  const deleteMap = async (id: string) => {
+    try { await deleteMapAsync(id); } catch { /* Keep the saved map visible and show the hook error. */ }
   };
 
   const handleCreateNote = () => {
+    setNoteError(null);
     setIsCreatingNote(true);
     setEditingNote(null);
   };
 
   const handleEditNote = (note: Note) => {
+    setNoteError(null);
     setEditingNote(note);
     setIsCreatingNote(false);
   };
 
-  const handleSaveNote = (title: string, content: string) => {
+  const handleSaveNote = async (title: string, content: string) => {
+    setNoteError(null);
+    try {
     if (editingNote) {
       if (editingNote.source_type === 'user') {
-        updateNote({
+        await updateNoteAsync({
           id: editingNote.id,
           title,
           content
         });
       }
     } else {
-      createNote({
+      await createNoteAsync({
         title,
         content,
         source_type: 'user'
       });
     }
+    identity.assertCurrent();
     setEditingNote(null);
     setIsCreatingNote(false);
+    } catch (error) {
+      try { identity.assertCurrent(); setNoteError(error instanceof Error ? error.message : 'Could not save your note. Your edits are still here.'); } catch { /* account changed */ }
+    }
   };
 
-  const handleDeleteNote = () => {
+  const handleDeleteNote = async () => {
+    setNoteError(null);
+    try {
     if (editingNote) {
-      deleteNote(editingNote.id);
+      await deleteNoteAsync(editingNote.id);
+      identity.assertCurrent();
       setEditingNote(null);
+    }
+    } catch (error) {
+      try { identity.assertCurrent(); setNoteError(error instanceof Error ? error.message : 'Could not delete your note. Try again.'); } catch { /* account changed */ }
     }
   };
 
@@ -127,9 +163,9 @@ export function useStudioSidebar(notebookId?: string) {
     });
   };
 
-  const handleQuizComplete = () => {
-    completeQuiz();
-    setShowQuizResults(true);
+  const handleQuizComplete = async () => {
+    const completed = await completeQuiz();
+    if (completed) setShowQuizResults(true);
   };
 
   const handleQuizRetry = () => {
@@ -140,6 +176,13 @@ export function useStudioSidebar(notebookId?: string) {
   const handleQuizClose = () => {
     setShowQuizResults(false);
     resetQuiz();
+  };
+  const handleOpenSavedQuiz = (quiz: Quiz) => {
+    setShowQuizResults(false);
+    openQuiz(quiz);
+  };
+  const handleOpenQuizAttempt = (attempt: QuizHistory) => {
+    if (reopenAttempt(attempt)) setShowQuizResults(true);
   };
 
   const isEditingMode = editingNote || isCreatingNote;
@@ -175,20 +218,21 @@ export function useStudioSidebar(notebookId?: string) {
       showQuizResults, setShowQuizResults
     },
     data: {
-      notes, sources, usableSources, installedModels, conceptMaps, currentSession
+      notes, sources, usableSources, sourcesLoading, sourcesFetching, sourcesError, retrySources, installedModels, conceptMaps, currentSession, savedQuizzes, quizHistory
     },
     flags: {
       isLoading, isCreating, isUpdating, isDeleting,
-      isGenerating, isGeneratingMap, isDeletingMap,
+      isGenerating, isGeneratingMap, isDeletingMap, isCompleting, isLoadingQuizzes, isLoadingHistory,
       isEditingMode, isQuizActive, isQuizCompleted
     },
     misc: {
-      generationError, generatingProgress
+      generationError, generatingProgress, completionError, noteError, quizzesError, historyError, mapLoadError, mapMutationError
     },
     handlers: {
       handleGenerateConceptMap,
       handleCreateNote, handleEditNote, handleSaveNote, handleDeleteNote, handleCancel,
       handleStartQuiz, handleQuizComplete, handleQuizRetry, handleQuizClose,
+      handleOpenSavedQuiz, handleOpenQuizAttempt,
       answerQuestion, nextQuestion, getPreviewText, getCurrentQuestion, getProgress, deleteMap
     }
   };

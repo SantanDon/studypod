@@ -3,7 +3,7 @@ import { parseStudioAudioIntent, useStudioAudioCommands } from '@/lib/audio/stud
 import { lazy, Suspense, useState, useEffect, useRef, useCallback } from 'react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
-// import { Send, Upload, FileText, Loader2, RefreshCw } from 'lucide-react'; // Removed Lucide imports
+import { Bot, List, Loader2, MessageSquare, RefreshCw, Search, Send, Share2 } from 'lucide-react';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { useChatMessages } from '@/hooks/useChatMessages';
 import { useSources } from '@/hooks/useSources';
@@ -29,7 +29,7 @@ import {
   consumeQueuedAudioListeningQuestion,
   type AudioListeningQuestionRequest,
 } from '@/lib/audio/listeningQuestion';
-const AddSourcesDialog = lazy(() => import('./AddSourcesDialog'));
+import AddSourcesDialog from './AddSourcesDialog';
 const ResearchFurtherDialog = lazy(() => import('./ResearchFurtherDialog'));
 
 const DialogLoading = () => (
@@ -102,7 +102,11 @@ const ChatArea = ({
   } = useChatMessages(notebookId);
   
   const {
-    sources
+    sources,
+    isLoading: sourcesLoading,
+    isFetching: sourcesFetching,
+    error: sourcesError,
+    retrySources
   } = useSources(notebookId);
   
   const sourceCount = sources?.length || 0;
@@ -367,7 +371,7 @@ const ChatArea = ({
   const getPlaceholderText = () => {
     if (isChatDisabled) {
       if (sourceCount === 0) {
-        return "Upload a source to get started...";
+        return "Add a source to get started...";
       } else if (hasProcessingSource) {
         return "Sources are still processing...";
       } else if (hasFailedSource) {
@@ -390,33 +394,45 @@ const ChatArea = ({
     return chatMode === 'agent' ? "Ask your agent to analyze this notebook..." : "Start typing...";
   };
   return <div className="flex-1 flex flex-col h-full overflow-hidden">
-      {hasSource ? <div className="flex-1 flex flex-col h-full overflow-hidden">
+      {!hasSource && sourceCount === 0 && sourcesLoading ? (
+        <div role="status" className="flex-1 flex items-center justify-center p-8 text-sm text-muted-foreground">Loading sources...</div>
+      ) : !hasSource && sourceCount === 0 && sourcesError ? (
+        <div role="alert" className="flex-1 flex flex-col items-center justify-center gap-3 p-8 text-center">
+          <h2 className="text-lg font-semibold text-foreground">Could not load sources</h2>
+          <p className="max-w-sm text-sm text-muted-foreground">Your source list is unavailable. Retry to continue your grounded chat.</p>
+          <Button type="button" disabled={sourcesFetching} onClick={() => void retrySources()}>
+            {sourcesFetching ? 'Retrying…' : 'Retry loading sources'}
+          </Button>
+        </div>
+      ) : hasSource ? <div className="flex-1 flex flex-col h-full overflow-hidden">
         {/* Chat Header */}
-          <div className="p-4 border-b border-gray-200 dark:border-border flex-shrink-0 bg-white dark:bg-background">
+          <div className="p-4 border-b border-gray-200 dark:border-border flex-shrink-0 bg-[#F7F4ED] dark:bg-[#101D22]">
             <div className="max-w-4xl mx-auto">
-              <div className="flex items-center justify-between gap-3">
-              <div className="flex items-center space-x-4">
-                <h2 className="text-lg font-medium text-gray-900 dark:text-foreground">
+              <div className="flex flex-wrap items-center justify-between gap-x-3 gap-y-2">
+              <div className="contents sm:flex sm:items-center sm:gap-4">
+                <h2 className="basis-full text-lg font-medium text-gray-900 dark:text-foreground sm:basis-auto">
                   {chatMode === 'agent' ? 'Agent Collaboration' : 'Study Chat'}
                 </h2>
                 <div className="flex bg-muted p-1 rounded-md">
                   <button 
                     onClick={() => setChatMode('study')}
+                    aria-pressed={chatMode === 'study'}
                     className={`px-3 py-1 text-sm rounded-sm transition-colors ${chatMode === 'study' ? 'bg-background shadow-sm' : 'text-muted-foreground hover:text-foreground'}`}
                   >
                     Study
                   </button>
                   <button 
                     onClick={() => setChatMode('agent')}
+                    aria-pressed={chatMode === 'agent'}
                     className={`px-3 py-1 text-sm rounded-sm transition-colors flex items-center space-x-1 ${chatMode === 'agent' ? 'bg-primary/10 text-primary shadow-sm font-medium' : 'text-muted-foreground hover:text-foreground'}`}
                   >
-                    <i className="fi fi-rr-robot text-xs"></i>
+                    <Bot className="h-3.5 w-3.5" aria-hidden="true" />
                     <span>Agent</span>
                   </button>
                 </div>
               </div>
               
-              <div className="flex items-center space-x-4">
+              <div className="flex items-center gap-4">
                <div className="hidden md:block">
                   <ChatEvidenceScope
                     value={chatScope}
@@ -430,34 +446,38 @@ const ChatArea = ({
                 <div className="flex bg-muted p-1 rounded-md">
                   <button
                     onClick={() => setResponseStyle('dense')}
+                    aria-label="Detailed responses"
+                    aria-pressed={responseStyle === 'dense'}
                     className={`px-3 py-1 text-sm rounded-sm transition-colors flex items-center space-x-1.5 ${responseStyle === 'dense' ? 'bg-background shadow-sm font-medium text-foreground' : 'text-muted-foreground hover:text-foreground'}`}
                     title="Detailed, structured responses with headings and tables"
                   >
-                    <i className="fi fi-rr-list text-xs"></i>
+                    <List className="h-3.5 w-3.5" aria-hidden="true" />
                     <span className="hidden sm:inline">Detailed</span>
                   </button>
                   <button
                     onClick={() => setResponseStyle('conversational')}
+                    aria-label="Conversational responses"
+                    aria-pressed={responseStyle === 'conversational'}
                     className={`px-3 py-1 text-sm rounded-sm transition-colors flex items-center space-x-1.5 ${responseStyle === 'conversational' ? 'bg-background shadow-sm font-medium text-foreground' : 'text-muted-foreground hover:text-foreground'}`}
                     title="Fluid, conversational summaries in plain paragraphs"
                   >
-                    <i className="fi fi-rr-comment-alt text-xs"></i>
+                    <MessageSquare className="h-3.5 w-3.5" aria-hidden="true" />
                     <span className="hidden sm:inline">Conversational</span>
                   </button>
                 </div>
 
                 {shouldShowRefreshButton && <Button variant="ghost" size="sm" onClick={handleRefreshChat} disabled={isDeletingChatHistory || isChatDisabled} className="hidden sm:flex items-center space-x-2">
-                    <i className={`fi fi-rr-refresh h-4 w-4 ${isDeletingChatHistory ? 'animate-spin' : ''}`}></i>
+                    <RefreshCw className={`h-4 w-4 ${isDeletingChatHistory ? 'animate-spin' : ''}`} aria-hidden="true" />
                     <span>{isDeletingChatHistory ? 'Clearing...' : 'Clear Chat'}</span>
                   </Button>}
                 {(notebook?.joinCode || notebook?.join_code) && (
                   <Button variant="outline" size="sm" onClick={handleShareNotebook} className="hidden sm:flex items-center space-x-2 border-gray-300 hover:bg-muted text-foreground">
-                    <i className="fi fi-rr-share h-4 w-4"></i>
+                    <Share2 className="h-4 w-4" aria-hidden="true" />
                     <span>Share</span>
                   </Button>
                 )}
                <Button variant="outline" size="sm" onClick={() => setShowResearchDialog(true)} className="hidden sm:flex items-center space-x-2">
-                  <i className="fi fi-rr-search h-4 w-4"></i>
+                  <Search className="h-4 w-4" aria-hidden="true" />
                   <span>Research Further</span>
                 </Button>
               </div>
@@ -473,13 +493,21 @@ const ChatArea = ({
             </div>
           </div>
 
-          <ScrollArea className="flex-1 h-full bg-white dark:bg-background" ref={scrollAreaRef}>
+          {sourcesError && sourceCount > 0 && (
+            <div role="alert" className="flex items-center justify-between gap-3 border-b border-amber-300 bg-amber-50 px-4 py-2 text-xs text-amber-950 dark:border-amber-900/60 dark:bg-amber-950/30 dark:text-amber-100">
+              <span>Could not refresh sources. Showing the last loaded list.</span>
+              <Button type="button" variant="outline" size="sm" disabled={sourcesFetching} onClick={() => void retrySources()}>
+                {sourcesFetching ? 'Retrying…' : 'Retry loading sources'}
+              </Button>
+            </div>
+          )}
+          <ScrollArea className="flex-1 h-full bg-[#F7F4ED] dark:bg-[#101D22]" ref={scrollAreaRef}>
              {/* Notebook context stays compact once the conversation begins. */}
-             <div className="border-b border-border bg-background/95 px-5 py-4 sm:px-8">
+             <div className="border-b border-border bg-[#F7F4ED]/95 dark:bg-[#101D22]/95 px-5 py-4 sm:px-8">
                <div className="mx-auto max-w-4xl">
                  <div className="flex items-center gap-3">
                    <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-muted text-2xl">
-                     {isGenerating ? <i className="fi fi-rr-spinner animate-spin text-muted-foreground" /> : <span>{notebook?.icon || '☕'}</span>}
+                     {isGenerating ? <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" aria-hidden="true" /> : <span>{notebook?.icon || '☕'}</span>}
                    </div>
                    <div className="min-w-0 flex-1">
                      <h1 className="truncate text-lg font-semibold tracking-tight text-foreground sm:text-xl">
@@ -514,7 +542,7 @@ const ChatArea = ({
                {/* Chat Messages */}
                 {(messages.length > 0 || pendingUserMessage || showAiLoading || failedMessage) && <div className="mb-6 space-y-4">
                     {messages.map((msg) => <div key={msg.id} className={`group flex ${isUserMessage(msg) ? 'justify-end' : 'justify-start'}`}>
-                        <div className={`${isUserMessage(msg) ? 'max-w-xs lg:max-w-md px-4 py-2 bg-blue-500 text-white rounded-lg' : 'w-full'}`}>
+                        <div className={`${isUserMessage(msg) ? 'max-w-xs lg:max-w-md px-4 py-2 bg-[#165E61] text-white rounded-lg' : 'w-full'}`}>
                           <div className={isUserMessage(msg) ? '' : 'prose prose-gray dark:prose-invert max-w-none text-gray-800 dark:text-gray-200'}>
                             <MarkdownRenderer content={msg.message.content} className={isUserMessage(msg) ? '' : ''} onCitationClick={handleCitationClick} isUserMessage={isUserMessage(msg)} />
                           </div>
@@ -526,7 +554,7 @@ const ChatArea = ({
                     
                     {/* Pending user message */}
                     {pendingUserMessage && <div className="flex justify-end">
-                        <div className="max-w-xs lg:max-w-md px-4 py-2 bg-blue-500 text-white rounded-lg">
+                        <div className="max-w-xs lg:max-w-md px-4 py-2 bg-[#165E61] text-white rounded-lg">
                           <MarkdownRenderer content={pendingUserMessage} className="" isUserMessage={true} />
                         </div>
                       </div>}
@@ -584,42 +612,41 @@ const ChatArea = ({
           />
         </div> :
     // Empty State
-    <div className="flex-1 flex flex-col items-center justify-center p-8 overflow-hidden bg-white dark:bg-background">
+    <div className="flex-1 flex flex-col items-center justify-center p-8 overflow-hidden bg-[#F7F4ED] dark:bg-[#101D22]">
           <div className="text-center mb-8">
             <div className="w-16 h-16 rounded-full mx-auto mb-4 flex items-center justify-center bg-gray-100 dark:bg-muted">
               <i className="fi fi-rr-upload h-8 w-8 text-slate-600 dark:text-slate-400"></i>
             </div>
-            <h2 className="text-xl font-medium text-gray-900 dark:text-foreground mb-4">Add a source to get started</h2>
+            <h2 className="text-xl font-medium text-gray-900 dark:text-foreground mb-2">Add a source to get started</h2>
+            <p className="mb-4 text-sm text-muted-foreground">Upload a file, paste text, or add a web link. Then ask questions grounded in your material.</p>
             <Button onClick={() => setShowAddSourcesDialog(true)}>
               <i className="fi fi-rr-upload h-4 w-4 mr-2"></i>
-              Upload a source
+              Add a source
             </Button>
           </div>
 
           {/* Bottom Input */}
           <div className="w-full max-w-2xl">
             <div className="flex space-x-4">
-              <Input placeholder="Upload a source to get started" disabled className="flex-1" />
+              <Input placeholder="Add a source to get started" disabled className="flex-1" />
               <div className="flex items-center text-sm text-gray-500">
                 0 sources
               </div>
-              <Button disabled>
-                <i className="fi fi-rr-paper-plane-top h-4 w-4"></i>
+              <Button disabled aria-label="Send message">
+                <Send className="h-4 w-4" aria-hidden="true" />
               </Button>
             </div>
           </div>
         </div>}
       
       {/* Footer */}
-      <div className="p-4 border-t border-border flex-shrink-0 bg-background">
-        <p className="pr-16 text-center text-xs text-muted-foreground sm:pr-0 sm:text-sm">StudyPodLM can be inaccurate; please double-check its responses.</p>
+      <div className="p-4 border-t border-border flex-shrink-0 bg-[#F7F4ED] dark:bg-[#101D22]">
+        <p className="pr-16 text-center text-xs text-[#53676A] dark:text-[#B8CBC9] sm:pr-0 sm:text-sm">StudyPod can be inaccurate; please double-check its responses.</p>
       </div>
       
       {/* Add Sources Dialog */}
       {showAddSourcesDialog && (
-        <Suspense fallback={<DialogLoading />}>
           <AddSourcesDialog open={showAddSourcesDialog} onOpenChange={setShowAddSourcesDialog} notebookId={notebookId} />
-        </Suspense>
       )}
       
       {/* Research Further Dialog */}

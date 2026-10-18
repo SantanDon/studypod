@@ -27,6 +27,8 @@ interface TelemetryPulse {
 
 export const AntigravityTelemetry: React.FC<{ notebookId?: string }> = ({ notebookId: _notebookId }) => {
   const { isAuthenticated } = useAuth();
+  // Internal diagnostics must not cover notebook controls or poll for normal users.
+  const enabled = import.meta.env.DEV && import.meta.env.VITE_AGENT_TELEMETRY === 'true';
   const [isOpen, setIsOpen] = useState(false);
   const [pulse, setPulse] = useState<TelemetryPulse>({
     status: 'idle',
@@ -37,7 +39,7 @@ export const AntigravityTelemetry: React.FC<{ notebookId?: string }> = ({ notebo
   });
 
   useEffect(() => {
-    if (!isAuthenticated) return;
+    if (!enabled || !isAuthenticated) return;
     const fetchPulse = async () => {
       try {
         const res = await fetch('/api/agent/antigravity/pulse');
@@ -53,9 +55,9 @@ export const AntigravityTelemetry: React.FC<{ notebookId?: string }> = ({ notebo
     fetchPulse();
     const interval = setInterval(fetchPulse, 2000);
     return () => clearInterval(interval);
-  }, [isAuthenticated]);
+  }, [enabled, isAuthenticated]);
 
-  if (!isAuthenticated) return null;
+  if (!enabled || !isAuthenticated) return null;
 
   // Determine status dot color
   const getStatusColor = (status: string) => {
@@ -92,6 +94,7 @@ export const AntigravityTelemetry: React.FC<{ notebookId?: string }> = ({ notebo
                 <span className="text-xs font-bold uppercase tracking-wider font-mono text-zinc-400">Antigravity 2.0</span>
               </div>
               <button 
+                aria-label="Close developer telemetry"
                 onClick={() => setIsOpen(false)} 
                 className="p-1 rounded-md text-zinc-500 hover:text-zinc-300 hover:bg-white/5 transition-all"
               >
@@ -157,6 +160,7 @@ export const AntigravityTelemetry: React.FC<{ notebookId?: string }> = ({ notebo
           </motion.div>
         ) : (
           <motion.button
+            aria-label="Open developer telemetry"
             whileHover={{ scale: 1.05, boxShadow: '0 0 15px rgba(99, 102, 241, 0.4)' }}
             whileTap={{ scale: 0.95 }}
             onClick={() => setIsOpen(true)}

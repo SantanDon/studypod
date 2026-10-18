@@ -1,11 +1,13 @@
 import React, { useState, useRef } from 'react';
-import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Button } from '@/components/ui/button';
 import { Textarea } from '@/components/ui/textarea';
 import { Label } from '@/components/ui/label';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { useSignalQueue } from '@/hooks/useSignalQueue';
 import { useToast } from '@/hooks/use-toast';
+import { useAuth } from '@/hooks/useAuth';
+import { validateBookmarkArchive, validateTweetUrls } from '@/lib/bookmarkImportValidation';
 
 interface BookmarkImportDialogProps {
   open: boolean;
@@ -24,26 +26,29 @@ const BookmarkImportDialog = ({
   const [fileName, setFileName] = useState<string>('');
   const [fileBookmarksCount, setFileBookmarksCount] = useState<number>(0);
   const [isDragging, setIsDragging] = useState(false);
+  const [fileError, setFileError] = useState('');
+  const [isReadingFile, setIsReadingFile] = useState(false);
+  const fileReadVersion = useRef(0);
   
   const fileInputRef = useRef<HTMLInputElement>(null);
   const { importTweets, isImporting } = useSignalQueue();
   const { toast } = useToast();
+  const { session } = useAuth();
+  const isAuthenticated = !!session?.access_token;
 
   const handleClose = () => {
     setUrlsText('');
     setFileContent('');
     setFileName('');
     setFileBookmarksCount(0);
+    setFileError('');
+    setIsReadingFile(false);
+    fileReadVersion.current += 1;
+    setActiveTab('paste');
     onOpenChange(false);
   };
 
-  // Parse URLs from input text
-  const getUrlsList = () => {
-    return urlsText
-      .split('\n')
-      .map(url => url.trim())
-      .filter(url => url !== '' && (url.includes('twitter.com') || url.includes('x.com')));
-  };
+  const urlValidation = validateTweetUrls(urlsText);
 
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -52,7 +57,14 @@ const BookmarkImportDialog = ({
   };
 
   const processFile = (file: File) => {
-    if (!file.name.endsWith('.json') && !file.name.endsWith('.js')) {
+    const version = ++fileReadVersion.current;
+    setFileContent('');
+    setFileName('');
+    setFileBookmarksCount(0);
+    setFileError('');
+    setIsReadingFile(false);
+    if (!/\.(json|js)$/i.test(file.name)) {
+      setFileError('Please upload a .json or .js Twitter bookmarks file.');
       toast({
         title: "Invalid file type",
         description: "Please upload a .json or .js Twitter bookmarks file",
@@ -62,37 +74,24 @@ const BookmarkImportDialog = ({
     }
 
     const reader = new FileReader();
+    setIsReadingFile(true);
     reader.onload = (e) => {
+      if (version !== fileReadVersion.current) return;
+      setIsReadingFile(false);
       const content = e.target?.result as string;
-      setFileContent(content);
-      setFileName(file.name);
-
-      // Attempt a rough client-side preview of bookmark count
       try {
-        let parsedCount = 0;
-        let dataStr = content;
-        
-        // Handle Twitter JS wrapper: window.YTD.bookmarks.part0 = [...]
-        const jsMatch = content.match(/=\s*(\[[\s\S]+\])/);
-        if (jsMatch) {
-          dataStr = jsMatch[1];
-        }
-        
-        const data = JSON.parse(dataStr);
-        if (Array.isArray(data)) {
-          parsedCount = data.length;
-        } else if (data?.bookmarkTimeline?.instructions) {
-          const instructions = data.bookmarkTimeline.instructions;
-          (instructions as Array<{ entries?: unknown[] }>).forEach((inst) => {
-            parsedCount += inst?.entries?.length || 0;
-          });
-        }
-        setFileBookmarksCount(parsedCount);
+        const archive = validateBookmarkArchive(content);
+        setFileContent(archive.fileContent);
+        setFileName(file.name);
+        setFileBookmarksCount(archive.count);
       } catch (err) {
-        // Fallback: estimate count of status URLs in file
-        const matches = content.match(/(?:twitter|x)\.com\/[^/]+\/status/g);
-        setFileBookmarksCount(matches ? [...new Set(matches)].length : 0);
+        setFileError(err instanceof Error ? err.message : 'Cannot read this archive. Please upload the original export.');
       }
+    };
+    reader.onerror = () => {
+      if (version !== fileReadVersion.current) return;
+      setIsReadingFile(false);
+      setFileError('This file could not be read. Select it again or try another export.');
     };
     reader.readAsText(file);
   };
@@ -116,9 +115,10 @@ const BookmarkImportDialog = ({
   };
 
   const handleImport = async () => {
+    if (!isAuthenticated || !canSubmit || isReadingFile) return;
     try {
       if (activeTab === 'paste') {
-        const urls = getUrlsList();
+        const urls = urlValidation.urls;
         if (urls.length === 0) {
           toast({
             title: "No URLs found",
@@ -159,8 +159,8 @@ const BookmarkImportDialog = ({
     }
   };
 
-  const validUrls = getUrlsList();
-  const canSubmit = activeTab === 'paste' ? validUrls.length > 0 : !!fileContent;
+  const validUrls = urlValidation.urls;
+  const canSubmit = isAuthenticated && !isReadingFile && (activeTab === 'paste' ? validUrls.length > 0 && urlValidation.invalidCount === 0 : !!fileContent && fileBookmarksCount > 0);
 
   return (
     <Dialog open={open} onOpenChange={handleClose}>
@@ -170,12 +170,17 @@ const BookmarkImportDialog = ({
             <i className="fi fi-rr-bookmark text-indigo-600 text-2xl"></i>
             <span>Import Bookmarks & Tweet Seeds</span>
           </DialogTitle>
-          <p className="text-sm text-gray-500 mt-1">
+          <DialogDescription className="text-sm text-gray-500 mt-1">
             Feed StudyPod tweet seeds. It will automatically crawl embedded links, extract reply links, and populate research trails + the Social Queue.
-          </p>
+          </DialogDescription>
         </DialogHeader>
 
-        <Tabs defaultValue="paste" onValueChange={setActiveTab} className="mt-4">
+        {!isAuthenticated && (
+          <p role="status" className="mt-4 rounded-xl bg-indigo-50 p-3 text-sm text-indigo-800">
+            Sign in to import bookmarks and tweet seeds into an account-owned notebook. This import is unavailable in guest mode.
+          </p>
+        )}
+        <Tabs value={activeTab} onValueChange={setActiveTab} className="mt-4">
           <TabsList className="grid grid-cols-2 bg-gray-50/80 p-1 rounded-xl">
             <TabsTrigger value="paste" className="rounded-lg py-2.5 text-sm font-medium transition-all data-[state=active]:bg-white data-[state=active]:shadow-sm">
               <i className="fi fi-rr-link mr-2"></i>Paste URLs
@@ -187,8 +192,9 @@ const BookmarkImportDialog = ({
 
           <TabsContent value="paste" className="space-y-4 pt-4 outline-none">
             <div className="space-y-2">
-              <Label className="text-sm font-medium text-gray-700">Paste X / Twitter URL(s)</Label>
+              <Label htmlFor="bookmark-tweet-urls" className="text-sm font-medium text-gray-700">Paste X / Twitter URL(s)</Label>
               <Textarea
+                id="bookmark-tweet-urls"
                 placeholder={`https://x.com/username/status/1234567890123456789\nhttps://twitter.com/another/status/987654321098765432`}
                 value={urlsText}
                 onChange={(e) => setUrlsText(e.target.value)}
@@ -203,12 +209,17 @@ const BookmarkImportDialog = ({
                   </span>
                 )}
               </div>
+              {urlValidation.invalidCount > 0 && (
+                <p role="alert" className="text-sm text-red-600">
+                  {urlValidation.invalidCount} invalid link{urlValidation.invalidCount !== 1 ? 's' : ''}. Use HTTPS links to an individual X or Twitter post, such as https://x.com/username/status/123. Remove profile links and links to other websites.
+                </p>
+              )}
             </div>
           </TabsContent>
 
           <TabsContent value="file" className="space-y-4 pt-4 outline-none">
             <div className="space-y-2">
-              <Label className="text-sm font-medium text-gray-700">Upload Bookmarks Export File</Label>
+              <Label htmlFor="bookmark-archive-file" className="text-sm font-medium text-gray-700">Upload Bookmarks Export File</Label>
               
               <div
                 onDragOver={handleDragOver}
@@ -222,6 +233,7 @@ const BookmarkImportDialog = ({
                 }`}
               >
                 <input
+                  id="bookmark-archive-file"
                   type="file"
                   ref={fileInputRef}
                   onChange={handleFileChange}
@@ -237,7 +249,7 @@ const BookmarkImportDialog = ({
                     <div className="space-y-1">
                       <p className="text-sm font-semibold text-gray-800">{fileName}</p>
                       <p className="text-xs text-indigo-600 bg-indigo-50/60 px-3 py-1 rounded-full font-medium inline-block">
-                        ~{fileBookmarksCount} bookmark{fileBookmarksCount !== 1 ? 's' : ''} found
+                        {fileBookmarksCount} bookmark{fileBookmarksCount !== 1 ? 's' : ''} found
                       </p>
                     </div>
                   ) : (
@@ -252,6 +264,8 @@ const BookmarkImportDialog = ({
                   )}
                 </div>
               </div>
+              {isReadingFile && <p role="status" className="text-sm text-gray-500">Checking archive...</p>}
+              {fileError && <p role="alert" className="text-sm text-red-600">{fileError}</p>}
             </div>
           </TabsContent>
         </Tabs>

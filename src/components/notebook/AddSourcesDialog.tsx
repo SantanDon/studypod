@@ -22,6 +22,7 @@ import CopiedTextDialog from "./CopiedTextDialog";
 import YouTubeUrlInput from "./YouTubeUrlInput";
 import BookmarkImportDialog from "./BookmarkImportDialog";
 import { useAddSourcesHandlers } from "./hooks/useAddSourcesHandlers";
+import { useGuest, useNotebookLimits } from "@/hooks/useGuest";
 
 interface AddSourcesDialogProps {
   open: boolean;
@@ -74,6 +75,17 @@ const AddSourcesDialog = ({
   const [showBookmarkImportDialog, setShowBookmarkImportDialog] =
     useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const { isGuest, showAuthPrompt } = useGuest();
+  const { canAddSource, sourcesRemaining } = useNotebookLimits(notebookId);
+  const guestLimited = isGuest && Boolean(notebookId);
+  const sourceLimitReached = guestLimited && !canAddSource;
+  const checkSourceAllowance = () => {
+    if (guestLimited && !canAddSource) {
+      showAuthPrompt("add more sources");
+      return false;
+    }
+    return true;
+  };
 
   const {
     handleMultipleWebsiteSubmit,
@@ -87,12 +99,13 @@ const AddSourcesDialog = ({
   } = useAddSourcesHandlers(notebookId, onOpenChange, open);
 
   const openFilePicker = () => {
-    if (!isProcessingFiles) fileInputRef.current?.click();
+    if (!isProcessingFiles && checkSourceAllowance()) fileInputRef.current?.click();
   };
 
   const handleSourceOption = (
     action: (typeof sourceOptions)[number]["action"],
   ) => {
+    if (!checkSourceAllowance()) return;
     if (action === "youtube") setShowYouTubeDialog(true);
     if (action === "website") setShowMultipleWebsiteDialog(true);
     if (action === "paste") setShowCopiedTextDialog(true);
@@ -136,7 +149,11 @@ const AddSourcesDialog = ({
                       Upload files
                     </h2>
                     <p className="mt-1 text-xs text-muted-foreground">
-                      Choose up to 20 files—50 MB each, 250 MB total.
+                      {guestLimited
+                        ? sourcesRemaining > 0
+                          ? `You can add ${sourcesRemaining} more source${sourcesRemaining === 1 ? "" : "s"} to this guest notebook. Files: 50 MB each, 250 MB total.`
+                          : "This guest notebook has reached its source limit. Sign in to add more sources."
+                        : "Choose up to 20 files—50 MB each, 250 MB total."}
                     </p>
                   </div>
                   <span className="hidden text-[11px] text-muted-foreground sm:inline">
@@ -146,17 +163,22 @@ const AddSourcesDialog = ({
 
                 <div
                   role="button"
-                  tabIndex={isProcessingFiles ? -1 : 0}
+                  tabIndex={isProcessingFiles || sourceLimitReached ? -1 : 0}
                   aria-label="Upload source files"
+                  aria-disabled={isProcessingFiles || sourceLimitReached}
                   aria-busy={isProcessingFiles}
                   className={`rounded-2xl border-2 border-dashed px-5 py-7 text-center outline-none transition sm:px-8 ${
-                    dragActive
+                    sourceLimitReached
+                      ? "border-border bg-muted/20"
+                      : dragActive
                       ? "border-primary bg-primary/5 ring-4 ring-primary/10"
                       : "border-border bg-muted/20 hover:border-primary/50 hover:bg-muted/40 focus-visible:ring-2 focus-visible:ring-ring"
-                  } ${isProcessingFiles ? "cursor-wait" : "cursor-pointer"}`}
-                  onClick={openFilePicker}
+                  } ${isProcessingFiles ? "cursor-wait" : sourceLimitReached ? "cursor-default" : "cursor-pointer"}`}
+                  onClick={(event) => {
+                    if (!sourceLimitReached && event.target !== fileInputRef.current) openFilePicker();
+                  }}
                   onKeyDown={(event) => {
-                    if (event.key === "Enter" || event.key === " ") {
+                    if (!sourceLimitReached && event.target === event.currentTarget && (event.key === "Enter" || event.key === " ")) {
                       event.preventDefault();
                       openFilePicker();
                     }
@@ -174,7 +196,7 @@ const AddSourcesDialog = ({
                     className="sr-only"
                     accept=".pdf,.docx,.txt,.md,.markdown,.mp3,.wav,.m4a,.epub"
                     onChange={handleFileSelect}
-                    disabled={isProcessingFiles}
+                    disabled={isProcessingFiles || sourceLimitReached}
                     tabIndex={-1}
                   />
 
@@ -217,14 +239,14 @@ const AddSourcesDialog = ({
                         <UploadCloud className="h-6 w-6" />
                       </div>
                       <h3 className="mt-3 text-sm font-semibold">
-                        {dragActive
+                        {sourceLimitReached ? "Guest source limit reached" : dragActive
                           ? "Drop files to add them"
                           : "Drop files here"}
                       </h3>
                       <p className="mt-1 text-xs text-muted-foreground">
-                        or choose them from your computer
+                        {sourceLimitReached ? "Sign in to continue adding material to this notebook." : "or choose them from your computer"}
                       </p>
-                      <Button
+                      {!sourceLimitReached && <Button
                         type="button"
                         size="sm"
                         className="mt-4"
@@ -234,10 +256,16 @@ const AddSourcesDialog = ({
                         }}
                       >
                         Browse files
-                      </Button>
+                      </Button>}
                     </div>
                   )}
                 </div>
+
+                {sourceLimitReached && (
+                  <Button type="button" size="sm" className="mt-3" onClick={() => showAuthPrompt("add more sources")}>
+                    Sign in to add sources
+                  </Button>
+                )}
 
                 <div
                   className="mt-3 flex flex-wrap gap-1.5"
@@ -276,7 +304,7 @@ const AddSourcesDialog = ({
                         variant="outline"
                         className="h-auto justify-start gap-3 rounded-xl p-3 text-left"
                         onClick={() => handleSourceOption(option.action)}
-                        disabled={isProcessingFiles}
+                        disabled={isProcessingFiles || sourceLimitReached}
                       >
                         <span
                           className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-lg ${option.tone}`}

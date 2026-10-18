@@ -15,7 +15,7 @@ import {
   ResizablePanelGroup,
 } from '@/components/ui/resizable';
 import { LocalSource } from '@/services/localStorageService';
-import { ComparisonResult, useSourceComparison } from './hooks/useSourceComparison';
+import { COMPARISON_CHARACTER_LIMIT, ComparisonResult, useSourceComparison } from './hooks/useSourceComparison';
 
 type Source = LocalSource;
 
@@ -268,7 +268,7 @@ const SourceComparisonView: React.FC<SourceComparisonViewProps> = ({ sources, on
             <label id="comparison-source-1-label" className="mb-1.5 block text-xs font-medium text-foreground">
               First source
             </label>
-            <Select value={selectedSource1} onValueChange={setSelectedSource1}>
+            <Select value={selectedSource1} onValueChange={setSelectedSource1} disabled={isAnalyzing}>
               <SelectTrigger className="w-full" aria-labelledby="comparison-source-1-label">
                 <SelectValue placeholder="Choose first source" />
               </SelectTrigger>
@@ -286,7 +286,7 @@ const SourceComparisonView: React.FC<SourceComparisonViewProps> = ({ sources, on
             <label id="comparison-source-2-label" className="mb-1.5 block text-xs font-medium text-foreground">
               Second source
             </label>
-            <Select value={selectedSource2} onValueChange={setSelectedSource2}>
+            <Select value={selectedSource2} onValueChange={setSelectedSource2} disabled={isAnalyzing}>
               <SelectTrigger className="w-full" aria-labelledby="comparison-source-2-label">
                 <SelectValue placeholder="Choose second source" />
               </SelectTrigger>
@@ -321,10 +321,13 @@ const SourceComparisonView: React.FC<SourceComparisonViewProps> = ({ sources, on
             </Button>
           </div>
         </div>
+        <p className="mt-3 text-xs leading-5 text-muted-foreground" data-testid="comparison-scope">
+          Analysis uses the first {COMPARISON_CHARACTER_LIMIT.toLocaleString('en-US')} characters of each source, or its summary when text is unavailable. Claims beyond that excerpt are not compared. The full available text remains below for review.
+        </p>
       </div>
 
       {isWideLayout ? (
-        <div className="min-h-0 flex-1 flex-col" data-testid="wide-source-comparison-layout">
+        <div className="flex min-h-0 flex-1 flex-col" data-testid="wide-source-comparison-layout">
           <div className="min-h-0 flex-1 overflow-hidden">
             <ResizablePanelGroup direction="horizontal" className="h-full">
               <ResizablePanel defaultSize={50} minSize={25}>

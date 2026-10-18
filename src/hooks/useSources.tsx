@@ -54,7 +54,9 @@ export const useSources = (notebookId?: string) => {
   const {
     data: sources = [],
     isLoading,
+    isFetching,
     error,
+    refetch,
   } = useQuery({
     queryKey: ["sources", notebookId, !!session?.access_token],
     queryFn: async () => {
@@ -261,7 +263,9 @@ export const useSources = (notebookId?: string) => {
   return {
     sources,
     isLoading,
+    isFetching,
     error,
+    retrySources: refetch,
     addSource: addSource.mutate,
     addSourceAsync: addSource.mutateAsync,
     isAdding: addSource.isPending,

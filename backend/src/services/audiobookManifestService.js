@@ -4,7 +4,7 @@ import { createHash, randomUUID } from "crypto";
 import {
   loadBookManifest,
   manifestPathFor,
-  saveBookManifest,
+  saveBookManifestAsync,
 } from "./audiobookBookService.js";
 
 export const AUDIOBOOK_MANIFEST_SCHEMA_VERSION = 2;
@@ -468,7 +468,7 @@ export async function mutateAudiobookManifest({
     const normalized = normalizeAudiobookManifest(loaded);
     const next = (await mutate(normalized)) || normalized;
     next.updatedAt = nowIso();
-    saveBookManifest(manifestDir, next);
+    await saveBookManifestAsync(manifestDir, next);
     return next;
   } finally {
     releaseManifestLock(lock);

@@ -857,9 +857,74 @@
 
 .audio-lab-grid {
   display: grid;
-  grid-template-columns: 1fr 1fr;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 16px;
-  margin-bottom: 24px;
+  margin-top: 16px;
+}
+
+.audio-lab-grid--solo {
+  grid-template-columns: minmax(0, 1fr);
+}
+
+.audio-voice-disclosure {
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  border-radius: 10px;
+  margin: 0 0 20px;
+}
+
+.audio-voice-disclosure summary {
+  cursor: pointer;
+  min-height: 48px;
+  padding: 12px 16px;
+  color: #e2e8f0;
+  font-size: 14px;
+  font-weight: 600;
+  line-height: 1.4;
+}
+
+.audio-voice-disclosure summary:focus-visible {
+  outline: 2px solid hsl(var(--primary));
+  outline-offset: 2px;
+}
+
+.audio-voice-disclosure-note {
+  display: block;
+  margin-left: 18px;
+  color: #a7b7cc;
+  font-size: 13px;
+  font-weight: 400;
+}
+
+.audio-voice-disclosure .audio-lab-grid {
+  padding: 0 16px 16px;
+}
+
+.lab-input.audio-voice-select {
+  height: auto !important;
+  min-height: 44px;
+  gap: 8px;
+}
+
+.audio-voice-select > span {
+  display: block !important;
+  -webkit-line-clamp: unset !important;
+  white-space: normal;
+  overflow-wrap: anywhere;
+  min-width: 0;
+}
+
+.audio-voice-select > svg {
+  flex: none;
+}
+
+@media (max-width: 640px) {
+  .audio-lab-overlay {
+    padding: 18px 14px;
+  }
+
+  .audio-lab-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
 }
 
 .lab-input-group {
@@ -869,9 +934,9 @@
 }
 
 .lab-input-group label {
-  font-size: 12px;
+  font-size: 13px;
   font-weight: 600;
-  color: #64748b;
+  color: #b7c5d7;
   text-transform: uppercase;
   letter-spacing: 0.05em;
   display: flex;
@@ -899,10 +964,10 @@
 }
 
 .lab-hint {
-  font-size: 12px;
-  color: #94a3b8;
+  font-size: 13px;
+  line-height: 1.5;
+  color: #a7b7cc;
   margin: 0;
-  font-style: italic;
   padding-left: 4px;
 }
 
@@ -1485,6 +1550,21 @@
     0 1px 3px rgba(0, 0, 0, 0.04);
 }
 
+:root:not(.dark) .audio-voice-disclosure,
+.light .audio-voice-disclosure {
+  border-color: rgba(15, 23, 42, 0.18);
+}
+
+:root:not(.dark) .audio-voice-disclosure summary,
+.light .audio-voice-disclosure summary {
+  color: #334155;
+}
+
+:root:not(.dark) .audio-voice-disclosure-note,
+.light .audio-voice-disclosure-note {
+  color: #475569;
+}
+
 :root:not(.dark) .audio-lab-header h4,
 .light .audio-lab-header h4 {
   color: #1e293b;
@@ -1565,6 +1645,19 @@
   box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1) !important;
 }
 
+
+@media (max-width: 359px) {
+  .audio-lab-overlay .audio-format-tabs-list {
+    height: auto;
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .audio-lab-overlay .audio-format-tabs-list [role="tab"] {
+    min-width: 0;
+    width: 100%;
+    white-space: normal;
+  }
+}
 
 @media (prefers-reduced-motion: reduce) {
   .wave-bar,

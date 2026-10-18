@@ -34,15 +34,18 @@ export const useDocumentProcessing = () => {
       sourceType,
       notebookId,
       content: providedContent,
+      metadata: providedMetadata,
     }: {
       sourceId: string;
       filePath: string;
       sourceType: string;
       notebookId?: string;
       content?: string;
+      metadata?: unknown;
     }) => {
       const updateSourceData = async (updates: Record<string, unknown>) => {
-        if (session?.access_token && notebookId) {
+        if (session?.access_token) {
+          if (!notebookId) throw new Error("A notebook is required to save account source processing.");
           await ApiService.updateSource(notebookId, sourceId, updates, session.access_token);
           return;
         }
@@ -50,15 +53,29 @@ export const useDocumentProcessing = () => {
       };
 
       let content = providedContent || "";
-      let metadata: Record<string, unknown> = {};
+      let metadata: Record<string, unknown> = parseSourceProcessingMetadata(providedMetadata);
 
-      const localSource = localStorageService.getSourceById(sourceId);
+      // Older website/YouTube callers supply only the saved source ID. Resolve
+      // their text and provenance from the authorized notebook, never a guest cache.
+      if (!content && session?.access_token) {
+        if (!notebookId) throw new Error("A notebook is required to save account source processing.");
+        const sources: unknown = await ApiService.fetchSources(notebookId, session.access_token);
+        const savedSource = Array.isArray(sources)
+          ? sources.find((source: unknown): source is Record<string, unknown> =>
+              typeof source === "object" && source !== null && "id" in source && source.id === sourceId)
+          : undefined;
+        if (!savedSource) throw new Error("The source is unavailable in this account notebook.");
+        content = typeof savedSource.content === "string" ? savedSource.content : "";
+        metadata = { ...parseSourceProcessingMetadata(savedSource.metadata), ...metadata };
+      }
+
+      const localSource = session?.access_token ? null : localStorageService.getSourceById(sourceId);
       if (localSource) {
-        metadata = parseSourceProcessingMetadata(localSource.metadata);
+        metadata = { ...parseSourceProcessingMetadata(localSource.metadata), ...metadata };
         if (!content) content = localSource.content || "";
       }
 
-      if (!content) {
+      if (!content && !session?.access_token) {
         try {
           const cachedFile = localStorage.getItem(`file_${filePath}`);
           if (cachedFile) {
@@ -69,7 +86,8 @@ export const useDocumentProcessing = () => {
             content = fileData.content || "";
             metadata = {
               ...metadata,
-              ...(fileData.metadata || {}),
+              ...parseSourceProcessingMetadata(fileData.metadata),
+              ...parseSourceProcessingMetadata(providedMetadata),
             };
           }
         } catch (error) {

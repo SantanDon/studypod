@@ -1,4 +1,5 @@
 import crypto from 'node:crypto';
+import { KOKORO_TOKEN_BUDGET_VERSION } from './kokoroGenerationService.js';
 
 export const AUDIOBOOK_DIRECTION_VERSION = 'v1';
 export const AUTOMATIC_PRONUNCIATION_LEXICON = [
@@ -387,6 +388,7 @@ export const createNarrationSignature = ({
     pronunciations: normalizePronunciationEntries(pronunciations),
     voice,
     provider,
+    tokenBudgetVersion: provider === 'kokoro' ? KOKORO_TOKEN_BUDGET_VERSION : undefined,
   }))
   .digest('hex')
   .slice(0, 12);

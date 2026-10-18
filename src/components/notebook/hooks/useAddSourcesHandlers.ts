@@ -8,7 +8,10 @@ import { useYoutubeProcessing } from "@/hooks/useYoutubeProcessing";
 import { useGuest, useNotebookLimits } from "@/hooks/useGuest";
 import { useNotebookUpdate } from "@/hooks/useNotebookUpdate";
 import { useToast } from "@/hooks/use-toast";
-import { validateSourceFiles } from "@/lib/sources/sourceUploadValidation";
+import { detectUploadSourceType, validateSourceFiles } from "@/lib/sources/sourceUploadValidation";
+import { buildSourceProcessingError, parseSourceProcessingMetadata } from "@/lib/sources/sourceProcessing";
+import { beginSourceUpload, clearUploadInterruption, recordUploadInterruption, type UploadInterruptionScope, type UploadInterruptionStage } from "@/lib/sources/sourceUploadInterruption";
+import { localStorageService } from "@/services/localStorageService";
 
 type UploadSourceType =
   "pdf" | "doc" | "text" | "website" | "youtube" | "audio" | "image" | "ebook";
@@ -23,7 +26,7 @@ export function useAddSourcesHandlers(
   const [pendingFileNames, setPendingFileNames] = useState<string[]>([]);
 
   const { sources, addSourceAsync, updateSourceAsync } = useSources(notebookId);
-  const { uploadFile } = useFileUpload();
+  const { uploadFile, ownerId } = useFileUpload();
   const { processDocumentAsync } = useDocumentProcessing();
   const { generateNotebookContentAsync } = useNotebookGeneration();
   const { updateNotebook } = useNotebookUpdate();
@@ -33,7 +36,7 @@ export function useAddSourcesHandlers(
     useYoutubeProcessing();
 
   const { toast } = useToast();
-  const { isGuest, showAuthPrompt, incrementUsage } = useGuest();
+  const { isGuest, guestId, showAuthPrompt, incrementUsage } = useGuest();
   const { canAddSource, sourcesRemaining } = useNotebookLimits(notebookId);
   const isProcessingFiles =
     isLocallyProcessing || isWebsiteProcessing || isYoutubeProcessing;
@@ -51,9 +54,8 @@ export function useAddSourcesHandlers(
       const { accepted: files, rejected } = validateSourceFiles(selectedFiles);
       if (rejected.length > 0) {
         const details = rejected
-          .slice(0, 3)
           .map(({ file, reason }) => `${file.name}: ${reason}`)
-          .join(" | ");
+          .join("; ");
         toast({
           title:
             rejected.length === selectedFiles.length
@@ -82,43 +84,40 @@ export function useAddSourcesHandlers(
         return;
       }
 
-      const detectFileType = (file: File): UploadSourceType => {
-        if (
-          file.type.includes("pdf") ||
-          file.name.toLowerCase().endsWith(".pdf")
-        )
-          return "pdf";
-        if (
-          file.name.toLowerCase().endsWith(".docx") ||
-          file.type.includes("wordprocessingml")
-        )
-          return "doc";
-        if (file.type.includes("audio")) return "audio";
-        if (file.type.includes("image")) return "image";
-        if (
-          file.type === "application/epub+zip" ||
-          file.name.toLowerCase().endsWith(".epub")
-        )
-          return "ebook";
-        return "text";
-      };
+      const detectFileType = detectUploadSourceType;
+      const localNotebook = isGuest && notebookId ? localStorageService.getNotebook(notebookId) : null;
+      const interruptionScope: UploadInterruptionScope | null = notebookId
+        ? isGuest
+          ? guestId && localNotebook?.user_id === guestId
+            ? { kind: "guest", ownerId: guestId, notebookId } : null
+          : ownerId ? { ownerId, notebookId } : null
+        : null;
 
       const processFileAsync = async (
         file: File,
         sourceId: string,
         notebookId: string,
+        originalMetadata: unknown,
       ) => {
+        let metadata = parseSourceProcessingMetadata(originalMetadata);
+        let stage = "uploading";
+        let failureCode: string | undefined;
+        let documentProcessingStarted = false;
         try {
           const fileType = detectFileType(file);
 
-          await updateSourceAsync({
+          const uploadingSource = await updateSourceAsync({
             sourceId,
             updates: { processing_status: "uploading" },
           });
+          metadata = { ...metadata, ...parseSourceProcessingMetadata(uploadingSource?.metadata) };
 
+          stage = "extracting";
           const uploadResult = await uploadFile(file, notebookId, sourceId);
 
           if (uploadResult.success === false) {
+            failureCode = uploadResult.failureCode;
+            stage = uploadResult.failureStage || stage;
             const errorContext = uploadResult.error;
             console.error(
               `[SourcePipeline] Upload failed for ${file.name}:`,
@@ -128,13 +127,16 @@ export function useAddSourcesHandlers(
           }
 
           const { filePath, content } = uploadResult;
+          metadata = { ...metadata, ...parseSourceProcessingMetadata(uploadResult.metadata) };
 
+          stage = "saving";
           await updateSourceAsync({
             sourceId,
             updates: {
               file_path: filePath,
               processing_status: "processing",
               content,
+              metadata,
             },
           });
 
@@ -150,13 +152,23 @@ export function useAddSourcesHandlers(
             }
           }
 
-          await processDocumentAsync({
+          stage = "processing";
+          documentProcessingStarted = true;
+          const processingResult = await processDocumentAsync({
             sourceId,
             filePath,
             sourceType: fileType,
             notebookId,
             content,
+            metadata,
           });
+
+          // The sidebar may be unmounted by an error boundary. Release the
+          // reload guard here only after this source's terminal save is acknowledged.
+          if (interruptionScope && processingResult.sourceId === sourceId &&
+            (processingResult.status === "completed" || processingResult.status === "degraded")) {
+            clearUploadInterruption(interruptionScope, sourceId);
+          }
 
           return { filePath, sourceType: fileType };
         } catch (error) {
@@ -164,10 +176,30 @@ export function useAddSourcesHandlers(
           try {
             await updateSourceAsync({
               sourceId,
-              updates: { processing_status: "failed" },
+              // Document processing persists its own specific extraction/indexing
+              // errors. Do not replace them with an upload wrapper error.
+              updates: documentProcessingStarted
+                ? { processing_status: "failed" }
+                : {
+                    processing_status: "failed",
+                    metadata: {
+                      ...metadata,
+                      processingStage: metadata.processingError?.stage || stage,
+                      processingError: metadata.processingError || buildSourceProcessingError(
+                        failureCode || (stage === "saving" ? "SOURCE_SAVE_FAILED" : stage === "extracting" ? "SOURCE_EXTRACTION_FAILED" : "SOURCE_UPLOAD_FAILED"),
+                        error instanceof Error ? error.message : "File upload failed. Please retry or replace this source.",
+                        stage,
+                      ),
+                    },
+                  },
             });
+            if (interruptionScope) clearUploadInterruption(interruptionScope, sourceId);
           } catch (statusError) {
             console.warn("Could not persist failed source status:", statusError);
+            if (interruptionScope) recordUploadInterruption(interruptionScope, {
+              sourceId, fileName: file.name,
+              stage: (stage === "extracting" ? "uploading" : stage) as UploadInterruptionStage,
+            });
           }
           throw error;
         }
@@ -186,8 +218,8 @@ export function useAddSourcesHandlers(
       setIsLocallyProcessing(true);
 
       try {
-        const createdSources: Array<{ file: File; sourceId: string }> = [];
-        let creationFailures = 0;
+        const createdSources: Array<{ file: File; sourceId: string; metadata: unknown }> = [];
+        const creationFailures: string[] = [];
 
         // Create records sequentially so each successful file is known and can
         // always advance out of "pending", even if another record fails.
@@ -201,9 +233,12 @@ export function useAddSourcesHandlers(
               processing_status: "pending",
               metadata: { fileName: file.name, fileType: file.type },
             });
-            createdSources.push({ file, sourceId: source.id });
+            if (interruptionScope) beginSourceUpload(interruptionScope, {
+              sourceId: source.id, fileName: file.name, stage: "uploading",
+            });
+            createdSources.push({ file, sourceId: source.id, metadata: source.metadata ?? { fileName: file.name, fileType: file.type } });
           } catch (error) {
-            creationFailures += 1;
+            creationFailures.push(file.name);
             console.error(`Failed to create source for ${file.name}:`, error);
           }
         }
@@ -221,12 +256,12 @@ export function useAddSourcesHandlers(
         onOpenChange(false);
 
         toast({
-          title: creationFailures > 0 ? "Some files queued" : "Files queued",
+          title: creationFailures.length > 0 ? "Some files queued" : "Files queued",
           description:
-            creationFailures > 0
-              ? `${createdSources.length} added; ${creationFailures} could not be created. You can retry the failed files.`
+            creationFailures.length > 0
+              ? `${createdSources.length} added. Could not add: ${creationFailures.join(", ")}. Retry these files when the connection is restored.`
               : `${createdSources.length} file${createdSources.length > 1 ? "s" : ""} added. Chat unlocks as soon as text extraction finishes; indexing can continue in the background.`,
-          variant: creationFailures > 0 ? "destructive" : "default",
+          variant: creationFailures.length > 0 ? "destructive" : "default",
         });
 
         void (async () => {
@@ -238,8 +273,8 @@ export function useAddSourcesHandlers(
           for (let index = 0; index < createdSources.length; index += 3) {
             const batch = createdSources.slice(index, index + 3);
             const results = await Promise.allSettled(
-              batch.map(({ file, sourceId }) =>
-                processFileAsync(file, sourceId, notebookId),
+              batch.map(({ file, sourceId, metadata }) =>
+                processFileAsync(file, sourceId, notebookId, metadata),
               ),
             );
             failed += results.filter(
@@ -279,7 +314,7 @@ export function useAddSourcesHandlers(
         setPendingFileNames([]);
         toast({
           title: "Error",
-          description: "Failed to add files. Please try again.",
+          description: `Failed to add: ${files.map(file => file.name).join(", ")}. Restore the connection and try again.`,
           variant: "destructive",
         });
       }
@@ -291,10 +326,12 @@ export function useAddSourcesHandlers(
       addSourceAsync,
       updateSourceAsync,
       uploadFile,
+      ownerId,
       processDocumentAsync,
       generateNotebookContentAsync,
       onOpenChange,
       isGuest,
+      guestId,
       canAddSource,
       sourcesRemaining,
       showAuthPrompt,

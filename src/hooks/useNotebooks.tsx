@@ -8,7 +8,7 @@ import { ApiService } from "@/services/apiService";
 
 export const useNotebooks = () => {
   const { user, isSignedIn: isAuthenticated } = useAuthState();
-  const { session } = useAuth();
+  const { session, loading: authLoading } = useAuth();
   const { isGuest, guestId, incrementUsage } = useGuest();
   const queryClient = useQueryClient();
   const { triggerSync } = useSyncTrigger();
@@ -53,7 +53,7 @@ export const useNotebooks = () => {
         return notebooksData || [];
       }
     },
-    enabled: !!effectiveUserId,
+    enabled: !authLoading && !!effectiveUserId,
     // Add polling so notebooks created by agents appear automatically
     refetchInterval: isAuthenticated ? 10000 : false,
     retry: (failureCount: number, err: unknown) => {
@@ -144,7 +144,9 @@ export const useNotebooks = () => {
 
   return {
     notebooks,
-    isLoading: isLoading,
+    // A disabled query is not "loading" in TanStack Query. Until cookie auth
+    // and the guest identity settle, an empty result is not a missing notebook.
+    isLoading: authLoading || !effectiveUserId || isLoading,
     error: (error as Error)?.message || null,
     isError,
     createNotebook: createNotebook.mutate,

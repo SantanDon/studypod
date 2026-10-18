@@ -14,6 +14,7 @@ import { generateTextToString, listModels } from "./ollamaClient";
 import { DOCUMENT_PROMPTS, formatPrompt } from "@/config/prompts";
 import { getModelForTask } from "@/config/ollamaModels";
 import { isOllamaEnabled } from "@/config/ollamaConfig";
+import { createRequestDeadline, type RequestDeadlineOptions } from './requestDeadline';
 import { generateServerAiResponse } from "./serverAiClient";
 
 const OLLAMA_BASE_URL = import.meta.env.VITE_OLLAMA_URL || "http://localhost:11434";
@@ -29,7 +30,7 @@ async function fetchWithRetry(url: string, options: RequestInit, retries = 3, ba
     }
     return response;
   } catch (error) {
-    if (retries <= 0) throw error;
+    if (options.signal || retries <= 0) throw error;
     
     console.warn(`Fetch failed, retrying in ${backoff}ms... (${retries} retries left)`, error);
     await new Promise(resolve => setTimeout(resolve, backoff));
@@ -125,17 +126,18 @@ const MODELS_CACHE_TTL = 60000; // 1 minute
 /**
  * Get cached models or fetch fresh list
  */
-async function getAvailableModelsCached(): Promise<string[]> {
+async function getAvailableModelsCached(signal?: AbortSignal): Promise<string[]> {
   const now = Date.now();
   if (modelsCache && now - modelsCache.timestamp < MODELS_CACHE_TTL) {
     return modelsCache.models;
   }
 
   try {
-    const models = await listModels();
+    const models = await listModels(undefined, signal);
     modelsCache = { models, timestamp: now };
     return models;
   } catch (err) {
+    signal?.throwIfAborted();
     console.error("Failed to fetch models:", err);
     return modelsCache?.models || [];
   }
@@ -146,9 +148,11 @@ async function getAvailableModelsCached(): Promise<string[]> {
  * If the exact model isn't available, try to find a model with the same prefix (before ':').
  * If nothing matches, fall back to the first available model and log a warning.
  */
-async function resolveModelName(requested: string): Promise<string> {
+async function resolveModelName(requested: string, signal?: AbortSignal): Promise<string> {
+  // An explicit deployment selection must not silently become another model.
+  if (requested === import.meta.env.VITE_OLLAMA_MODEL?.trim()) return requested;
   try {
-    const available = await getAvailableModelsCached();
+    const available = await getAvailableModelsCached(signal);
     if (!available || available.length === 0) {
       console.warn(
         "âš ï¸ No models available from Ollama server. Is Ollama running?",
@@ -173,6 +177,9 @@ async function resolveModelName(requested: string): Promise<string> {
       return byPrefix;
     }
 
+    // A missing embedding model cannot be replaced with a text generator.
+    if (/embed/i.test(requested)) return requested;
+
     // If no generation-specific candidates, fall back to the first non-embedding model
     if (generationCandidates.length > 0) {
       return generationCandidates[0];
@@ -181,6 +188,7 @@ async function resolveModelName(requested: string): Promise<string> {
     // As a last resort, pick the first available model
     return available[0];
   } catch (err) {
+    signal?.throwIfAborted();
     console.error("Error resolving model name:", err);
     return requested;
   }
@@ -241,20 +249,35 @@ function cacheResponse(model: string, prompt: string, response: string): void {
 /**
  * Ultra-fast chat completion with streaming support
  */
-export async function chatCompletion(params: {
+type ChatCompletionParams = RequestDeadlineOptions & {
   messages: Array<{ role: "system" | "user" | "assistant"; content: string }>;
   model?: string;
   stream?: boolean;
   temperature?: number;
   onChunk?: (chunk: string) => void;
-}): Promise<string> {
+};
+
+export async function chatCompletion(params: ChatCompletionParams): Promise<string> {
+  const scope = createRequestDeadline(params);
+  try {
+    scope.signal.throwIfAborted();
+    const result = await chatCompletionInternal({ ...params, signal: params.signal || params.deadlineAt !== undefined ? scope.signal : undefined });
+    scope.signal.throwIfAborted();
+    return result;
+  } finally {
+    scope.dispose();
+  }
+}
+
+async function chatCompletionInternal(params: ChatCompletionParams): Promise<string> {
   // When local inference is disabled, use the authenticated server provider chain.
   if (!isOllamaEnabled()) {
-    return generateServerAiResponse(params.messages, params.temperature ?? 0.7);
+    return generateServerAiResponse(params.messages, params.temperature ?? 0.7, params);
   }
 
   const requestedModel = params.model || FAST_MODELS.chat;
-  const model = await resolveModelName(requestedModel);
+  const model = await resolveModelName(requestedModel, params.signal);
+  params.signal?.throwIfAborted();
 
   // Build prompt from messages - optimized format
   // Sanitize each message to avoid binary/mojibake reaching the model
@@ -292,12 +315,14 @@ export async function chatCompletion(params: {
     if (params.stream && params.onChunk) {
       // Streaming mode
       const response = await fetchWithRetry(`${OLLAMA_BASE_URL}/api/generate`, {
+        signal: params.signal,
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           model,
           prompt: finalPrompt,
           stream: true,
+          think: false,
           options: {
             temperature: params.temperature ?? 0.7,
             num_predict: 1024,
@@ -347,12 +372,14 @@ export async function chatCompletion(params: {
         prompt: finalPrompt,
         stream: false,
         params: {
+          think: false,
           temperature: params.temperature ?? 0.7,
           num_predict: isShortQuery ? 512 : 2048, // Shorter responses for quick queries
           top_k: 40,
           top_p: 0.9,
           num_ctx: isShortQuery ? 2048 : 4096, // Smaller context for speed
         },
+        signal: params.signal,
         timeoutMs: isShortQuery ? 30000 : 120000, // 30s for short, 2min for long
       });
 

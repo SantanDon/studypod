@@ -13,11 +13,7 @@ vi.mock("@/lib/tts/wavUtils", () => ({
 vi.mock("@/lib/ai/ollamaService", () => ({
   chatCompletion: vi.fn().mockResolvedValue(
     JSON.stringify({
-      title: "Test Podcast",
-      segments: Array.from({ length: 40 }, (_, i) => ({
-        speaker: i % 2 === 0 ? "Alex" : "Sarah",
-        text: "Hello world.",
-      })),
+      passageIds: ["p1", "p2"],
     }),
   ),
 }));
@@ -51,14 +47,14 @@ vi.mock("@/lib/tts/ttsWorker", () => ({
   }),
 }));
 
-test("full podcast generation produces script with >= 40 segments and audio", async () => {
-  const content = "Full content with multiple sections...";
+test("compiled faithful passages flow through the mocked audio pipeline", async () => {
+  const content = "A pilot study is planned. No results have been measured.\n\nThe protocol will compare twelve learners.";
   const script = await generatePodcastScript(content, { type: "standard" });
-  expect(script.segments.length).toBeGreaterThanOrEqual(40);
+  expect(script.segments.some(s => s.text === "A pilot study is planned. No results have been measured.")).toBe(true);
 
   const generator = getPodcastAudioGenerator();
   const result = await generator.generatePodcastAudio(script, {});
-  expect(result.segments.length).toBeGreaterThanOrEqual(40);
+  expect(result.segments.length).toBe(script.segments.length);
   expect(result.duration).toBeGreaterThan(60);
   expect(result.audioBlob.type).toBe("audio/wav");
   expect(result.audioBlob.size).toBeGreaterThan(0);

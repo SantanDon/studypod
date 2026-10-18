@@ -7,6 +7,7 @@
  */
 
 import { TTSProvider, TTSVoice, TTSRequest, TTSResponse } from './ttsService';
+import { generateCompleteKokoroAudio } from './kokoroTokenGeneration';
 
 // Kokoro voice IDs - these are the available voices
 export const KOKORO_VOICES = {
@@ -136,7 +137,7 @@ export class KokoroTTSProvider implements TTSProvider {
       // Generate audio
       console.log(`🔊 Generating speech for: "${text.substring(0, 50)}..."`);
       
-      const audio = await kokoro.generate(text, {
+      const audio = await generateCompleteKokoroAudio(kokoro, text, {
         voice: voice as KokoroVoiceId,
         speed,
       });

@@ -77,7 +77,9 @@ export async function generateAndCacheSuggestedGoals(notebookId, userId, source)
   let suggestions = [];
   try {
     const { answer } = await dispatchToTitan({ messages, priority: 'fast', temperature: 0.4 });
-    suggestions = safeParseJsonArray(answer);
+    suggestions = safeParseJsonArray(answer).filter(s => s && typeof s.title === 'string' && s.title.trim() &&
+      typeof s.rationale === 'string' && Array.isArray(s.sourceChunkIndices) &&
+      s.sourceChunkIndices.every(index => Number.isInteger(index) && index >= 0));
   } catch (err) {
     logger.warn(`[SuggestedGoals] Titan dispatch failed for source ${source.id}: ${err.message}`);
     return [];
@@ -126,12 +128,12 @@ export async function generateAndCacheSuggestedGoals(notebookId, userId, source)
 }
 
 export async function getOrComputeSuggestedGoals(notebookId, userId, sourceId, { force = false } = {}) {
-  const cached = await dbHelpers.getSignalQueueSuggestionsBySource(sourceId);
-  if (cached && cached.length > 0) return { suggestions: cached, computed: false };
-
+  // Verify source ownership before touching cached suggestions.
   const sources = await dbHelpers.getSourcesByNotebookId(notebookId, userId);
   const source = sources.find(s => s.id === sourceId);
   if (!source) return { suggestions: [], computed: false };
+  const cached = await dbHelpers.getSignalQueueSuggestionsBySource(sourceId, notebookId, userId);
+  if (!force && cached?.length) return { suggestions: cached, computed: false };
 
   if (!canGenerateNow(sourceId, force)) {
     const last = lastGenerated.get(sourceId) || 0;
@@ -142,7 +144,7 @@ export async function getOrComputeSuggestedGoals(notebookId, userId, sourceId, {
   lastGenerated.set(sourceId, Date.now());
 
   const generated = await generateAndCacheSuggestedGoals(notebookId, userId, source);
-  const refreshed = await dbHelpers.getSignalQueueSuggestionsBySource(sourceId);
+  const refreshed = await dbHelpers.getSignalQueueSuggestionsBySource(sourceId, notebookId, userId);
   return { suggestions: refreshed, computed: generated.length > 0 };
 }
 

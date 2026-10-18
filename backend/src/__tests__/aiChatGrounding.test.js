@@ -34,6 +34,34 @@ const sources = [
 ];
 
 describe("AI chat grounding", () => {
+  // Reconstructed from failed browser journeys; these are not complete live transcripts.
+  it.each([
+    {
+      type: "website",
+      introduction: 'Photosynthesis photosynthesis photosynthesis. Allen JF. The photosynthesis review. Journal of Theoretical Biology. Photosynthesis bibliography.',
+      evidence: "During photosynthesis, plants absorb carbon dioxide and use light energy to produce sugars.",
+      question: "What gas do plants absorb during photosynthesis?",
+      claim: "Plants absorb carbon dioxide during photosynthesis.",
+      fact: "carbon dioxide",
+    },
+    {
+      type: "youtube",
+      introduction: "Photosynthesis produces carbohydrates. Carbohydrates account for 60% of our food. Photosynthesis and carbohydrates are the topic of this introduction.",
+      evidence: "The chloroplast transforms the original carbon dioxide gas into a simple carbohydrate called glucose, C-6-H-12-O-6.",
+      question: "What simple carbohydrate does photosynthesis produce?",
+      claim: "Photosynthesis produces the simple carbohydrate glucose.",
+      fact: "glucose",
+    },
+  ])("selects the answered fact instead of a topic-heavy $type introduction", ({ introduction, evidence, question, claim, fact }) => {
+    const content = `${introduction}\n${evidence}`;
+    const citation = { citation_id: 1, source_id: "source-1", excerpt: introduction };
+    const result = alignCitationExcerptsWithClaims(
+      `${claim}[1]`, [citation], [{ id: "source-1", content }], question,
+    );
+    expect(result[0].excerpt).toContain(fact);
+    expect(content.replace(/\s+/g, " ")).toContain(result[0].excerpt.replace(/\s+/g, " "));
+  });
+
   it("keeps a citation when the excerpt is verbatim", () => {
     const rawAnswer =
       'Use explicit boundaries.[1]\n\nCITATIONS:\n[1] "explicit boundaries"';
@@ -88,7 +116,7 @@ describe("AI chat grounding", () => {
     expect(excerpt).toContain("universally optimal spacing interval");
   });
 
-  it("replaces a verbatim but weak citation with evidence that supports the claim", () => {
+  it("rejects an uncited quantitative paraphrase despite a verbatim weak citation", () => {
     const directSources = [
       {
         id: "trial-source",
@@ -105,6 +133,41 @@ describe("AI chat grounding", () => {
     ];
     const answer =
       "The trial coordinator was Dr. Amina Khumalo. The retrieval group had an average delayed-test score of 78%, while the rereading group had an average delayed-test score of 61%.";
+    const weakCitation = {
+      citation_id: 1,
+      source_id: "trial-source",
+      source_title: "Active Recall Field Study",
+      source_type: "text",
+      excerpt:
+        "In a six-week classroom trial at Meridian College, 84 first-year students were assigned to rereading or retrieval practice. The retrieval group answered short questions without notes, then checked immediate corrective feedback.",
+    };
+    const result = alignCitationExcerptsWithClaims(
+      answer,
+      [weakCitation, { ...weakCitation }],
+      directSources,
+      "Who coordinated the classroom trial, and what were the delayed-test scores? Answer directly.",
+    );
+
+    expect(result).toEqual([]);
+  });
+
+  it("replaces a verbatim but weak citation with evidence that supports the claim", () => {
+    const directSources = [
+      {
+        id: "trial-source",
+        type: "text",
+        content: [
+          "Active recall is the act of retrieving an answer from memory before reviewing notes.",
+          "In a six-week classroom trial at Meridian College, 84 first-year students were assigned to rereading or retrieval practice.",
+          "The retrieval group answered short questions without notes, then checked immediate corrective feedback.",
+          "Their average delayed-test score was 78%, compared with 61% for the rereading group.",
+          "The trial coordinator was Dr. Amina Khumalo.",
+          "The report cautions that the groups were not randomly assigned and that motivation was self-reported.",
+        ].join("\n"),
+      },
+    ];
+    const answer =
+      "Their average delayed-test score was 78%, compared with 61% for the rereading group.[1]\nThe trial coordinator was Dr. Amina Khumalo.[1]";
     const weakCitation = {
       citation_id: 1,
       source_id: "trial-source",
@@ -219,12 +282,12 @@ describe("AI chat grounding", () => {
   });
 
   it("derives a verbatim structured citation when a model emits only a valid marker", () => {
-    const answer = "Use explicit boundaries to improve reliability.[1]";
+    const answer = "Reliable agents need explicit boundaries and observable feedback loops.[1]";
     const result = inferCitationsFromMarkers(
       answer,
       sourceRefs,
       sources,
-      "How can reliability improve?",
+      "What do reliable agents need?",
     );
 
     expect(result).toHaveLength(1);
@@ -238,11 +301,11 @@ describe("AI chat grounding", () => {
 
   it("adds deterministic grounding when the model omits citation markers", () => {
     const result = ensurePrimaryGrounding(
-      "Explicit boundaries improve reliability.",
+      "Reliable agents need explicit boundaries and observable feedback loops.",
       [],
       sourceRefs,
       sources,
-      "How can reliability improve?",
+      "What do reliable agents need?",
     );
 
     expect(result.answer).toContain("[1]");
@@ -414,7 +477,7 @@ describe("AI chat grounding", () => {
           content: "Unrelated quarterly revenue projections.",
         },
       ],
-      "How can reliability improve?",
+      "What do reliable agents need?",
     );
     expect(result.answer).not.toContain("[2]");
     expect(result.citations).toHaveLength(1);
