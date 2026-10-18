@@ -119,7 +119,7 @@ describe("conservative extractive fragment repair", () => {
     dispatch.mockResolvedValueOnce({ answer: JSON.stringify({ status: "supported", sentences: [{ sourceIndex: 1, text: tedSentence }] }), tokensUsed: 3, modelUsed: "repair-mock" });
     const result = await chatWithNotebook({ notebook: { id: "ted-whole-sentence-repair", title: "Photosynthesis" }, sources: [tedSource], notes: [], message: tedQuestion, allowWebFallback: false });
     expect(dispatch).toHaveBeenCalledTimes(2);
-    expect(dispatch.mock.calls[1][0].messages.at(-1).content).toContain("fit 384 characters");
+    expect(dispatch.mock.calls[1][0].messages.at(-1).content).toContain("four-sentence and 384-character bounds");
     expect(result.citations[0].excerpt).toBe(tedSentence);
     expect(result.groundedSources).toEqual([tedSource.id]);
     expect(result.tokensUsed).toBe(5);

@@ -34,7 +34,6 @@ import {
   parseEpub,
   sanitizeFileName,
   saveBookManifestAsync,
-  uniqueSafeFileName,
 } from "../services/audiobookBookService.js";
 import { prepareNarrationText } from "../services/audiobookNarrationTextService.js";
 import { generateKokoroAudio, prepareKokoroSegments } from "../services/kokoroGenerationService.js";
@@ -63,7 +62,10 @@ import {
 
 import { selectNarrationChapterIds } from "../services/audiobookSelectionService.js";
 import { createDeleteAudiobookAudioHandler } from "../services/audiobookAudioDeletionService.js";
+import { createDeleteAudiobookBookHandler } from "../services/audiobookBookDeletionService.js";
 import { createAudiobookAdmissionGuard, isOwnedAudiobookManifest } from "../services/audiobookRequestGuard.js";
+import { createAudiobookNarrationReadHandler } from "../services/audiobookNarrationReadService.js";
+import { extractUploadedBook } from "../services/audiobookUploadService.js";
 
 const router = express.Router();
 router.use(authenticateToken, requireScope("sources:read"));
@@ -1527,41 +1529,34 @@ router.post(
   requireRuntime,
   upload.single("file"),
   async (req, res) => {
-    let tempPath;
-    let permanentPath;
     try {
       if (!req.file) return res.status(400).json({ error: "No file uploaded" });
-      tempPath = req.file.path;
-
-      const safeFileName = uniqueSafeFileName(req.file.originalname);
-      permanentPath = path.join(UPLOADS_DIR, safeFileName);
-      fs.copyFileSync(tempPath, permanentPath);
-      try {
-        fs.unlinkSync(tempPath);
-      } catch (_) {}
-
-      logger.info(`📚 Extracting uploaded book: ${safeFileName}`);
-      const book = await extractAndPersistBook({
-        permanentPath,
-        fileName: safeFileName,
-        source: "upload",
+      const book = await extractUploadedBook({
+        file: req.file,
+        persistOption: req.query.persist,
+        uploadsDir: UPLOADS_DIR,
         ownerId: requestUserId(req),
+        persistBook: extractAndPersistBook,
       });
       logger.info(
         `  ✅ Extracted ${book.stats.charCount} chars, ${book.stats.chapterCount} chapters from "${book.title}"`,
       );
       res.json(book);
     } catch (err) {
-      if (tempPath)
-        try {
-          fs.unlinkSync(tempPath);
-        } catch (_) {}
-      if (permanentPath)
-        try {
-          fs.unlinkSync(permanentPath);
-        } catch (_) {}
-      logger.error("Book extraction failed:", err);
-      res.status(500).json({ error: "Book extraction failed" });
+      // Error properties are not enumerable, so logging the Error itself hides
+      // the failure as {}. Keep diagnostics useful without logging book text,
+      // filenames, paths, or arbitrary parser messages.
+      logger.error("Book extraction failed:", {
+        name: ["Error", "TypeError", "ReferenceError", "SyntaxError", "RangeError"].includes(err?.name)
+          ? err.name
+          : "Error",
+        code: ["EACCES", "EPERM", "ENOENT", "ENOSPC", "EBUSY", "EIO", "EMFILE", "ENFILE", "EROFS", "EISDIR", "ENOTDIR"].includes(err?.code)
+          ? err.code
+          : "UNCLASSIFIED",
+      });
+      res.status(err.status === 400 ? 400 : 500).json({
+        error: err.status === 400 ? err.message : "Book extraction failed",
+      });
     }
   },
 );
@@ -1644,18 +1639,26 @@ const audiobookAudioMutationAdmission = createAudiobookAdmissionGuard({
   ownerFor: requestUserId, fileFor: sanitizeFileName,
   rawFileFor: (req) => req.params.fileName ?? req.body?.fileName,
 });
+const listOwnedBookJobs = (fileName, ownerId) => {
+  const ids = new Set(generationJobs.keys());
+  for (const entry of fs.readdirSync(JOB_DIR)) {
+    if (entry.endsWith(".json") && !entry.endsWith(".cancelled.json")) ids.add(entry.slice(0, -5));
+  }
+  return [...ids].map((jobId) => ({ jobId, job: readJob(jobId) }))
+    .filter(({ job }) => job?.ownerId === ownerId && job?.bookFileName === fileName);
+};
+router.delete("/books/:fileName", requireAudiobookWrite, requireRuntime, audiobookAudioMutationAdmission,
+  createDeleteAudiobookBookHandler({
+    requestUserId, uploadsDir: UPLOADS_DIR, manifestDir: MANIFEST_DIR, audioCacheDir: AUDIO_CACHE_DIR,
+    listBookJobs: listOwnedBookJobs, readJob, isWorkerActive: (jobId) => activeWorkerJobs.has(jobId),
+    writeCancelMarker: writeAudiobookCancelMarker, logger,
+  }),
+);
 router.delete("/books/:fileName/audio", requireAudiobookWrite, requireRuntime, audiobookAudioMutationAdmission,
   createDeleteAudiobookAudioHandler({
     requestUserId, sanitizeFileName, mutateOwnedManifest,
     readJob, isWorkerActive: (jobId) => activeWorkerJobs.has(jobId),
-    listBookJobs: (fileName, ownerId) => {
-      const ids = new Set(generationJobs.keys());
-      for (const entry of fs.readdirSync(JOB_DIR)) {
-        if (entry.endsWith(".json") && !entry.endsWith(".cancelled.json")) ids.add(entry.slice(0, -5));
-      }
-      return [...ids].map((jobId) => ({ jobId, job: readJob(jobId) }))
-        .filter(({ job }) => job?.ownerId === ownerId && job?.bookFileName === fileName);
-    },
+    listBookJobs: listOwnedBookJobs,
     writeCancelMarker: writeAudiobookCancelMarker,
     removeAudioFile: (fileName) => {
       if (path.basename(fileName) !== fileName) throw new Error("Invalid audio filename");
@@ -1679,6 +1682,12 @@ router.get(
     res.setHeader("Cache-Control", "no-store");
     return res.json(createPublicPlaybackManifest(manifest, renderId));
   },
+);
+
+router.get("/books/:fileName/narration/:chapterId", requireRuntime,
+  createAudiobookNarrationReadHandler({
+    requestUserId, loadManifest: (fileName) => loadBookManifest(MANIFEST_DIR, fileName),
+  }),
 );
 
 router.get("/chapter-audio", requireRuntime, (req, res) => {

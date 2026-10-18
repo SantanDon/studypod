@@ -14,7 +14,7 @@ const DashboardHeader = (_: DashboardHeaderProps) => {
       <div className="flex items-center justify-between">
         <div className="flex items-center space-x-2">
           <Logo />
-          <h1 className={`text-xl font-medium text-foreground ${useCustomFonts ? 'font-heading' : ''}`}>StudyPod
+          <h1 className={`text-xl font-medium bg-gradient-to-r from-blue-600 to-violet-400 bg-clip-text text-transparent ${useCustomFonts ? 'font-heading' : ''}`}>StudyPod
           </h1>
         </div>
 

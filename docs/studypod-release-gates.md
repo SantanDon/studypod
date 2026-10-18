@@ -89,3 +89,20 @@ The full-flow reporter's `report.json`, attached receipts, process logs and data
 
 The local runner records `candidate.json` with HEAD and hashes of relevant source files, built assets and generated fixtures. It compares source state before and after building, then compares source, assets and fixtures again after execution. A changed candidate fails the runner. Detailed file inventories remain private. A complete execution decision must be paired with this stable candidate record; HEAD alone does not identify a dirty working tree. The runner disables browser-direct Ollama discovery and exercises authenticated server generation using local Qwen. Normal builds keep that discovery disabled unless `VITE_ENABLE_OLLAMA=1` or `true` is set.
 
+
+
+### Existing shared-account serial journeys
+
+Supply credentials only through the invoking process environment (never an env file, command argument or checked-in fixture). Set `STUDYPOD_SHARED_EMAIL` and `STUDYPOD_SHARED_PASSWORD` for the approved existing account, `STUDYPOD_SHARED_ACCOUNT_MODE=existing-account-only`, `STUDYPOD_SHARED_MUTATIONS=new-notebooks-only`, and both `STUDYPOD_SHARED_BASE_URL` and `STUDYPOD_SHARED_APPROVED_ORIGIN` to the exact authorized origin. Set `STUDYPOD_SHARED_FIXTURE_DIR` to the existing generated full-flow fixture directory. The application, backend and configured providers must already be running.
+
+Run `npm run test:release:shared -- --check` to list the four suites without providers, then `npm run test:release:shared -- --run` for sources, Studio, podcast and audiobook in that order. The wrapper stops at the first failing phase and never creates an account or accepts Terms. It uses a unique run directory under `.ai-bridge/shared-release-gates` (override its parent with `STUDYPOD_SHARED_ARTIFACTS`); each phase has its own receipts and the root contains `shared-release-summary.json`. Keep phase artifacts private and inspect failures before replay.
+
+A passing wrapper proves these existing-account desktop journeys only. It does not replace the complete acceptance inventory, stable candidate identity, independent audible-content checks, or the authorized cloud candidate and post-release journeys described above; `releaseReady` therefore remains false in its summary. Signup, foreign-account isolation, mobile and encrypted background sync remain outside this shared-account run.
+
+## Stabilization candidate: 18 October 2026
+
+This candidate preserves the previous white, blue, and indigo interface. Local signed-in runs exercised owned source uploads (text, Markdown, DOCX, PDF, EPUB, website/bookmark, WAV, MP3, M4A), YouTube extraction with persisted citations, grounded chat, and podcast playback/download/fresh-login persistence. Desktop and mobile visual journeys passed. These results came from separate runs; they do not constitute a complete pass on one fixed candidate.
+
+Typecheck, focused lint, and production build passed. Studio remained blocked by the local Qwen 30-second generation timeout. A local-only launcher override to supported 50/55-second budgets has not been validated: its replay stopped during browser login, although a subsequent direct sign-in check returned 200. Audiobook extraction previously returned 500; the latest replay stopped before notebook creation, so extraction and complete audiobook playback remain unverified. Sanitized failure diagnostics were added without weakening acceptance assertions.
+
+Push as a stabilization candidate only. Production promotion requires the exact candidate to pass the shared-account upload, YouTube, chat, Studio and audio journeys in Preview, followed by a production smoke check. Existing-account testing does not certify fresh signup.

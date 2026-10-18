@@ -6,7 +6,7 @@ import { authenticateToken, requireScope } from "../middleware/auth.js";
 import { deepDiveBookmarks } from "../services/bookmarkDeepDiveService.js";
 import { brokerResearchGoals } from "../services/goalBrokerService.js";
 import { MemoryService } from "../services/memoryService.js";
-import { chatWithNotebook } from "../services/aiChatService.js";
+import { chatWithNotebook, getSafeGroundingFailureReason } from "../services/aiChatService.js";
 import { createChatRequestBudget } from "../utils/chatRequestBudget.js";
 import { researchNotebook } from "../services/researchService.js";
 import { discoverSources } from "../services/discoverService.js";
@@ -1588,6 +1588,7 @@ router.post("/:id/chat", requireScope("chat:all"), async (req, res) => {
         return res.status(422).json({
           error: "The answer could not be verified against your sources. Please try a more specific question.",
           code: "GROUNDING_UNAVAILABLE",
+          groundingReason: getSafeGroundingFailureReason(aiError),
         });
       }
       res.status(500).json({ error: "AI processing failed" });

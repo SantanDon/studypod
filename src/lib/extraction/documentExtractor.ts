@@ -157,7 +157,7 @@ export async function extractEPUB(file: File): Promise<ExtractionResult> {
     const formData = new FormData();
     formData.append("file", file);
 
-    const response = await fetch(`${API_BASE_URL}/audiobook/extract`, {
+    const response = await fetch(`${API_BASE_URL}/audiobook/extract?persist=false`, {
       method: "POST",
       credentials: "include",
       headers: { Authorization: `Bearer ${getServerAiAuthValue()}` },

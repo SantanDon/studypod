@@ -128,7 +128,7 @@ const NotebookHeader = ({ title, notebookId }: NotebookHeaderProps) => {
               <button
                 ref={titleButtonRef}
                 type="button"
-                className="min-w-0 truncate text-left text-base sm:text-lg font-medium text-foreground hover:bg-accent rounded px-2 py-1 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-teal-600"
+                className="min-w-0 truncate text-left text-base sm:text-lg font-medium text-foreground hover:bg-accent rounded px-2 py-1 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-600"
                 onClick={handleTitleClick}
                 disabled={!notebookId}
                 aria-label={`Edit notebook title: ${displayTitle}`}

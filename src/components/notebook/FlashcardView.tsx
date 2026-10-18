@@ -202,14 +202,14 @@ const FlashcardView: React.FC<FlashcardViewProps> = ({
               <Card
                 className={cn(
                   "absolute inset-0 p-6 flex flex-col items-center justify-between shadow-xl w-full h-full",
-                  "bg-gradient-to-br from-green-50 to-emerald-50 dark:from-green-950/40 dark:to-teal-950/40 border-2 border-green-200/50 dark:border-green-800/50"
+                  "bg-gradient-to-br from-blue-50 to-indigo-50 dark:from-blue-950/40 dark:to-indigo-950/40 border-2 border-blue-200/50 dark:border-blue-800/50"
                 )}
                 style={{ 
                   backfaceVisibility: 'hidden',
                   transform: 'rotateY(180deg)'
                 }}
               >
-                <div className="text-xs text-green-600 dark:text-green-400 uppercase tracking-widest mb-2 font-bold shrink-0">
+                <div className="text-xs text-blue-600 dark:text-blue-400 uppercase tracking-widest mb-2 font-bold shrink-0">
                   Answer
                 </div>
                 <div className="flex-1 w-full overflow-y-auto flex items-center justify-center my-2 custom-scrollbar">

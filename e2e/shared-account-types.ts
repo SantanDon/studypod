@@ -1,0 +1,5 @@
+export interface SharedSource { id: string; title: string; content: string; processingStatus: string; metadata?: unknown }
+export interface SharedMessage { role: string; content: string }
+export interface SharedPodcast { id: string; notebook_id: string; persistence: string; source_ids: string[]; audio_sha256: string; byte_length: number; script: { metadata?: { narrationMode?: string; evidencePassageIds?: string[] }; segments: { speaker: string; text: string }[] } }
+export interface SharedAcceptanceReceipt { phase: string; format: string; origin: string; credentialsPersisted: boolean; legacy106Eligible: boolean; deniedRequests: { method: string; path: string; reason: string; quarantined: boolean }[]; cleanup: string; checks: Record<string, unknown>; notebookId?: string; sourceId?: string; processingStatus?: string; podcastId?: string; failure?: { name: string; matcher: string | null; assertion: string | null } }
+export interface SharedAssertionError { message?: string; name?: string; matcherResult?: { name?: string } }

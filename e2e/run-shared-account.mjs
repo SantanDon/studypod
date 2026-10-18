@@ -1,0 +1,10 @@
+import { spawnSync } from 'node:child_process';
+import { fileURLToPath } from 'node:url';
+import { validateSharedAccountEnvironment, excludedCoverage } from './shared-account-policy.mjs';
+const args = process.argv.slice(2);
+if (args.length !== 1 || !['--check', '--run'].includes(args[0])) throw new Error('Use --check (offline inventory) or --run (real existing account)');
+validateSharedAccountEnvironment(process.env, args[0] === '--run');
+const root = fileURLToPath(new URL('../', import.meta.url));
+console.log(JSON.stringify({ inventory: ['existing-login/new-notebook/pasted-source/logout/fresh-login/persistence/anonymous-denial/scoped-cleanup'], full106Eligible: false, excludedCoverage }));
+const result = spawnSync(process.execPath, ['node_modules/@playwright/test/cli.js', 'test', '--config', 'e2e/shared-account.config.ts', ...(args[0] === '--check' ? ['--list'] : [])], { cwd: root, env: { ...process.env, DEBUG: '', PWDEBUG: '', PLAYWRIGHT_NO_COPY_PROMPT: '1', STUDYPOD_SHARED_INVENTORY_ONLY: args[0] === '--check' ? '1' : '0', STUDYPOD_AUTH_SIGNUP: '0', STUDYPOD_AUTH_TERMS_ACCEPTED: '0' }, stdio: 'inherit' });
+process.exit(result.status ?? 1);

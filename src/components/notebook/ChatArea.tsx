@@ -406,7 +406,7 @@ const ChatArea = ({
         </div>
       ) : hasSource ? <div className="flex-1 flex flex-col h-full overflow-hidden">
         {/* Chat Header */}
-          <div className="p-4 border-b border-gray-200 dark:border-border flex-shrink-0 bg-[#F7F4ED] dark:bg-[#101D22]">
+          <div className="p-4 border-b border-gray-200 dark:border-border flex-shrink-0 bg-background dark:bg-background">
             <div className="max-w-4xl mx-auto">
               <div className="flex flex-wrap items-center justify-between gap-x-3 gap-y-2">
               <div className="contents sm:flex sm:items-center sm:gap-4">
@@ -501,9 +501,9 @@ const ChatArea = ({
               </Button>
             </div>
           )}
-          <ScrollArea className="flex-1 h-full bg-[#F7F4ED] dark:bg-[#101D22]" ref={scrollAreaRef}>
+          <ScrollArea className="flex-1 h-full bg-background dark:bg-background" ref={scrollAreaRef}>
              {/* Notebook context stays compact once the conversation begins. */}
-             <div className="border-b border-border bg-[#F7F4ED]/95 dark:bg-[#101D22]/95 px-5 py-4 sm:px-8">
+             <div className="border-b border-border bg-background/95 dark:bg-background/95 px-5 py-4 sm:px-8">
                <div className="mx-auto max-w-4xl">
                  <div className="flex items-center gap-3">
                    <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-muted text-2xl">
@@ -542,7 +542,7 @@ const ChatArea = ({
                {/* Chat Messages */}
                 {(messages.length > 0 || pendingUserMessage || showAiLoading || failedMessage) && <div className="mb-6 space-y-4">
                     {messages.map((msg) => <div key={msg.id} className={`group flex ${isUserMessage(msg) ? 'justify-end' : 'justify-start'}`}>
-                        <div className={`${isUserMessage(msg) ? 'max-w-xs lg:max-w-md px-4 py-2 bg-[#165E61] text-white rounded-lg' : 'w-full'}`}>
+                        <div className={`${isUserMessage(msg) ? 'max-w-xs lg:max-w-md px-4 py-2 bg-blue-500 text-white rounded-lg' : 'w-full'}`}>
                           <div className={isUserMessage(msg) ? '' : 'prose prose-gray dark:prose-invert max-w-none text-gray-800 dark:text-gray-200'}>
                             <MarkdownRenderer content={msg.message.content} className={isUserMessage(msg) ? '' : ''} onCitationClick={handleCitationClick} isUserMessage={isUserMessage(msg)} />
                           </div>
@@ -554,7 +554,7 @@ const ChatArea = ({
                     
                     {/* Pending user message */}
                     {pendingUserMessage && <div className="flex justify-end">
-                        <div className="max-w-xs lg:max-w-md px-4 py-2 bg-[#165E61] text-white rounded-lg">
+                        <div className="max-w-xs lg:max-w-md px-4 py-2 bg-blue-500 text-white rounded-lg">
                           <MarkdownRenderer content={pendingUserMessage} className="" isUserMessage={true} />
                         </div>
                       </div>}
@@ -612,7 +612,7 @@ const ChatArea = ({
           />
         </div> :
     // Empty State
-    <div className="flex-1 flex flex-col items-center justify-center p-8 overflow-hidden bg-[#F7F4ED] dark:bg-[#101D22]">
+    <div className="flex-1 flex flex-col items-center justify-center p-8 overflow-hidden bg-background dark:bg-background">
           <div className="text-center mb-8">
             <div className="w-16 h-16 rounded-full mx-auto mb-4 flex items-center justify-center bg-gray-100 dark:bg-muted">
               <i className="fi fi-rr-upload h-8 w-8 text-slate-600 dark:text-slate-400"></i>
@@ -640,7 +640,7 @@ const ChatArea = ({
         </div>}
       
       {/* Footer */}
-      <div className="p-4 border-t border-border flex-shrink-0 bg-[#F7F4ED] dark:bg-[#101D22]">
+      <div className="p-4 border-t border-border flex-shrink-0 bg-background dark:bg-background">
         <p className="pr-16 text-center text-xs text-[#53676A] dark:text-[#B8CBC9] sm:pr-0 sm:text-sm">StudyPod can be inaccurate; please double-check its responses.</p>
       </div>
       

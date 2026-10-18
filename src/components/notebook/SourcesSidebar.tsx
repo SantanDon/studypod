@@ -737,7 +737,7 @@ const SourcesSidebar = ({
             <div className="text-center py-8 bg-white dark:bg-card border border-dashed border-gray-200 dark:border-border rounded-xl">
               <p className="text-sm font-medium text-foreground">Bring your material into StudyPod</p>
               <p className="mx-auto mt-2 max-w-xs text-xs text-muted-foreground">Upload a file, paste text, or add a web link to begin.</p>
-              <Button type="button" size="sm" onClick={() => setShowAddSourcesDialog(true)} className="mt-4 min-h-11 rounded-full bg-teal-800 px-5 text-white hover:bg-teal-900 dark:bg-teal-700 dark:hover:bg-teal-600">Add a source</Button>
+              <Button type="button" size="sm" onClick={() => setShowAddSourcesDialog(true)} className="mt-4 min-h-11 rounded-full bg-indigo-800 px-5 text-white hover:bg-indigo-900 dark:bg-indigo-700 dark:hover:bg-indigo-600">Add a source</Button>
             </div>
           )}
 

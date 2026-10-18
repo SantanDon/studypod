@@ -16,6 +16,7 @@
         "setup:ollama": "node scripts/setup-ollama.js",
         "check:ollama": "node -e \"fetch('http://localhost:11434/api/tags').then(r=>r.ok?console.log('Ollama is running'):console.log('Ollama is not running')).catch(()=>console.log('Ollama is not running'))\"",
         "test": "vitest",
+        "test:release:shared": "node e2e/run-shared-account-release.mjs",
         "test:gate:unit": "node --test e2e/full-flow-decision.test.mjs e2e/full-flow-reporter.test.mjs e2e/audio-fidelity.helpers.test.mjs e2e/candidate-inputs.test.mjs e2e/acceptance-contracts.test.mjs scripts/write-deployment-identity.test.mjs backend/src/__tests__/notebookRecovery.test.js",
         "test:ui": "vitest --ui",
         "test:coverage": "vitest --coverage",

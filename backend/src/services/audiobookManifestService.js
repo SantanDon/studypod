@@ -446,6 +446,15 @@ function releaseManifestLock(lock) {
   } catch {}
 }
 
+export async function withAudiobookManifestLock({ manifestDir, fileName, run }) {
+  const lock = await acquireManifestLock(manifestDir, fileName);
+  try {
+    return await run();
+  } finally {
+    releaseManifestLock(lock);
+  }
+}
+
 export async function mutateAudiobookManifest({
   manifestDir,
   fileName,

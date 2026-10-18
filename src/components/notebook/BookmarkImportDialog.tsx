@@ -13,12 +13,14 @@ interface BookmarkImportDialogProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   notebookId: string;
+  onSuccess?: () => void;
 }
 
 const BookmarkImportDialog = ({
   open,
   onOpenChange,
-  notebookId
+  notebookId,
+  onSuccess
 }: BookmarkImportDialogProps) => {
   const [activeTab, setActiveTab] = useState<string>('paste');
   const [urlsText, setUrlsText] = useState('');
@@ -117,6 +119,8 @@ const BookmarkImportDialog = ({
   const handleImport = async () => {
     if (!isAuthenticated || !canSubmit || isReadingFile) return;
     try {
+      let result: { totalSources?: number; errors?: string[] };
+      let successMessage: { title: string; description: string };
       if (activeTab === 'paste') {
         const urls = urlValidation.urls;
         if (urls.length === 0) {
@@ -128,11 +132,11 @@ const BookmarkImportDialog = ({
           return;
         }
 
-        await importTweets({ notebookId, urls });
-        toast({
+        result = await importTweets({ notebookId, urls });
+        successMessage = {
           title: "Importing bookmarks",
           description: `Successfully started import of ${urls.length} tweet(s). Finding referenced resources & replies in background...`,
-        });
+        };
       } else {
         if (!fileContent) {
           toast({
@@ -143,13 +147,18 @@ const BookmarkImportDialog = ({
           return;
         }
 
-        await importTweets({ notebookId, fileContent });
-        toast({
+        result = await importTweets({ notebookId, fileContent });
+        successMessage = {
           title: "Importing archive",
           description: `Successfully loaded bookmarks archive. Scraping and crawler active.`,
-        });
+        };
       }
+      if (!result || !result.totalSources || result.totalSources < 1) {
+        throw new Error(result?.errors?.[0] || "No sources were imported. Check the links or archive and try again.");
+      }
+      toast(successMessage);
       handleClose();
+      onSuccess?.();
     } catch (err: unknown) {
       toast({
         title: "Import failed",

@@ -118,27 +118,27 @@ const Dashboard = () => {
 
       <main className="max-w-7xl mx-auto px-4 sm:px-6 py-8">
         <div className="mb-6 border-b border-border/70 pb-5">
-          <h1 className={`font-medium text-gray-900 dark:text-foreground text-3xl ${useCustomFonts ? 'font-heading' : ''}`}>Your study space
+          <h1 className={`font-medium bg-gradient-to-r from-indigo-600 to-violet-300 bg-clip-text text-transparent text-3xl ${useCustomFonts ? 'font-heading' : ''}`}>Your research workspace
           </h1>
           <p className="mt-1 text-sm text-muted-foreground">Pick up where you left off, or bring something new to learn.</p>
         </div>
 
         {hasNotebooks ? (
           <>
-            <section aria-labelledby="saved-audio-heading" className="mb-7 rounded-2xl border border-teal-200 bg-[#faf8f3] p-4 sm:p-5 dark:border-teal-900 dark:bg-card">
-              <h2 id="saved-audio-heading" className="text-sm font-semibold uppercase tracking-[0.12em] text-teal-800 dark:text-teal-300">{resumeAt > 0 ? "Continue listening" : "Saved audio"}</h2>
+            <section aria-labelledby="saved-audio-heading" className="mb-7 rounded-2xl border border-indigo-200 bg-white p-4 sm:p-5 dark:border-indigo-900 dark:bg-card">
+              <h2 id="saved-audio-heading" className="text-sm font-semibold uppercase tracking-[0.12em] text-indigo-800 dark:text-indigo-300">{resumeAt > 0 ? "Continue listening" : "Saved audio"}</h2>
               {recentAudio.isLoading ? <p role="status" className="mt-2 text-sm text-muted-foreground">Checking your saved audio...</p> : recentAudio.error ? (
                 <div role="alert" className="mt-2 flex flex-wrap items-center gap-2 text-sm text-red-700 dark:text-red-400">
                   <span>Could not check saved audio.</span>
-                  <button type="button" onClick={() => void recentAudio.retry()} disabled={recentAudio.isRefreshing} className="min-h-11 rounded-lg px-3 font-medium underline underline-offset-2 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-teal-600">Retry</button>
+                  <button type="button" onClick={() => void recentAudio.retry()} disabled={recentAudio.isRefreshing} className="min-h-11 rounded-lg px-3 font-medium underline underline-offset-2 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-600">Retry</button>
                 </div>
               ) : episodeNotebook && ownedEpisode ? (
                 <div className="mt-2 flex min-w-0 flex-wrap items-center justify-between gap-3">
                   <div className="min-w-0 flex-1">
-                    <p className="break-words font-medium text-stone-900 dark:text-foreground">{ownedEpisode.title}</p>
+                    <p className="break-words font-medium text-slate-900 dark:text-foreground">{ownedEpisode.title}</p>
                     <p className="break-words text-sm text-muted-foreground">Saved in {episodeNotebook.title}.{resumeAt > 0 ? ` Continue from ${Math.floor(resumeAt / 60)}:${Math.floor(resumeAt % 60).toString().padStart(2, "0")} on this device.` : " Open this episode in Studio to listen."}</p>
                   </div>
-                  <Link to={`/notebook/${encodeURIComponent(episodeNotebook.id)}?view=studio&episode=${encodeURIComponent(ownedEpisode.id)}`} className="inline-flex min-h-11 items-center rounded-lg bg-teal-800 px-4 py-2 text-sm font-semibold text-white hover:bg-teal-900 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-teal-600 focus-visible:ring-offset-2 dark:bg-teal-700 dark:hover:bg-teal-600" aria-label={`${resumeAt > 0 ? "Resume" : "Open"} ${ownedEpisode.title} in ${episodeNotebook.title}`}>{resumeAt > 0 ? "Resume in Studio" : "Open episode"}</Link>
+                  <Link to={`/notebook/${encodeURIComponent(episodeNotebook.id)}?view=studio&episode=${encodeURIComponent(ownedEpisode.id)}`} className="inline-flex min-h-11 items-center rounded-lg bg-indigo-800 px-4 py-2 text-sm font-semibold text-white hover:bg-indigo-900 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-600 focus-visible:ring-offset-2 dark:bg-indigo-700 dark:hover:bg-indigo-600" aria-label={`${resumeAt > 0 ? "Resume" : "Open"} ${ownedEpisode.title} in ${episodeNotebook.title}`}>{resumeAt > 0 ? "Resume in Studio" : "Open episode"}</Link>
                 </div>
               ) : <p className="mt-2 text-sm text-muted-foreground">No saved audio yet. Open a notebook's Studio to create an audio overview.</p>}
             </section>

@@ -364,6 +364,7 @@ const AddSourcesDialog = ({
           open={showBookmarkImportDialog}
           onOpenChange={setShowBookmarkImportDialog}
           notebookId={notebookId}
+          onSuccess={() => window.setTimeout(() => onOpenChange(false), 0)}
         />
       )}
     </>

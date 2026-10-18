@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import {readFile} from 'node:fs/promises';
 import vm from 'node:vm';
 import express from 'express';
+import { createTransportRecorder } from '../utils/youtubeTransportDiagnostics.js';
 
 const stripImports=s=>s.replace(/^import\s[\s\S]*?;\r?\n/gm,'');
 async function fixture(extractionError){
@@ -11,7 +12,7 @@ async function fixture(extractionError){
  const errors=vm.runInNewContext(`${errorSource}\n({AppError,errorHandler})`,{logger,multer:{MulterError:class extends Error{}},process:{env:{NODE_ENV:'production'}}});
  let source=stripImports(await readFile(new URL('./youtube.js',import.meta.url),'utf8')).replace('export default router;','router;').replace('async function performYouTubeExtraction(', 'async function unusedOriginalExtraction(');
  let sourceWrites=0;
- const router=vm.runInNewContext(source,{express,...errors,process:{env:{}},logger,authenticateToken:(_q,_s,n)=>n(),requireScope:()=>((_q,_s,n)=>n()),getDatabase:async()=>({}),dbHelpers:{getUserById:async()=>null,getNotebookById:async()=>({id:'synthetic'}),createSource:async()=>{sourceWrites++;}},performYouTubeExtraction:async()=>{throw typeof extractionError==='function'?extractionError(errors.AppError):extractionError;},setTimeout,clearTimeout,AbortController,URL});
+ const router=vm.runInNewContext(source,{express,...errors,createTransportRecorder:options=>createTransportRecorder({...options,env:{}}),process:{env:{}},logger,authenticateToken:(_q,_s,n)=>n(),requireScope:()=>((_q,_s,n)=>n()),getDatabase:async()=>({}),dbHelpers:{getUserById:async()=>null,getNotebookById:async()=>({id:'synthetic'}),createSource:async()=>{sourceWrites++;}},performYouTubeExtraction:async()=>{throw typeof extractionError==='function'?extractionError(errors.AppError):extractionError;},setTimeout,clearTimeout,AbortController,URL});
  router.get('/health',(_req,res)=>res.json({status:'ok'}));
  router.post('/signup',(_req,res)=>res.status(201).json({synthetic:true}));
  async function request(path,method='GET'){

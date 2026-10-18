@@ -120,7 +120,7 @@ export const PodcastHistory: React.FC<PodcastHistoryProps> = ({
 
   if (!podcasts || podcasts.length === 0) {
     return (
-      <div className="rounded-2xl border border-dashed border-stone-300 bg-[#faf8f3] p-5 text-center text-stone-600 dark:border-border dark:bg-card dark:text-muted-foreground">
+      <div className="rounded-lg border border-dashed border-slate-300 bg-white p-3 text-center text-slate-600 dark:border-border dark:bg-card dark:text-muted-foreground">
         {errorNotice}
         {!loadError && <p className="text-sm">No saved episodes yet.</p>}
       </div>
@@ -145,14 +145,14 @@ export const PodcastHistory: React.FC<PodcastHistoryProps> = ({
               key={podcast.id}
               className={`group rounded-xl border p-3 transition-colors ${
                 isCurrent
-                  ? "border-teal-500 bg-teal-50 dark:border-teal-600 dark:bg-teal-950/30"
+                  ? "border-indigo-500 bg-indigo-50 dark:border-indigo-600 dark:bg-indigo-950/30"
                   : index === 0
-                    ? "border-teal-200 bg-[#faf8f3] dark:border-teal-900 dark:bg-card"
-                    : "border-stone-200 bg-white hover:bg-stone-50 dark:border-border dark:bg-card dark:hover:bg-muted"
+                    ? "border-indigo-200 bg-white dark:border-indigo-900 dark:bg-card"
+                    : "border-slate-200 bg-white hover:bg-slate-50 dark:border-border dark:bg-card dark:hover:bg-muted"
               }`}
             >
               <div className="flex items-center space-x-3 overflow-hidden">
-                <div className="min-h-11 min-w-11 rounded-full bg-teal-100 text-teal-800 dark:bg-teal-950 dark:text-teal-300 flex items-center justify-center flex-shrink-0">
+                <div className="min-h-11 min-w-11 rounded-full bg-indigo-100 text-indigo-800 dark:bg-indigo-950 dark:text-indigo-300 flex items-center justify-center flex-shrink-0">
                   {loadingAudioId === podcast.id ? (
                     <FontAwesomeIcon
                       icon={faSpinner}
@@ -163,7 +163,7 @@ export const PodcastHistory: React.FC<PodcastHistoryProps> = ({
                     <button
                       type="button"
                       onClick={() => handlePlay(podcast)}
-                      className="min-h-11 min-w-11 rounded-full focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-teal-600"
+                      className="min-h-11 min-w-11 rounded-full focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-600"
                       aria-label={
                         resumeAt > 0
                           ? `Resume ${podcast.title} at ${formatResumeTime(resumeAt)}`
@@ -178,7 +178,7 @@ export const PodcastHistory: React.FC<PodcastHistoryProps> = ({
                   )}
                 </div>
                 <div className="min-w-0">
-                  {index === 0 && <p className="mb-1 text-[11px] font-semibold uppercase tracking-[0.14em] text-teal-800 dark:text-teal-300">{resumeAt > 0 ? "Continue listening" : "Latest saved audio"}</p>}
+                  {index === 0 && <p className="mb-1 text-[11px] font-semibold uppercase tracking-[0.14em] text-indigo-800 dark:text-indigo-300">{resumeAt > 0 ? "Continue listening" : "Latest saved audio"}</p>}
                   <p className="font-medium text-gray-900 dark:text-gray-100 text-sm truncate">
                     {podcast.title}
                   </p>
@@ -193,7 +193,7 @@ export const PodcastHistory: React.FC<PodcastHistoryProps> = ({
                   </p>
                   {resumeAt > 0 && (
                     <>
-                      <p className="mt-1 text-xs font-medium text-teal-800 dark:text-teal-300">
+                      <p className="mt-1 text-xs font-medium text-indigo-800 dark:text-indigo-300">
                         Resume at {formatResumeTime(resumeAt)}
                       </p>
                       <div
@@ -201,7 +201,7 @@ export const PodcastHistory: React.FC<PodcastHistoryProps> = ({
                         aria-hidden="true"
                       >
                         <div
-                          className="h-full rounded-full bg-teal-700"
+                          className="h-full rounded-full bg-indigo-700"
                           style={{ width: `${progress}%` }}
                         />
                       </div>
@@ -210,18 +210,18 @@ export const PodcastHistory: React.FC<PodcastHistoryProps> = ({
                 </div>
               </div>
 
-              <details className="mt-3 border-t border-stone-200 pt-2 text-sm dark:border-border">
-                <summary className="min-h-11 cursor-pointer rounded-md py-2 font-medium text-teal-900 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-teal-600 dark:text-teal-200">
+              <details className="mt-3 border-t border-slate-200 pt-2 text-sm dark:border-border">
+                <summary className="min-h-11 cursor-pointer rounded-md py-2 font-medium text-indigo-900 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-600 dark:text-indigo-200">
                   Sources used for this audio ({podcast.source_ids?.length ?? 0})
                 </summary>
                 {!podcast.source_ids?.length ? (
-                  <p className="pb-2 text-stone-600 dark:text-muted-foreground">This saved episode has no recorded source list.</p>
+                  <p className="pb-2 text-slate-600 dark:text-muted-foreground">This saved episode has no recorded source list.</p>
                 ) : sourcesLoading ? (
-                  <p role="status" className="pb-2 text-stone-600 dark:text-muted-foreground">Checking recorded sources...</p>
+                  <p role="status" className="pb-2 text-slate-600 dark:text-muted-foreground">Checking recorded sources...</p>
                 ) : sourcesError ? (
-                  <div role="alert" className="pb-2 text-stone-700 dark:text-foreground">
+                  <div role="alert" className="pb-2 text-slate-700 dark:text-foreground">
                     <p>Could not verify these recorded sources right now.</p>
-                    <button type="button" onClick={retrySources} disabled={sourcesFetching} className="min-h-11 rounded-md font-medium text-teal-800 underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-teal-600 disabled:opacity-50 dark:text-teal-200">
+                    <button type="button" onClick={retrySources} disabled={sourcesFetching} className="min-h-11 rounded-md font-medium text-indigo-800 underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-600 disabled:opacity-50 dark:text-indigo-200">
                       {sourcesFetching ? "Retrying sources..." : "Retry sources"}
                     </button>
                   </div>
@@ -234,18 +234,18 @@ export const PodcastHistory: React.FC<PodcastHistoryProps> = ({
                         <li key={`${sourceId}-${sourceIndex}`} className="min-w-0 rounded-lg bg-white/70 px-3 py-2 dark:bg-background/50">
                           {source ? (
                             <>
-                              <p className="break-words font-medium text-stone-900 dark:text-foreground">{source.title}</p>
-                              <p className="text-xs text-stone-600 dark:text-muted-foreground">
+                              <p className="break-words font-medium text-slate-900 dark:text-foreground">{source.title}</p>
+                              <p className="text-xs text-slate-600 dark:text-muted-foreground">
                                 {readyNow ? "Ready now" : `Current status: ${getSourceProcessingStatus(source)}. This does not change which source was recorded for the episode.`}
                               </p>
                               {onOpenSource && (
-                                <button type="button" onClick={() => onOpenSource(source)} className="min-h-11 rounded-md text-left font-medium text-teal-800 underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-teal-600 dark:text-teal-200">
+                                <button type="button" onClick={() => onOpenSource(source)} className="min-h-11 rounded-md text-left font-medium text-indigo-800 underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-600 dark:text-indigo-200">
                                   View {source.title} in Sources
                                 </button>
                               )}
                             </>
                           ) : (
-                            <p className="break-all text-stone-600 dark:text-muted-foreground">Recorded source {sourceIndex + 1} is no longer in this notebook.</p>
+                            <p className="break-all text-slate-600 dark:text-muted-foreground">Recorded source {sourceIndex + 1} is no longer in this notebook.</p>
                           )}
                         </li>
                       );

@@ -12,11 +12,10 @@ env.useBrowserCache = true;
 // Singleton to manage the model pipeline
 class SpeechRecognitionPipeline {
   static task = 'automatic-speech-recognition';
-  // Keep the smaller checkpoint as the default while a base candidate is
-  // evaluated against the same real recordings in an isolated browser build.
-  static model = import.meta.env.VITE_AUDIO_TRANSCRIPTION_MODEL === 'onnx-community/whisper-base'
-    ? 'onnx-community/whisper-base'
-    : 'onnx-community/whisper-tiny';
+  // Default to Base for transcript fidelity; Tiny remains an explicit comparison opt-in.
+  static model = import.meta.env.VITE_AUDIO_TRANSCRIPTION_MODEL === 'onnx-community/whisper-tiny'
+    ? 'onnx-community/whisper-tiny'
+    : 'onnx-community/whisper-base';
   static instance: unknown = null;
   static loading: Promise<unknown> | null = null;
 

@@ -21,10 +21,12 @@ describe('browser audio transcription boundaries', () => {
   afterEach(() => { vi.unstubAllGlobals(); vi.unstubAllEnvs(); });
 
   it.each([
-    ['', 'onnx-community/whisper-tiny'],
+    [undefined, 'onnx-community/whisper-base'],
+    ['', 'onnx-community/whisper-base'],
     ['onnx-community/whisper-base', 'onnx-community/whisper-base'],
-    ['unreviewed/arbitrary-model', 'onnx-community/whisper-tiny'],
-  ])('uses only the default or approved isolated candidate %s', async (configured, expected) => {
+    ['onnx-community/whisper-tiny', 'onnx-community/whisper-tiny'],
+    ['unreviewed/arbitrary-model', 'onnx-community/whisper-base'],
+  ])('uses Base by default and only approved model overrides %s', async (configured, expected) => {
     vi.stubEnv('VITE_AUDIO_TRANSCRIPTION_MODEL', configured);
     const { extractAudio } = await import('@/lib/extraction/audioExtractor');
     const result = await extractAudio(new File(['audio'], 'lecture.wav'));
