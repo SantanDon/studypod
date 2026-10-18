@@ -10,6 +10,7 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { useUsageLimits } from '@/hooks/useUsageLimits';
+import { extractVideoId } from '@/lib/extraction/youtubeExtractor';
 
 interface YouTubeUrlInputProps {
   open: boolean;
@@ -22,11 +23,11 @@ const YouTubeUrlInput = ({ open, onOpenChange, onSubmit }: YouTubeUrlInputProps)
   const [language, setLanguage] = useState('en');
   const [isLoading, setIsLoading] = useState(false);
   const { status, canExtract, refreshStatus } = useUsageLimits();
-  const isValidYoutubeUrl = /^(https?:\/\/)?(www\.)?(youtube\.com|youtu\.be)\//i.test(url.trim());
+  const isValidYoutubeUrl = Boolean(extractVideoId(url.trim()));
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!url.trim()) return;
+    if (!isValidYoutubeUrl) return;
 
     if (!canExtract()) {
       return; // UI should handle this but safety first
@@ -50,13 +51,13 @@ const YouTubeUrlInput = ({ open, onOpenChange, onSubmit }: YouTubeUrlInputProps)
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-md border-white/5 bg-black/40 backdrop-blur-xl">
+      <DialogContent className="max-w-md border-border bg-background text-foreground">
         <DialogHeader>
           <DialogTitle className="flex items-center space-x-2">
             <div className="p-2 rounded-lg bg-red-500/10 border border-red-500/20">
               <i className="fi fi-rr-play-alt h-5 w-5 text-red-500"></i>
             </div>
-            <span className="text-xl font-bold tracking-tight bg-clip-text text-transparent bg-gradient-to-r from-white to-white/60">
+            <span className="text-xl font-semibold tracking-tight text-foreground">
               YouTube Extraction
             </span>
           </DialogTitle>
@@ -64,20 +65,22 @@ const YouTubeUrlInput = ({ open, onOpenChange, onSubmit }: YouTubeUrlInputProps)
 
         <form onSubmit={handleSubmit} className="space-y-6 pt-2">
           <div className="space-y-3">
-            <Label htmlFor="youtube-url" className="text-white/60 text-xs uppercase tracking-widest">
+            <Label htmlFor="youtube-url" className="text-muted-foreground text-sm">
               YouTube video URL
             </Label>
             <Input
               id="youtube-url"
-              type="url"
+              type="text"
+              inputMode="url"
+              autoComplete="url"
               placeholder="https://www.youtube.com/watch?v=..."
               value={url}
               onChange={(e) => setUrl(e.target.value)}
-              className="bg-white/5 border-white/10 focus:border-red-500/50 h-12 text-base transition-all duration-300"
+              className="bg-background border-input h-12 text-base"
               required
             />
             <div className="space-y-2">
-              <Label htmlFor="youtube-language" className="text-white/60 text-xs uppercase tracking-widest">
+              <Label htmlFor="youtube-language" className="text-muted-foreground text-sm">
                 Preferred transcript language
               </Label>
               <Input
@@ -85,17 +88,17 @@ const YouTubeUrlInput = ({ open, onOpenChange, onSubmit }: YouTubeUrlInputProps)
                 value={language}
                 onChange={(event) => setLanguage(event.target.value)}
                 placeholder="en, ja, fr, zu..."
-                className="bg-white/5 border-white/10 focus:border-red-500/50 h-10"
+                className="bg-background border-input h-10"
                 aria-describedby="youtube-language-help"
               />
-              <p id="youtube-language-help" className="text-[10px] text-white/40">
+              <p id="youtube-language-help" className="text-xs text-muted-foreground">
                 StudyPod uses this language when multiple caption tracks are available.
               </p>
             </div>
 
-            <div className="flex justify-between items-center px-1">
-              <p className="text-[10px] text-white/40 italic">
-                We will import captions when available and clearly mark metadata-only videos.
+            <div className="flex flex-wrap gap-2 items-center px-1">
+              <p className="text-xs text-muted-foreground italic">
+                Captions are required for chat and Studio. If unavailable, save the video and re-add its URL to retry later.
               </p>
               {status && (
                 <div className={`flex items-center space-x-1.5 px-2 py-0.5 rounded-full border ${isLimitReached ? 'border-red-500/30 bg-red-500/10 text-red-400' : 'border-green-500/20 bg-green-500/5 text-green-400/80'} transition-colors duration-500`}>
@@ -112,14 +115,14 @@ const YouTubeUrlInput = ({ open, onOpenChange, onSubmit }: YouTubeUrlInputProps)
             <Button
               type="button"
               variant="outline"
-              className="flex-1 bg-transparent border-white/10 hover:bg-white/5 transition-all"
+              className="flex-1"
               onClick={() => onOpenChange(false)}
             >
               Cancel
             </Button>
             <Button
               type="submit"
-              className={`flex-1 ${isLimitReached ? 'bg-zinc-800 text-zinc-500 cursor-not-allowed' : 'bg-white text-black hover:bg-zinc-200'} transition-all font-bold`}
+              className="flex-1"
               disabled={!url.trim() || !isValidYoutubeUrl || isLoading || isLimitReached}
             >
               {isLoading ? 'Extracting...' : isLimitReached ? 'Limit Reached' : !isValidYoutubeUrl && url.trim() ? 'Invalid URL' : 'Add Source'}

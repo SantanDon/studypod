@@ -72,18 +72,35 @@ export interface TranscriptItem {
  * Extract video ID from various YouTube URL formats
  */
 export function extractVideoId(url: string): string | null {
-  const patterns = [
-    /(?:youtube\.com\/watch\?v=|youtu\.be\/|youtube\.com\/embed\/|youtube\.com\/v\/)([a-zA-Z0-9_-]{11})/,
-    /youtube\.com\/shorts\/([a-zA-Z0-9_-]{11})/,
-  ];
-
-  for (const pattern of patterns) {
-    const match = url.match(pattern);
-    if (match && match[1]) {
-      return match[1];
+  try {
+    const parsed = new URL(url.trim());
+    if (!['https:', 'http:'].includes(parsed.protocol)) return null;
+    const host = parsed.hostname.toLowerCase();
+    const parts = parsed.pathname.split('/').filter(Boolean);
+    let videoId: string | null = null;
+    if (host === 'youtu.be' || host === 'www.youtu.be') {
+      videoId = parts.length === 1 ? parts[0] : null;
+    } else if (['youtube.com', 'www.youtube.com', 'm.youtube.com', 'music.youtube.com'].includes(host)) {
+      videoId = parsed.pathname === '/watch'
+        ? parsed.searchParams.get('v')
+        : parts.length === 2 && ['shorts', 'live', 'embed', 'v'].includes(parts[0]) ? parts[1] : null;
     }
+    return videoId && /^[a-zA-Z0-9_-]{11}$/.test(videoId) ? videoId : null;
+  } catch {
+    return null;
   }
-  return null;
+}
+
+function normalizeTranscript(value: unknown): TranscriptItem[] {
+  if (!Array.isArray(value)) return [];
+  return value.filter(item => item && typeof item.text === 'string' && item.text.trim())
+    .map(item => ({
+      ...item,
+      text: item.text.trim(),
+      offset: Number.isFinite(item.offset) && item.offset >= 0 ? item.offset : 0,
+      duration: Number.isFinite(item.duration) && item.duration >= 0 ? item.duration : undefined,
+      timingSource: Number.isFinite(item.offset) && item.offset >= 0 ? item.timingSource : 'inferred',
+    })).sort((a, b) => a.offset - b.offset);
 }
 
 
@@ -132,7 +149,7 @@ function buildStructuredContent(
   }
   lines.push('', '---', '');
   const windowMs = 90_000;
-  const totalMs = transcript.at(-1)!.offset + (transcript.at(-1)!.duration || 0);
+  const totalMs = transcript.reduce((end, item) => Math.max(end, item.offset + Math.max(item.duration || 0, 1)), 0);
   for (let startMs = 0; startMs < totalMs; startMs += windowMs) {
     const items = transcript.filter(item => item.offset >= startMs && item.offset < startMs + windowMs);
     if (!items.length) continue;
@@ -158,11 +175,6 @@ function shouldTryEdgeFallback(status: number) {
 export async function extractYoutubeTranscript(url: string, token?: string, language = 'en'): Promise<YoutubeTranscriptResult> {
   console.log('🎬 Starting YouTube transcript extraction for:', url);
 
-  // Validate URL
-  if (!url.includes('youtube.com') && !url.includes('youtu.be')) {
-    throw new Error('Invalid YouTube URL. Please provide a valid YouTube video link.');
-  }
-
   // Extract video ID
   const videoId = extractVideoId(url);
   if (!videoId) {
@@ -182,10 +194,16 @@ export async function extractYoutubeTranscript(url: string, token?: string, lang
     if (authToken) {
       headers['Authorization'] = `Bearer ${authToken}`;
     }
-    let transcriptResponse = await fetch(apiUrl, { headers, credentials: 'include' });
-
     let primaryErrorMessage = '';
-    if (!transcriptResponse.ok) {
+    let transcriptResponse: Response | undefined;
+    try {
+      transcriptResponse = await fetch(apiUrl, { headers, credentials: 'include' });
+    } catch (networkError) {
+      primaryErrorMessage = 'The transcript server could not be reached.';
+      console.warn('Server request failed; continuing with transcript fallback:', networkError);
+    }
+
+    if (transcriptResponse && !transcriptResponse.ok) {
       const errorText = await transcriptResponse.text();
       let errorMessage = `Failed to fetch transcript: HTTP ${transcriptResponse.status}`;
       try {
@@ -209,30 +227,35 @@ export async function extractYoutubeTranscript(url: string, token?: string, lang
       }
     }
 
-    let payload = transcriptResponse.ok ? await transcriptResponse.json() : {};
-    let transcriptData = payload.transcript || (Array.isArray(payload) ? payload : []);
+    let payload = transcriptResponse?.ok ? await transcriptResponse.json() : {};
+    let transcriptData = normalizeTranscript(payload.transcript || payload);
 
     // Native YouTube clients can occasionally return metadata-only on a cold
     // request even when captions are available. Retry the same authenticated
     // server route once before falling through to the deployment-only Edge
     // function. A metadata-only response is not counted against user quota.
     if ((!transcriptData || transcriptData.length === 0)
+      && transcriptResponse
       && (transcriptResponse.status === 206 || shouldTryEdgeFallback(transcriptResponse.status))) {
       console.log('🔁 Transcript unavailable on first server attempt — retrying once...');
       await new Promise((resolve) => setTimeout(resolve, 350));
-      const retryResponse = await fetch(apiUrl, { headers, credentials: 'include' });
-      if (retryResponse.ok) {
-        const retryPayload = await retryResponse.json();
-        const retryTranscript = retryPayload.transcript || (Array.isArray(retryPayload) ? retryPayload : []);
-        if (retryTranscript?.length > 0) {
-          transcriptResponse = retryResponse;
-          payload = retryPayload;
-          transcriptData = retryTranscript;
-          primaryErrorMessage = '';
-          console.log(`✅ Server retry recovered ${retryTranscript.length} transcript lines`);
-        } else if (!payload.metadata?.title && retryPayload.metadata?.title) {
-          payload = retryPayload;
+      try {
+        const retryResponse = await fetch(apiUrl, { headers, credentials: 'include' });
+        if (retryResponse.ok) {
+          const retryPayload = await retryResponse.json();
+          const retryTranscript = normalizeTranscript(retryPayload.transcript || retryPayload);
+          if (retryTranscript.length > 0) {
+            transcriptResponse = retryResponse;
+            payload = retryPayload;
+            transcriptData = retryTranscript;
+            primaryErrorMessage = '';
+            console.log(`✅ Server retry recovered ${retryTranscript.length} transcript lines`);
+          } else if (!payload.metadata?.title && retryPayload.metadata?.title) {
+            payload = retryPayload;
+          }
         }
+      } catch (retryError) {
+        console.warn('Server retry failed; continuing with transcript fallback:', retryError);
       }
     }
 
@@ -240,11 +263,10 @@ export async function extractYoutubeTranscript(url: string, token?: string, lang
 
     let extractionWarning = payload.extractionWarning || metadata.extractionWarning || primaryErrorMessage;
     let countedEdgeFallback = false;
+    let usedEdgeFallback = false;
 
     // ── Edge Function Fallback ─────────────────────────────────────────────────
-    // If the server returned no transcript, it likely hit YouTube's datacenter
-    // IP block on Vercel's AWS us-east-1. Try the Edge Function (/api/youtube-edge)
-    // which runs on Cloudflare's network — YouTube doesn't block Cloudflare IPs.
+    // A separate extraction path may recover captions unavailable to the server.
     if ((!transcriptData || transcriptData.length === 0) && videoId) {
       console.log('⚡ Server returned no transcript — trying Edge Function (Cloudflare network)...');
       try {
@@ -253,15 +275,16 @@ export async function extractYoutubeTranscript(url: string, token?: string, lang
         if (edgeAuthToken) {
           edgeHeaders['Authorization'] = `Bearer ${edgeAuthToken}`;
         }
-        const edgeRes = await fetch(`/api/youtube-edge?videoId=${encodeURIComponent(videoId)}`, {
+        const edgeRes = await fetch(`/api/youtube-edge?videoId=${encodeURIComponent(videoId)}&language=${encodeURIComponent(language)}`, {
           headers: edgeHeaders,
           credentials: 'include'
         });
         if (edgeRes.ok) {
           const edgeData = await edgeRes.json();
-          if (edgeData.transcript && edgeData.transcript.length > 0) {
+          const edgeTranscript = normalizeTranscript(edgeData.transcript);
+          if (edgeTranscript.length > 0) {
             console.log(`✅ Edge Function extracted ${edgeData.transcript.length} transcript lines`);
-            transcriptData = edgeData.transcript.map((item: TranscriptItem) => ({
+            transcriptData = edgeTranscript.map((item: TranscriptItem) => ({
               ...item,
               timingSource: item.timingSource || 'provider',
             }));
@@ -272,8 +295,21 @@ export async function extractYoutubeTranscript(url: string, token?: string, lang
               author: edgeData.author || metadata.author,
               keywords: edgeData.keywords || metadata.keywords,
               extractedBy: edgeData.extractedBy || 'edge_fallback',
+              transcriptStatus: (edgeData.metadata?.transcriptStatus || edgeData.transcriptStatus) === 'partial' ? 'partial' : 'full',
+              transcriptProvider: edgeData.metadata?.transcriptProvider || edgeData.extractedBy || 'edge_fallback',
+              transcriptMode: edgeData.metadata?.transcriptMode || 'native',
+              transcriptLanguage: edgeData.metadata?.transcriptLanguage || edgeData.language || transcriptData.find(item => item.lang)?.lang || null,
+              transcriptQuality: edgeData.metadata?.transcriptQuality,
+              timingQuality: transcriptData.every(item => item.timingSource === 'provider') ? 'provider'
+                : transcriptData.every(item => item.timingSource === 'inferred') ? 'inferred' : 'mixed',
+              timestampedTranscript: transcriptData.every(item => item.timingSource === 'provider'),
+              providerCapabilities: undefined,
+              availabilityReason: null,
+              videoAvailability: 'available',
               sovereign_signal: { identity: 'EDGE_CLOUDFLARE', farm_health: 'healthy', timestamp: new Date().toISOString() },
             };
+            usedEdgeFallback = true;
+            extractionWarning = edgeData.extractionWarning || edgeData.metadata?.extractionWarning || '';
             if (!rawAuthToken?.startsWith('guest_')) {
               try {
                 await ApiService.recordYouTubeExtractionSuccess(authToken, videoId, metadata.extractedBy);
@@ -301,7 +337,9 @@ export async function extractYoutubeTranscript(url: string, token?: string, lang
     const author = metadata.author || "Unknown Channel";
     const keywords = metadata.keywords || [];
     const transcriptLineCount = Array.isArray(transcriptData) ? transcriptData.length : 0;
-    const transcriptStatus = metadata.transcriptStatus || (transcriptLineCount > 0 ? 'full' : 'metadata_only');
+    const transcriptStatus = transcriptLineCount > 0
+      ? metadata.transcriptStatus === 'partial' ? 'partial' : 'full'
+      : 'metadata_only';
     const extractedBy = metadata.extractedBy || payload.extractedBy || 'server_api';
     if (transcriptStatus === 'full' && extractedBy?.startsWith('edge_') && !countedEdgeFallback) {
       extractionWarning = extractionWarning || 'Transcript was recovered by Edge fallback, but usage accounting was not confirmed.';
@@ -314,15 +352,12 @@ export async function extractYoutubeTranscript(url: string, token?: string, lang
     // Calculate duration
     let duration = 0;
     if (Array.isArray(transcriptData) && transcriptData.length > 0) {
-      const lastItem = transcriptData[transcriptData.length - 1];
-      duration = (lastItem.offset + lastItem.duration) / 1000;
+      duration = transcriptData.reduce((end, item) => Math.max(end, item.offset + (item.duration || 0)), 0) / 1000;
     }
 
     // Prefer the backend's pre-built structured content (AI-optimized, chapter-aware)
     // Fall back to building locally if backend doesn't provide it
     let content: string;
-    const usedEdgeFallback = (!payload.transcript || payload.transcript.length === 0) && (transcriptData && transcriptData.length > 0);
-
     if (payload.structuredContent && !usedEdgeFallback) {
       content = payload.structuredContent;
       console.log(`✅ Using backend structured content (${content.length} chars)`);
@@ -356,24 +391,25 @@ export async function extractYoutubeTranscript(url: string, token?: string, lang
         transcriptLanguage: metadata.transcriptLanguage || transcriptData.find((item: TranscriptItem) => item.lang)?.lang || null,
         availableTranscriptLanguages: metadata.availableTranscriptLanguages || [],
         selectedTrackKind: metadata.selectedTrackKind || null,
-        transcriptQuality: metadata.transcriptQuality,
-        timingQuality: metadata.timingQuality || metadata.transcriptQuality?.timingQuality,
+        transcriptQuality: metadata.transcriptQuality?.status === transcriptStatus ? metadata.transcriptQuality : undefined,
+        timingQuality: transcriptLineCount > 0 ? metadata.timingQuality || metadata.transcriptQuality?.timingQuality : 'none',
         videoAvailability: metadata.videoAvailability,
         availabilityReason: metadata.availabilityReason || null,
         participants: metadata.participants || [],
         chapters: metadata.chapters || [],
-        timestampedTranscript: metadata.timestampedTranscript ?? transcriptData.every((item: TranscriptItem) => item.timingSource === 'provider'),
-        transcriptSegments: metadata.transcriptSegments || transcriptData,
+        timestampedTranscript: transcriptLineCount > 0 && (metadata.timestampedTranscript ?? transcriptData.every((item: TranscriptItem) => item.timingSource === 'provider')),
+        transcriptSegments: transcriptData,
         supadataBillableRequests: metadata.supadataBillableRequests || 0,
         channelId: metadata.channelId || null,
         thumbnail: metadata.thumbnail || null,
         publishedAt: metadata.publishedAt || null,
         canonicalUrl: metadata.canonicalUrl || normalizedUrl,
-        providerCapabilities: metadata.providerCapabilities || {
-          seekableCitations: transcriptData.length > 0 && transcriptData.every((item: TranscriptItem) => item.timingSource === 'provider'),
-          timestampedSegments: transcriptData.length > 0,
+        providerCapabilities: {
+          ...metadata.providerCapabilities,
+          seekableCitations: transcriptLineCount > 0 && (metadata.providerCapabilities?.seekableCitations ?? transcriptData.every((item: TranscriptItem) => item.timingSource === 'provider')),
+          timestampedSegments: transcriptLineCount > 0 && (metadata.providerCapabilities?.timestampedSegments ?? transcriptData.every((item: TranscriptItem) => item.timingSource === 'provider')),
           metadata: Boolean(title || author || description),
-          qualityAssessment: Boolean(metadata.transcriptQuality),
+          qualityAssessment: metadata.transcriptQuality?.status === transcriptStatus,
           languageSelection: true,
         },
         sovereign_signal: metadata.sovereign_signal

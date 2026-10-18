@@ -1,8 +1,6 @@
 /**
- * YouTube Edge Function — runs on Vercel's Edge Runtime (Cloudflare network)
- * Unlike the main serverless function (AWS us-east-1), Edge Functions execute
- * on Cloudflare's globally distributed edge nodes, whose IPs are not blocked
- * by YouTube's datacenter detection. This makes transcript extraction reliable.
+ * Authenticated YouTube recovery on Vercel's Edge Runtime.
+ * YouTube may still restrict datacenter requests or have no captions available.
  */
 
 export const config = { runtime: 'edge' };
@@ -38,11 +36,11 @@ function parseJson3Captions(jsonText) {
   const result = [];
   let data;
   try { data = JSON.parse(jsonText); } catch { return result; }
-  const events = data?.events || [];
+  const events = Array.isArray(data?.events) ? data.events : [];
   for (const event of events) {
-    if (!event.segs || event.segs.length === 0) continue;
+    if (!Array.isArray(event?.segs) || event.segs.length === 0) continue;
     const text = decodeHtmlEntities(
-      event.segs.map(s => s.utf8 || '').join('').replace(/\n/g, ' ')
+      event.segs.map(s => typeof s?.utf8 === 'string' ? s.utf8 : '').join('').replace(/\n/g, ' ')
     ).trim();
     if (text.length > 0) {
       result.push({ text, offset: event.tStartMs || 0, duration: event.dDurationMs || 3000 });
@@ -66,10 +64,10 @@ function parseXmlCaptions(xmlText) {
     ).trim();
     const startMatch = attrs.match(/start="([\d.]+)"/);
     const durMatch = attrs.match(/dur="([\d.]+)"/);
-    if (text.length > 0) {
+    if (text.length > 0 && startMatch) {
       result.push({
         text,
-        offset: startMatch ? parseFloat(startMatch[1]) * 1000 : result.length * 3000,
+        offset: parseFloat(startMatch[1]) * 1000,
         duration: durMatch ? parseFloat(durMatch[1]) * 1000 : 3000,
       });
     }
@@ -85,12 +83,12 @@ function parseXmlCaptions(xmlText) {
     const text = decodeHtmlEntities(
       content.replace(/<!\[CDATA\[([\s\S]*?)\]\]>/g, '$1').replace(/<[^>]+>/g, '')
     ).trim();
-    const tMatch = attrs.match(/t="([\d.]+)"/);
-    const dMatch = attrs.match(/d="([\d.]+)"/);
-    if (text.length > 0) {
+    const tMatch = attrs.match(/\bt="([\d.]+)"/);
+    const dMatch = attrs.match(/\bd="([\d.]+)"/);
+    if (text.length > 0 && tMatch) {
       result.push({
         text,
-        offset: tMatch ? parseFloat(tMatch[1]) : result.length * 3000,
+        offset: parseFloat(tMatch[1]),
         duration: dMatch ? parseFloat(dMatch[1]) : 3000,
       });
     }
@@ -110,6 +108,53 @@ async function fetchWithTimeout(url, options = {}, timeoutMs = 8000) {
     clearTimeout(id);
     throw e;
   }
+}
+
+function captionTracks(data) {
+  const tracks = data?.captions?.playerCaptionsTracklistRenderer?.captionTracks;
+  return Array.isArray(tracks) ? tracks.filter(track => track && typeof track.baseUrl === 'string') : [];
+}
+
+async function recoverCaptions(data, language, userAgent, watchUrl) {
+  const rank = track => {
+    const code = typeof track.languageCode === 'string' ? track.languageCode.toLowerCase() : '';
+    return code === language ? 0 : code.split('-')[0] === language.split('-')[0] ? 1 : 2;
+  };
+  const tracks = [...captionTracks(data)].sort((a, b) => rank(a) - rank(b)).slice(0, 3);
+  const deadline = Date.now() + 6000;
+  for (const track of tracks) {
+    let base;
+    try {
+      base = new URL(track.baseUrl, 'https://www.youtube.com');
+      if (base.protocol !== 'https:' || !/(^|\.)youtube\.com$/i.test(base.hostname)) continue;
+    } catch { continue; }
+    const variants = ['json3', 'srv3', null].map(format => {
+      const target = new URL(base);
+      if (format) target.searchParams.set('fmt', format);
+      else target.searchParams.delete('fmt');
+      return target.href;
+    });
+    for (const target of new Set(variants)) {
+      const remaining = deadline - Date.now();
+      if (remaining <= 0) return { transcript: [], language: null };
+      const controller = new AbortController();
+      const timer = setTimeout(() => controller.abort(), Math.min(1800, remaining));
+      try {
+        const response = await fetch(target, {
+          headers: { 'User-Agent': userAgent, 'Referer': watchUrl }, signal: controller.signal,
+        });
+        if (!response.ok) continue;
+        const body = await response.text();
+        // The service can return XML even when JSON was requested (and vice versa).
+        const transcript = parseJson3Captions(body);
+        const parsed = transcript.length ? transcript : parseXmlCaptions(body);
+        if (parsed.length) return { transcript: parsed, language: track.languageCode || null };
+      } catch {
+        // A blocked format or malformed response must not stop the next attempt.
+      } finally { clearTimeout(timer); }
+    }
+  }
+  return { transcript: [], language: null };
 }
 
 // ── JWT verification helpers for Edge runtime (no npm deps) ───────────────────
@@ -213,6 +258,10 @@ export default async function handler(request) {
     });
   }
 
+  const requestedLanguage = url.searchParams.get('language') || 'en';
+  const language = /^[a-zA-Z]{2,3}(?:-[a-zA-Z0-9]{2,8})*$/.test(requestedLanguage)
+    ? requestedLanguage.toLowerCase() : 'en';
+
   const watchUrl = `https://www.youtube.com/watch?v=${videoId}`;
   const desktopUA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36';
   const apiKey = YOUTUBE_INNERTUBE_API_KEY;
@@ -221,7 +270,7 @@ export default async function handler(request) {
     // ── Step 1: Session Warmup ─────────────────────────────────────────────────
     // Fetch YouTube homepage first to get fresh VISITOR_INFO1_LIVE + YSC cookies
     // and visitorData. This mimics a real browser navigating to YouTube before
-    // requesting a video — bypasses YouTube's "first cold request" bot detection.
+    // requesting a video. Warmup is best-effort and does not guarantee access.
     let warmCookies = process.env.YOUTUBE_COOKIE || 'CONSENT=YES+cb.20231102-09-0;';
     let visitorData = '';
 
@@ -282,7 +331,7 @@ export default async function handler(request) {
     const clientCtx = {
       clientName: 'WEB',
       clientVersion: '2.20240415.01.00',
-      hl: 'en',
+      hl: language,
       gl: 'US',
       timeZone: 'America/New_York',
       utcOffsetMinutes: -240,
@@ -296,34 +345,31 @@ export default async function handler(request) {
     const playerBody = JSON.stringify({
       context: { client: clientCtx },
       videoId,
-      playbackContext: {
-        contentPlaybackContext: { signatureTimestamp: Math.floor(Date.now() / 1000) - 1000 }
-      }
     });
 
-    const playerRes = await fetchWithTimeout(
-      `https://www.youtube.com/youtubei/v1/player?key=${apiKey}&prettyPrint=false`,
-      { method: 'POST', headers: browserHeaders, body: playerBody }
-    );
-
-    if (!playerRes.ok) {
-      return new Response(JSON.stringify({ error: `YouTube API returned ${playerRes.status}` }), {
-        status: 502, headers: { ...cors, 'Content-Type': 'application/json' }
-      });
+    let playerData = {};
+    try {
+      const playerRes = await fetchWithTimeout(
+        `https://www.youtube.com/youtubei/v1/player?key=${apiKey}&prettyPrint=false`,
+        { method: 'POST', headers: browserHeaders, body: playerBody }
+      );
+      if (playerRes.ok) playerData = await playerRes.json();
+    } catch {
+      // A failed WEB request must still allow the independent Android attempt.
     }
-
-    let playerData = await playerRes.json();
     let videoDetails = playerData?.videoDetails || {};
     let playabilityStatus = playerData?.playabilityStatus || {};
     let extractedBy = 'edge_web_client';
     let activeUA = desktopUA;
 
-    const webCaptionTracks = playerData?.captions?.playerCaptionsTracklistRenderer?.captionTracks || [];
     const isWebUnplayable = playabilityStatus.status === 'UNPLAYABLE';
     const isWebRestricted = playabilityStatus.status === 'LOGIN_REQUIRED';
+    let recovered = !isWebUnplayable && !isWebRestricted
+      ? await recoverCaptions(playerData, language, activeUA, watchUrl)
+      : { transcript: [], language: null };
 
     // ── Fallback: Android client if WEB is hollow, blocked, unplayable, or has no captions ───────────────────
-    if (!videoDetails?.title || isWebRestricted || isWebUnplayable || webCaptionTracks.length === 0) {
+    if (!videoDetails?.title || isWebRestricted || isWebUnplayable || recovered.transcript.length === 0) {
       try {
         const androidUA = 'com.google.android.youtube/20.10.38 (Linux; U; Android 14)';
         const androidBody = JSON.stringify({
@@ -331,7 +377,7 @@ export default async function handler(request) {
             client: {
               clientName: 'ANDROID',
               clientVersion: '20.10.38',
-              hl: 'en',
+              hl: language,
               gl: 'US'
             }
           },
@@ -356,12 +402,23 @@ export default async function handler(request) {
           const androidDetails = androidData?.videoDetails || {};
           const androidPlayabilityStatus = androidData?.playabilityStatus || {};
 
-          if (androidDetails?.title && androidPlayabilityStatus.status !== 'UNPLAYABLE') {
-            playerData = androidData;
-            videoDetails = androidDetails;
-            playabilityStatus = androidPlayabilityStatus;
-            extractedBy = 'edge_android_client';
-            activeUA = androidUA;
+          const androidUsable = !['UNPLAYABLE', 'LOGIN_REQUIRED', 'ERROR'].includes(androidPlayabilityStatus.status);
+          if (androidUsable) {
+            const androidRecovered = await recoverCaptions(androidData, language, androidUA, watchUrl);
+            // Retain useful WEB metadata when an alternate client returns less detail.
+            videoDetails = {
+              ...androidDetails, ...videoDetails,
+              title: videoDetails.title || androidDetails.title,
+              author: videoDetails.author || androidDetails.author,
+              shortDescription: videoDetails.shortDescription || androidDetails.shortDescription,
+            };
+            if (androidRecovered.transcript.length || !recovered.transcript.length && androidDetails?.title) {
+              playabilityStatus = androidPlayabilityStatus;
+              if (androidRecovered.transcript.length) {
+                recovered = androidRecovered;
+                extractedBy = 'edge_android_client';
+              }
+            }
           }
         }
       } catch (androidErr) {
@@ -391,35 +448,7 @@ export default async function handler(request) {
       }), { status: 422, headers: { ...cors, 'Content-Type': 'application/json' } });
     }
 
-    const captionTracks = playerData?.captions?.playerCaptionsTracklistRenderer?.captionTracks || [];
-    let transcript = [];
-
-    if (captionTracks.length > 0) {
-      const track = captionTracks.find(t => t.languageCode === 'en' || t.languageCode?.startsWith('en'))
-        || captionTracks[0];
-
-      const rawBase = track.baseUrl;
-      const captionBase = (rawBase.startsWith('/') ? 'https://www.youtube.com' : '') + rawBase;
-      const json3Url = captionBase + '&fmt=json3';
-
-      try {
-        // Only try json3 for non-android clients (Android returns XML directly)
-        if (extractedBy !== 'edge_android_client') {
-          const cr = await fetchWithTimeout(json3Url, { headers: { 'User-Agent': activeUA, 'Referer': watchUrl } });
-          if (cr.ok) {
-            const body = await cr.text();
-            transcript = parseJson3Captions(body);
-          }
-        }
-        // XML fallback or direct XML fetch for Android client
-        if (transcript.length === 0) {
-          const xr = await fetchWithTimeout(captionBase, { headers: { 'User-Agent': activeUA, 'Referer': watchUrl } });
-          if (xr.ok) transcript = parseXmlCaptions(await xr.text());
-        }
-      } catch (e) {
-        // Transcript fetch failed — return metadata without transcript
-      }
-    }
+    const transcript = recovered.transcript;
 
     const responseBody = JSON.stringify({
       videoId,
@@ -429,6 +458,8 @@ export default async function handler(request) {
       keywords: videoDetails.keywords || [],
       transcript,
       captionCount: transcript.length,
+      language: recovered.language || language,
+      transcriptStatus: transcript.length ? 'complete' : 'metadata_only',
       extractedBy,
     });
 

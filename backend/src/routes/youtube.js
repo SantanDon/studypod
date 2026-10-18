@@ -16,7 +16,7 @@ import {
   extractYouTubeVideoId,
   normalizeTranscriptSegments,
   parseYouTubeChapters,
-  selectCaptionTrack,
+  recoverYouTubeCaptions,
 } from '../services/youtubeUnderstandingService.js';
 
 import { createTransportRecorder, fetchWithTransportTimeout } from '../utils/youtubeTransportDiagnostics.js';
@@ -151,9 +151,16 @@ function parseXmlCaptions(xmlText) {
 // IP-session-bound. On Vercel (AWS datacenter), any IP-specific fmt like srv3
 // silently returns an empty response. fmt=json3 bypasses this restriction —
 // it works regardless of which server makes the request after the token is issued.
-function buildCaptionUrl(rawBaseUrl) {
-  const base = rawBaseUrl.startsWith('/') ? 'https://www.youtube.com' + rawBaseUrl : rawBaseUrl;
-  return base + '&fmt=json3';
+async function recoverCaptionTracks(tracks, preferredLanguage, headers) {
+  return recoverYouTubeCaptions(tracks, {
+    preferredLanguage,
+    fetchText: async captionUrl => {
+      const response = await fetchWithTimeout(captionUrl, { headers });
+      return response.ok ? response.text() : null;
+    },
+    parseJson: parseJson3Captions,
+    parseXml: parseXmlCaptions,
+  });
 }
 
 // ─── JSON3 Caption Parser ───────────────────────────────────────────────
@@ -206,6 +213,21 @@ async function fetchTranscriptLibrary(videoId) {
 
 async function extractWithRetry(videoId, maxAttempts = 3, preferredLanguage = 'en') {
   let lastError = null;
+  let fallbackMetadata = null;
+  const rememberMetadata = (details, tracks) => {
+    if (!details?.title) return;
+    const candidate = {
+      title: details.title,
+      description: details.shortDescription || '',
+      author: details.author || 'Unknown Channel',
+      keywords: details.keywords || [],
+      extractedBy: 'innertube_metadata',
+      availableTranscriptLanguages: [...new Set(tracks.map(track => track.languageCode).filter(Boolean))],
+    };
+    if (!fallbackMetadata || candidate.description.length > fallbackMetadata.description.length) {
+      fallbackMetadata = candidate;
+    }
+  };
   const diagnostics = [];
   const mobileUA = 'Mozilla/5.0 (iPhone; CPU iPhone OS 17_4 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.4 Mobile/15E148 Safari/604.1';
   const desktopUA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36';
@@ -252,6 +274,7 @@ async function extractWithRetry(videoId, maxAttempts = 3, preferredLanguage = 'e
       const playabilityStatus = playerData?.playabilityStatus || {};
       const videoDetails = playerData?.videoDetails || {};
       const captionTracks = playerData?.captions?.playerCaptionsTracklistRenderer?.captionTracks || [];
+      rememberMetadata(videoDetails, captionTracks);
       diagnostics.push({
         client: 'WEB',
         status: playabilityStatus.status || null,
@@ -270,32 +293,11 @@ async function extractWithRetry(videoId, maxAttempts = 3, preferredLanguage = 'e
         let selectedTrack = null;
 
         if (captionTracks.length > 0) {
-          try {
-            const track = selectCaptionTrack(captionTracks, preferredLanguage);
-            selectedTrack = track;
-            const captionUrl = buildCaptionUrl(track.baseUrl);
-            
-            logger.info(`[YouTube] Fetching WEB captions (json3) from: ${captionUrl.slice(0, 120)}`);
-            const captionResult = await fetchWithTimeout(captionUrl, {
-              headers: { 'User-Agent': desktopUA, 'Referer': url }
-            });
-
-            if (captionResult.ok) {
-              const captionText = await captionResult.text();
-              transcript = parseJson3Captions(captionText);
-              logger.info(`[YouTube] json3 parsed ${transcript.length} WEB transcript lines`);
-              if (transcript.length === 0) {
-                const xmlUrl = buildCaptionUrl(track.baseUrl).replace('&fmt=json3', '');
-                const xmlResult = await fetchWithTimeout(xmlUrl, { headers: { 'User-Agent': desktopUA, 'Referer': url } });
-                if (xmlResult.ok) {
-                  transcript = parseXmlCaptions(await xmlResult.text());
-                  logger.info(`[YouTube] XML fallback parsed ${transcript.length} lines`);
-                }
-              }
-            }
-          } catch (innerError) {
-            logger.warn(`[YouTube] WEB caption fetch failed: ${innerError.message}`);
-          }
+          const recovered = await recoverCaptionTracks(captionTracks, preferredLanguage, {
+            'User-Agent': desktopUA, 'Referer': url,
+          });
+          transcript = recovered.transcript;
+          selectedTrack = recovered.track;
         }
 
         if (transcript.length > 0) {
@@ -362,6 +364,7 @@ async function extractWithRetry(videoId, maxAttempts = 3, preferredLanguage = 'e
       const playabilityStatus = playerData?.playabilityStatus || {};
       const videoDetails = playerData?.videoDetails || {};
       const captionTracks = playerData?.captions?.playerCaptionsTracklistRenderer?.captionTracks || [];
+      rememberMetadata(videoDetails, captionTracks);
       diagnostics.push({
         client: 'ANDROID',
         attempt: androidAttempt,
@@ -381,32 +384,9 @@ async function extractWithRetry(videoId, maxAttempts = 3, preferredLanguage = 'e
         throw new Error('ANDROID player returned no caption tracks');
       }
 
-      const track = selectCaptionTrack(captionTracks, preferredLanguage);
-      let transcript = [];
-
-      // json3 is less sensitive to IP-bound caption tokens than the default XML
-      // representation. Keep XML as a second attempt because some ASR tracks
-      // still return an empty json3 payload.
-      const jsonCaptionUrl = buildCaptionUrl(track.baseUrl);
-      logger.info(`[YouTube] Fetching ANDROID captions (json3) attempt ${androidAttempt}`);
-      const jsonResult = await fetchWithTimeout(jsonCaptionUrl, {
-        headers: { 'User-Agent': androidUA, 'Accept-Language': 'en-US,en;q=0.9' }
+      const { transcript, track } = await recoverCaptionTracks(captionTracks, preferredLanguage, {
+        'User-Agent': androidUA, 'Accept-Language': 'en-US,en;q=0.9',
       });
-      if (jsonResult.ok) {
-        transcript = parseJson3Captions(await jsonResult.text());
-        logger.info(`[YouTube] ANDROID json3 parsed ${transcript.length} transcript lines`);
-      }
-
-      if (transcript.length === 0) {
-        logger.info(`[YouTube] ANDROID json3 empty; trying XML attempt ${androidAttempt}`);
-        const xmlResult = await fetchWithTimeout(track.baseUrl, {
-          headers: { 'User-Agent': androidUA, 'Accept-Language': 'en-US,en;q=0.9' }
-        });
-        if (xmlResult.ok) {
-          transcript = parseXmlCaptions(await xmlResult.text());
-          logger.info(`[YouTube] ANDROID XML parsed ${transcript.length} transcript lines`);
-        }
-      }
 
       if (transcript.length === 0) {
         throw new Error('ANDROID caption tracks returned no transcript lines');
@@ -539,6 +519,7 @@ async function extractWithRetry(videoId, maxAttempts = 3, preferredLanguage = 'e
       const playabilityStatus = playerData?.playabilityStatus || {};
       const videoDetails = playerData?.videoDetails || {};
       const captionTracks = playerData?.captions?.playerCaptionsTracklistRenderer?.captionTracks || [];
+      rememberMetadata(videoDetails, captionTracks);
       diagnostics.push({
         client: 'MWEB',
         attempt,
@@ -557,51 +538,20 @@ async function extractWithRetry(videoId, maxAttempts = 3, preferredLanguage = 'e
       let selectedTrack = null;
 
       if (captionTracks.length > 0) {
-        try {
-          const track = selectCaptionTrack(captionTracks, preferredLanguage);
-          selectedTrack = track;
-          const captionUrl = buildCaptionUrl(track.baseUrl);
-          
-          logger.info(`[YouTube] Fetching captions (json3) from: ${captionUrl.slice(0, 120)}`);
-          const captionResult = await fetchWithTimeout(captionUrl, {
-            headers: {
-              'User-Agent': mobileUA,
-              'Referer': url,
-              'Cookie': sessionCookie
-            }
-          });
-
-          if (!captionResult.ok) {
-            throw new Error(`HTTP ${captionResult.status} fetching caption tracks`);
-          }
-
-          const captionText = await captionResult.text();
-          transcript = parseJson3Captions(captionText);
-          logger.info(`[YouTube] json3 parsed ${transcript.length} transcript lines`);
-          // Fallback to XML if json3 returned nothing
-          if (transcript.length === 0) {
-            const xmlUrl = buildCaptionUrl(track.baseUrl).replace('&fmt=json3', '');
-            logger.info(`[YouTube] json3 empty, trying XML fallback`);
-            const xmlResult = await fetchWithTimeout(xmlUrl, {
-              headers: { 'User-Agent': mobileUA, 'Referer': url, 'Cookie': sessionCookie }
-            });
-            if (xmlResult.ok) {
-              transcript = parseXmlCaptions(await xmlResult.text());
-              logger.info(`[YouTube] XML fallback parsed ${transcript.length} lines`);
-            }
-          }
-        } catch (innerError) {
-          logger.warn(`[YouTube] Caption fetch failed: ${innerError.message}`);
-        }
+        const recovered = await recoverCaptionTracks(captionTracks, preferredLanguage, {
+          'User-Agent': mobileUA, 'Referer': url, 'Cookie': sessionCookie,
+        });
+        transcript = recovered.transcript;
+        selectedTrack = recovered.track;
       } else {
-        logger.warn(`[YouTube] No caption tracks returned in InnerTube player response.`);
+        logger.warn('[YouTube] No caption tracks returned in InnerTube player response.');
       }
 
       const metadata = {
         title: videoDetails?.title || `YouTube Video: ${videoId}`,
-        description: videoDetails?.shortDescription || '',
-        author: videoDetails?.author || 'Unknown Channel',
-        keywords: videoDetails?.keywords || [],
+        description: videoDetails?.shortDescription || fallbackMetadata?.description || '',
+        author: videoDetails?.author || fallbackMetadata?.author || 'Unknown Channel',
+        keywords: videoDetails?.keywords || fallbackMetadata?.keywords || [],
         extractedBy: 'innertube_mweb',
         attempt,
         transcriptLanguage: selectedTrack?.languageCode || null,
@@ -625,7 +575,7 @@ async function extractWithRetry(videoId, maxAttempts = 3, preferredLanguage = 'e
     }
   }
 
-  return { transcript: null, metadata: null, identity: null, error: lastError, diagnostics };
+  return { transcript: null, metadata: fallbackMetadata, identity: null, error: lastError, diagnostics };
 }
 
 async function assertYouTubeQuota(userId) {

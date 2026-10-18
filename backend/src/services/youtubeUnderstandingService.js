@@ -39,6 +39,36 @@ export function selectCaptionTrack(tracks = [], preferredLanguage = 'en') {
     .sort((left, right) => (right.score - left.score) || (left.index - right.index))[0]?.track || null;
 }
 
+export function buildYouTubeCaptionUrl(baseUrl, format = 'json3') {
+  const url = new URL(baseUrl, 'https://www.youtube.com');
+  // Caption URLs may already contain fmt=srv3. Appending another fmt is ambiguous.
+  if (format) url.searchParams.set('fmt', format);
+  else url.searchParams.delete('fmt');
+  return url.toString();
+}
+
+export async function recoverYouTubeCaptions(tracks = [], {
+  preferredLanguage = 'en', fetchText, parseJson, parseXml, maxTracks = 2,
+} = {}) {
+  const remaining = Array.isArray(tracks) ? tracks.filter(track => track?.baseUrl) : [];
+  for (let attempt = 0; remaining.length && attempt < maxTracks; attempt += 1) {
+    const track = selectCaptionTrack(remaining, preferredLanguage);
+    remaining.splice(remaining.indexOf(track), 1);
+    for (const format of ['json3', null]) {
+      try {
+        const text = await fetchText(buildYouTubeCaptionUrl(track.baseUrl, format));
+        if (!text?.trim()) continue;
+        const transcript = (format ? parseJson(text) : parseXml(text))
+          .filter(segment => String(segment?.text || '').trim());
+        if (transcript.length) return { transcript, track };
+      } catch {
+        // An expired/empty/malformed track must not suppress another format or track.
+      }
+    }
+  }
+  return { transcript: [], track: null };
+}
+
 function cleanTranscriptText(value = '') {
   return String(value || '')
     .replace(/\u200b|\u200c|\u200d|\ufeff/g, '')

@@ -7,6 +7,7 @@ import { useNotebookGeneration } from "@/hooks/useNotebookGeneration";
 import { useQueryClient } from "@tanstack/react-query";
 import { useAuth } from "@/hooks/useAuth";
 import { ApiService } from "@/services/apiService";
+import { isSourceUsableForGroundedWork } from "@/lib/sources/sourceProcessing";
 
 function parseSourceMetadata(source: LocalSource): Record<string, unknown> {
   const rawMetadata = source.metadata as unknown;
@@ -45,24 +46,26 @@ export const useYoutubeProcessing = () => {
         throw new Error("Notebook ID is required");
       }
 
-      // Check if this is the first source in the notebook
+      const videoId = extractVideoId(url);
+      if (!videoId) throw new Error("Enter a valid YouTube video URL.");
+
+      // Fetch only this notebook so recovery retains its existing ownership.
       let existingSources: LocalSource[] = [];
       if (session?.access_token) {
         existingSources = await ApiService.fetchSources(notebookId, session.access_token);
       } else {
         existingSources = (await localStorageService.getSources(notebookId)) as LocalSource[];
       }
-      const isFirstSource = existingSources.length === 0;
-      const videoId = extractVideoId(url);
+      const isFirstUsableSource = !existingSources.some(isSourceUsableForGroundedWork);
 
       const duplicateSource = videoId
         ? existingSources.find((source) => {
             const metadata = parseSourceMetadata(source);
-            return metadata.videoId === videoId || source.url?.includes(videoId);
+            return source.type === "youtube" && (metadata.videoId === videoId || (source.url && extractVideoId(source.url) === videoId));
           })
         : null;
 
-      if (duplicateSource) {
+      if (duplicateSource && isSourceUsableForGroundedWork(duplicateSource)) {
         toast({
           title: "Video already added",
           description: `"${duplicateSource.title}" is already in this notebook.`,
@@ -71,13 +74,20 @@ export const useYoutubeProcessing = () => {
       }
 
       toast({
-        title: "Processing YouTube Video",
+        title: duplicateSource ? "Retrying YouTube transcript" : "Processing YouTube Video",
         description: "Fetching transcript and metadata...",
       });
 
       const result = await extractYoutubeTranscript(url, session?.access_token, language);
 
-      console.log(`📺 YouTube: isFirstSource=${isFirstSource}, existingSources=${existingSources.length}`);
+      const isMetadataOnly = result.metadata.transcriptStatus === "metadata_only";
+      if (duplicateSource && isMetadataOnly) {
+        toast({
+          title: "Transcript still unavailable",
+          description: "Your existing source was kept. Try another caption language, or paste/upload the transcript as a text source.",
+        });
+        return false;
+      }
 
       const sourcePayload = {
         title: result.title,
@@ -85,7 +95,7 @@ export const useYoutubeProcessing = () => {
         type: "youtube",
         content: result.content,
         url: result.url,
-        processing_status: "processing" as const,
+        processing_status: isMetadataOnly ? "degraded" as const : "processing" as const,
         metadata: {
           sourceType: "youtube-transcript",
           wordCount: result.content.split(/\s+/).length,
@@ -125,17 +135,31 @@ export const useYoutubeProcessing = () => {
       // Save the source to API or local storage
       let savedSource: LocalSource;
       if (session?.access_token) {
-        savedSource = await ApiService.createSource(notebookId, sourcePayload, session.access_token);
+        savedSource = duplicateSource
+          ? await ApiService.updateSource(notebookId, duplicateSource.id, sourcePayload, session.access_token)
+          : await ApiService.createSource(notebookId, sourcePayload, session.access_token);
       } else {
-        savedSource = localStorageService.createSource({
+        const localSource = duplicateSource
+          ? localStorageService.updateSource(duplicateSource.id, { ...sourcePayload, type: "youtube" })
+          : localStorageService.createSource({
           notebook_id: notebookId,
           ...sourcePayload,
           type: "youtube" as const
         });
+        if (!localSource) throw new Error("This source no longer exists. Add the video again.");
+        savedSource = localSource;
       }
       
       // Invalidate sources query to refresh UI
       queryClient.invalidateQueries({ queryKey: ["sources", notebookId] });
+
+      if (isMetadataOnly) {
+        toast({
+          title: "Video saved without a transcript",
+          description: "Chat and Studio need the transcript. Re-add this URL to retry, choose another caption language, or paste/upload the transcript as text.",
+        });
+        return true;
+      }
 
       // Cache the content in localStorage for the document processor
       localStorage.setItem(`file_${result.url}`, JSON.stringify({
@@ -162,7 +186,7 @@ export const useYoutubeProcessing = () => {
         queryClient.invalidateQueries({ queryKey: ["sources", notebookId] });
 
         // IMPORTANT: Trigger notebook generation for first source
-        if (isFirstSource) {
+        if (isFirstUsableSource) {
           console.log("🚀 Triggering notebook generation for YouTube source...");
           try {
             // Mark notebook as generating
@@ -192,17 +216,10 @@ export const useYoutubeProcessing = () => {
           queryClient.invalidateQueries({ queryKey: ["notebooks"] });
         }
         
-        if (result.metadata.transcriptStatus === "metadata_only") {
-          toast({
-            title: "Video added with limited context",
-            description: result.metadata.extractionWarning || "No transcript was available, so answers can only use metadata.",
-          });
-        } else {
-          toast({
-            title: "Video Added",
-            description: `Transcript added successfully (${result.metadata.transcriptLineCount || 0} caption lines).`,
-          });
-        }
+        toast({
+          title: duplicateSource ? "Transcript recovered" : "Video Added",
+          description: `Transcript added successfully (${result.metadata.transcriptLineCount || 0} caption lines).`,
+        });
         
         return true;
       } catch (processingError) {
