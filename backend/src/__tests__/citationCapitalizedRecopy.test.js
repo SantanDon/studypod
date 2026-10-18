@@ -66,8 +66,11 @@ describe('capitalized retry literal recopy safety', () => {
     expect(result.citations).toHaveLength(1);
     expect(result.citations[0].source_id).toBe(source.id);
     const initial = dispatch.mock.calls[0][0], retry = dispatch.mock.calls[1][0];
-    expect(retry.messages.slice(0, -2)).toEqual(initial.messages.slice(0, -1));
-    expect(retry.messages.at(-2).content).toContain(fact);
+    expect(retry.messages[0].content).toContain('JSON');
+    expect(retry.messages.slice(1, -2)).toEqual(initial.messages.slice(1, -1));
+    expect(retry.messages.at(-2).content).not.toContain(fact);
+    expect(retry.messages.at(-2).content).toContain(source.id);
+    expect(retry.messages.at(-1).content).toContain(fact);
     expect(retry.messages.at(-2).content).toContain(query);
     expect(retry.messages).toHaveLength(initial.messages.length + 1);
     expect(retry.priority).toBe(initial.priority);

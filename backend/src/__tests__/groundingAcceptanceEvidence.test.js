@@ -74,7 +74,15 @@ describe("private failed grounding acceptance evidence", () => {
     expect(payloads.map((value) => value.attempt).sort()).toEqual(["initial", "repair"]);
     expect(payloads.every((value) => value.rawAnswer.text === rawAnswer && value.tokensUsed === 4)).toBe(true);
     expect(payloads[0].notebookContext).toEqual(payloads[1].notebookContext);
-    expect(dispatch.mock.calls[1][0].messages.slice(0, -1)).toEqual(dispatch.mock.calls[0][0].messages);
+    const initialMessages = dispatch.mock.calls[0][0].messages;
+    const retryMessages = dispatch.mock.calls[1][0].messages;
+    expect(retryMessages[0].content).toContain('JSON');
+    expect(retryMessages.slice(1, -2)).toEqual(initialMessages.slice(1, -1));
+    expect(retryMessages.at(-2).content).toContain(args.message);
+    expect(retryMessages.at(-2).content).toContain('synthetic');
+    expect(retryMessages.at(-2).content).not.toContain(fragment);
+    expect(retryMessages.at(-1).content).toContain(fragment.slice(0, fragment.indexOf('.') + 1));
+    expect(retryMessages.at(-1).content).not.toContain('Some plants have ev');
     await expect(chatWithNotebook(args)).rejects.toMatchObject({ code: "GROUNDING_UNAVAILABLE" });
     expect(dispatch).toHaveBeenCalledTimes(4);
   });

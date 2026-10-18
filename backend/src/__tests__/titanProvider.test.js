@@ -9,6 +9,128 @@ const log = vi.hoisted(() => ({
 
 vi.mock("../utils/logger.js", () => ({ logger: log }));
 
+describe("Groq brief rate-window recovery", () => {
+  async function setup(fallbackEnabled = false, model = "") {
+    for (const key of ["OPENAI_API_KEY", "VITE_GROQ_API_KEY", "TOKENLLM7_KEY", "NVIDIA_API_KEY", "GEMINI_API_KEY", "ANTHROPIC_API_KEY", "OLLAMA_BASE_URL", "GROQ_MODEL"]) vi.stubEnv(key, "");
+    vi.stubEnv("GROQ_API_KEY", "fixture");
+    vi.stubEnv("GROQ_MODEL", model);
+    vi.stubEnv("OVHCLOUD_ENABLED", "false");
+    vi.stubEnv("TOKENLLM7_ENABLED", fallbackEnabled ? "true" : "false");
+    vi.resetModules();
+    return import("../services/titanProvider.js");
+  }
+  const request = { messages: [{ role: "user", content: "Explain the source." }], priority: "performance" };
+  const failure = (message, headers = {}, status = 429) => ({
+    ok: false, status,
+    headers: { get: (name) => headers[name] || null },
+    text: async () => JSON.stringify({ error: { message } }),
+  });
+  const success = () => ({ ok: true, json: async () => ({ choices: [{ message: { content: "Recovered grounded answer" } }] }) });
+  afterEach(() => { vi.useRealTimers(); vi.unstubAllEnvs(); vi.unstubAllGlobals(); vi.clearAllMocks(); });
+
+  it("uses the explicit subsecond request window instead of the full token refill", async () => {
+    const { dispatchToTitan, getAvailableProviders } = await setup();
+    vi.useFakeTimers();
+    const fetchMock = vi.fn().mockResolvedValueOnce(failure(
+      "Rate limit reached for model: Limit 7000, Used 1880, Requested 5156. Please try again in 308.571428ms.",
+      { "x-ratelimit-reset-tokens": "25s" },
+    )).mockResolvedValueOnce(success());
+    vi.stubGlobal("fetch", fetchMock);
+    const pending = expect(dispatchToTitan(request)).resolves.toMatchObject({ answer: "Recovered grounded answer" });
+    await vi.advanceTimersByTimeAsync(358);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    await vi.advanceTimersByTimeAsync(1);
+    await pending;
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(getAvailableProviders().GROQ.available).toBe(true);
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
+  it("honors Retry-After before the full token reset", async () => {
+    const { dispatchToTitan } = await setup();
+    vi.useFakeTimers();
+    const fetchMock = vi.fn().mockResolvedValueOnce(failure("Rate limit reached", {
+      "retry-after": "0.1", "x-ratelimit-reset-tokens": "25s",
+    })).mockResolvedValueOnce(success());
+    vi.stubGlobal("fetch", fetchMock);
+    const pending = expect(dispatchToTitan(request)).resolves.toMatchObject({ answer: "Recovered grounded answer" });
+    await vi.advanceTimersByTimeAsync(149);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    await vi.advanceTimersByTimeAsync(1);
+    await pending;
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
+  it("retries only once, preserves provider fallback, and avoids a blanket cooldown", async () => {
+    const { dispatchToTitan, getAvailableProviders } = await setup(true);
+    vi.useFakeTimers();
+    const fetchMock = vi.fn(async (url) => url.includes("groq.com")
+      ? failure("Rate limit reached. Please try again in 100ms.") : success());
+    vi.stubGlobal("fetch", fetchMock);
+    const pending = expect(dispatchToTitan(request)).resolves.toMatchObject({ answer: "Recovered grounded answer" });
+    await vi.advanceTimersByTimeAsync(150);
+    await pending;
+    expect(fetchMock).toHaveBeenCalledTimes(3);
+    expect(fetchMock.mock.calls.filter(([url]) => url.includes("groq.com"))).toHaveLength(2);
+    expect(getAvailableProviders().GROQ.available).toBe(false);
+    await vi.advanceTimersByTimeAsync(150);
+    expect(getAvailableProviders().GROQ.available).toBe(true);
+  });
+
+  it.each([
+    [429, "Dailyquota exhausted. Please try again in 100ms.", {}],
+    [429, "Authentication required. Please try again in 100ms.", {}],
+    [429, "Rate limit reached. Please try again in 3s.", {}],
+    [429, "Rate limit reached.", {}],
+    [429, "Please try again in 100ms.", { "retry-after": "10" }],
+    [401, "Please try again in 100ms.", {}],
+    [403, "Please try again in 100ms.", {}],
+  ])("does not retry quota, unknown, long or auth failures (%s, %s)", async (status, message, headers) => {
+    const { dispatchToTitan } = await setup();
+    const fetchMock = vi.fn(async () => failure(message, headers, status));
+    vi.stubGlobal("fetch", fetchMock);
+    await expect(dispatchToTitan(request)).rejects.toMatchObject({ code: "PROVIDER_UNAVAILABLE" });
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("does not spend the remaining request budget on a rate wait", async () => {
+    const { dispatchToTitan } = await setup();
+    const fetchMock = vi.fn(async () => failure("Please try again in 300ms."));
+    vi.stubGlobal("fetch", fetchMock);
+    await expect(dispatchToTitan({ ...request, timeoutMs: 1_200 })).rejects.toMatchObject({ code: "PROVIDER_UNAVAILABLE" });
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("keeps the recovered Groq model when its first request is briefly rate limited", async () => {
+    const { dispatchToTitan } = await setup(false, "retired-model");
+    vi.useFakeTimers();
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(failure("Model not found", {}, 404))
+      .mockResolvedValueOnce(failure("Please try again in 100ms."))
+      .mockResolvedValueOnce(success());
+    vi.stubGlobal("fetch", fetchMock);
+    const pending = expect(dispatchToTitan(request)).resolves.toMatchObject({ modelUsed: "qwen/qwen3.8-27b" });
+    await vi.advanceTimersByTimeAsync(150);
+    await pending;
+    expect(fetchMock.mock.calls.map(([, options]) => JSON.parse(options.body).model))
+      .toEqual(["retired-model", "qwen/qwen3.8-27b", "qwen/qwen3.8-27b"]);
+  });
+
+  it("cancels the rate wait with the original request and cleans up timers", async () => {
+    const { dispatchToTitan } = await setup();
+    vi.useFakeTimers();
+    const fetchMock = vi.fn(async () => failure("Please try again in 300ms."));
+    vi.stubGlobal("fetch", fetchMock);
+    const controller = new AbortController();
+    const pending = expect(dispatchToTitan({ ...request, signal: controller.signal })).rejects.toMatchObject({ name: "AbortError" });
+    await vi.advanceTimersByTimeAsync(100);
+    controller.abort();
+    await pending;
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(vi.getTimerCount()).toBe(0);
+  });
+});
+
 describe("LLM7 model availability recovery", () => {
   function isolate(model = "retired-model") {
     for (const key of ["OPENAI_API_KEY", "GROQ_API_KEY", "VITE_GROQ_API_KEY", "TOKENLLM7_KEY", "NVIDIA_API_KEY", "GEMINI_API_KEY", "ANTHROPIC_API_KEY", "OLLAMA_BASE_URL"]) vi.stubEnv(key, "");

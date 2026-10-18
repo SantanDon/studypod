@@ -288,6 +288,20 @@ function sanitizeProviderErrorDetail(value) {
     .slice(0, 400);
 }
 
+async function waitForRateWindow(delayMs, signal) {
+  signal.throwIfAborted();
+  await new Promise((resolve) => {
+    const finish = () => {
+      clearTimeout(timer);
+      signal.removeEventListener("abort", finish);
+      resolve();
+    };
+    const timer = setTimeout(finish, delayMs);
+    signal.addEventListener("abort", finish, { once: true });
+  });
+  signal.throwIfAborted();
+}
+
 async function createProviderHttpError(titan, response) {
   const rawBody = await response.text().catch(() => "");
   let parsedBody;
@@ -312,6 +326,21 @@ async function createProviderHttpError(titan, response) {
   );
   error.providerDetail = providerDetail;
   error.retryAfterMs = retryAfterMs;
+  // Token reset is the full refill window. Groq can accept this specific
+  // request sooner, as stated in Retry-After or its explicit error message.
+  if (titan.provider === "groq" && response.status === 429
+      && !/(?:daily|quota|billing|credit|per day|auth|forbidden|invalid key|\bTPD\b|\bRPD\b)/i.test(
+        `${error.providerCode} ${providerDetail}`.replaceAll("_", " "),
+      )) {
+    const messageDelay = providerDetail.match(/\btry again in\s+((?:\d+(?:\.\d+)?\s*(?:ms|s|m|h)\s*)+)/i)?.[1];
+    const delayMs = parseProviderDelayMs(response.headers?.get?.("retry-after"))
+      || parseProviderDelayMs(messageDelay?.replaceAll(" ", ""))
+      || parseProviderDelayMs(response.headers?.get?.("x-ratelimit-reset-tokens"));
+    if (delayMs > 0 && delayMs <= 2_000) {
+      error.shortRetryAfterMs = delayMs + 50;
+      error.retryAfterMs = delayMs;
+    }
+  }
   error.rateLimit = {
     tokenLimit: response.headers?.get?.("x-ratelimit-limit-tokens") || null,
     tokenRemaining:
@@ -605,6 +634,7 @@ async function dispatchWithinDeadline({ messages, priority, temperature, deadlin
       } catch (error) {
         signal.throwIfAborted();
         let handledError = error;
+        let retryTitan = titan;
 
         const llm7ModelUnavailable = name === "TOKENLLM7"
           && [400, 404].includes(Number(error?.status || 0))
@@ -628,12 +658,14 @@ async function dispatchWithinDeadline({ messages, priority, temperature, deadlin
           name === "GROQ"
           && Number(error?.status || 0) === 404
           && titan.model !== GROQ_FALLBACK_MODEL
+          && deadline - Date.now() >= 1_000
         ) {
           logger.warn(
             `[Titan] GROQ model ${titan.model} is unavailable; retrying once with ${GROQ_FALLBACK_MODEL}`,
           );
           try {
             const fallbackTitan = { ...titan, model: GROQ_FALLBACK_MODEL };
+            retryTitan = fallbackTitan;
             const result = await requestProvider(
               fallbackTitan,
               messages,
@@ -652,11 +684,32 @@ async function dispatchWithinDeadline({ messages, priority, temperature, deadlin
           }
         }
 
+        const shortDelayMs = Number(handledError?.shortRetryAfterMs || 0);
+        if (name === "GROQ" && shortDelayMs > 0
+            && deadline - Date.now() >= shortDelayMs + 1_000) {
+          logger.warn(`[Titan] GROQ briefly rate limited; retrying once after ${shortDelayMs}ms`);
+          await waitForRateWindow(shortDelayMs, signal);
+          if (deadline - Date.now() >= 1_000) {
+            try {
+              const result = await requestProvider(
+                retryTitan, messages, temperature, priority,
+                Math.min(FETCH_TIMEOUT_MS, deadline - Date.now()), signal,
+              );
+              logger.info(`[Titan] GROQ completed a request after a brief rate limit with ${retryTitan.model}`);
+              return result;
+            } catch (retryError) {
+              signal.throwIfAborted();
+              handledError = retryError;
+            }
+          }
+        }
+
         const status = Number(handledError?.status || 0);
         if (status === 429 || status === 413) {
           cooldownProvider(
             name,
-            Math.max(RATE_LIMIT_COOLDOWN_MS, Number(handledError?.retryAfterMs || 0)),
+            Number(handledError?.shortRetryAfterMs)
+              || Math.max(RATE_LIMIT_COOLDOWN_MS, Number(handledError?.retryAfterMs || 0)),
           );
         }
         if (status === 401 || status === 403)
