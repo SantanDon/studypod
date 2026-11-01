@@ -27,15 +27,15 @@ const makeEngine = (count = (text) => text.length + 2) => {
 const words = (text) => text.trim().split(/\s+/u);
 
 describe('Kokoro complete-token protection', () => {
-  it('invalidates old Kokoro narration caches while preserving other providers', () => {
-    const legacySignature = (provider) => crypto.createHash('sha256').update(JSON.stringify({
+  it('invalidates pre-token-budget Kokoro caches while preserving other providers in the framing schema', () => {
+    const preTokenBudgetSignature = (provider) => crypto.createHash('sha256').update(JSON.stringify({
       version: 'v1', requestedPreset: 'faithful', resolvedPreset: 'faithful',
-      pronunciations: [], voice: 'af_heart', provider,
+      pronunciations: [], voice: 'af_heart', provider, includeFraming: false,
     })).digest('hex').slice(0, 12);
     const signature = (provider) => createNarrationSignature({ requestedPreset: 'faithful', voice: 'af_heart', provider });
-    expect(signature('kokoro')).not.toBe(legacySignature('kokoro'));
+    expect(signature('kokoro')).not.toBe(preTokenBudgetSignature('kokoro'));
     expect(signature('kokoro')).toBe(signature('kokoro'));
-    expect(signature('chatterbox')).toBe(legacySignature('chatterbox'));
+    expect(signature('chatterbox')).toBe(preTokenBudgetSignature('chatterbox'));
   });
 
   it('passes complete ids at the 511-token safe boundary and preserves options', async () => {

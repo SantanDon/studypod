@@ -60,7 +60,7 @@ describe('production source context to evidence generation', () => {
     expect(deep).toContain(sentences[250]);
     expect(standard).not.toContain(sentences[250]);
   });
-  it('keeps deterministic deep-dive production within its spoken-word ceiling', async () => {
+  it('prepares a verified deep discussion within its spoken-word ceiling', async () => {
     const paragraphs = Array.from({ length: 8 }, (_, i) =>
       `Section ${i + 1} records a measured observation; uncertainty remains attached. ` +
       'The source limits this interpretation to its stated evidence. '.repeat(70),
@@ -70,19 +70,37 @@ describe('production source context to evidence generation', () => {
     expect(indexed.passages.length).toBeGreaterThanOrEqual(7);
     vi.mocked(chatCompletion).mockClear();
 
+    // Deep Dive now requires a structured section followed by a separate
+    // all-turn support review. The file-level default is the standard-mode
+    // passage selector response, which is intentionally invalid for this path.
+    vi.mocked(chatCompletion).mockImplementation(async request => {
+      const payload = JSON.parse(request.messages[1].content);
+      if (Array.isArray(payload.requiredTurnIndexes)) {
+        return JSON.stringify({verdicts: payload.requiredTurnIndexes.map((turnIndex: number) => ({turnIndex, supported: true}))});
+      }
+
+      const [passage] = payload.passages;
+      const quote = passage.text.slice(0, 96);
+      const section = payload.section;
+      return JSON.stringify({
+        title: `Section ${section}`,
+        turns: [
+          {speaker: 'host1', kind: 'explanation', text: `Section ${section} opens with a detail recorded in the source.`, evidence: [{passageId: passage.id, quote}]},
+          {speaker: 'host2', kind: 'explanation', text: `Section ${section} keeps the cited wording attached to its context.`, evidence: [{passageId: passage.id, quote}]},
+          {speaker: 'host1', kind: 'question', text: `Which detail does the source record in section ${section}?`, evidence: [{passageId: passage.id, quote}]},
+        ],
+      });
+    });
+
     const script = await generatePodcastScript(context, { type: 'deep-dive' });
-    const spokenSourcePassages = script.segments
-      .map(segment => segment.text)
-      .filter(text => indexed.passages.some(passage => passage.text === text));
     expect(script.metadata?.type).toBe('deep-dive');
+    expect(script.metadata?.narrationMode).toBe('grounded-discussion');
     expect(script.metadata?.sourceCoverage?.excerpted).toBe(true);
     expect(script.estimatedDuration).toBeLessThanOrEqual(30 * 60);
-    expect(spokenSourcePassages.length).toBe(script.metadata?.evidencePassageIds?.length);
-    expect(spokenSourcePassages.length).toBeGreaterThan(0);
-    expect(spokenSourcePassages.every(text => indexed.passages.some(passage => passage.text === text))).toBe(true);
-    // Deep Dive compiles its literal source selection deterministically; it no
-    // longer asks the model for passage IDs or retries oversized selections.
-    expect(vi.mocked(chatCompletion)).not.toHaveBeenCalled();
+    expect(script.segments.length).toBeGreaterThanOrEqual(3);
+    expect(script.metadata?.evidencePassageIds?.length).toBeGreaterThan(0);
+    expect(script.metadata?.segmentEvidence).toHaveLength(script.segments.length);
+    expect(vi.mocked(chatCompletion).mock.calls.length).toBeGreaterThan(1);
 
     const standardContext = buildPodcastEvidenceContext(
       [{ id: 'deep-pdf', title: 'Deep source', content: paragraphs.join('\n\n') }],
@@ -92,7 +110,7 @@ describe('production source context to evidence generation', () => {
     vi.mocked(chatCompletion).mockClear();
     vi.mocked(chatCompletion).mockResolvedValue(JSON.stringify({ passageIds: standardIndexed.passages.map(passage => passage.id) }));
     const standardScript = await generatePodcastScript(standardContext, { type: 'standard' });
-    expect(script.estimatedDuration).toBeGreaterThanOrEqual(standardScript.estimatedDuration * 1.5);
+    expect(script.metadata?.sourceCoverage?.budgetedChars).toBeGreaterThan(standardScript.metadata?.sourceCoverage?.budgetedChars ?? 0);
   });
   it('filters standalone PDF front matter and retains complete inner sentences around page-edge fragments', () => {
     const prose = 'The opening argument is complete and remains useful. Writers on philosophy are 5';

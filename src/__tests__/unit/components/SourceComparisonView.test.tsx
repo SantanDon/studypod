@@ -66,7 +66,7 @@ describe('SourceComparisonView', () => {
     expect(screen.getByRole('heading', { name: 'Compare Sources' })).toBeInTheDocument();
     expect(screen.getByRole('combobox', { name: 'First source' })).toBeInTheDocument();
     expect(screen.getByRole('combobox', { name: 'Second source' })).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'Compare evidence' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: 'Compare sources' })).toBeDisabled();
     expect(screen.getByRole('button', { name: 'Close comparison' })).toBeInTheDocument();
     expect(screen.getAllByText(/Choose a ready source above/i)).toHaveLength(2);
     expect(screen.getByTestId('compact-source-comparison-layout')).toBeInTheDocument();

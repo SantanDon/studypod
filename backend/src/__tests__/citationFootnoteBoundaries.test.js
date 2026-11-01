@@ -4,7 +4,7 @@ const dispatch = vi.hoisted(() => vi.fn());
 vi.mock("../services/titanProvider.js", () => ({ dispatchToTitan: dispatch }));
 const literal = "In this process, atmospheric carbon dioxide is incorporated into already existing organic compounds, such as ribulose bisphosphate (RuBP).";
 const next = "Using the ATP and NADPH produced by the light-dependent reactions, the resulting compounds are then reduced.";
-const question = "According to this photosynthesis article, which gas do plants take in as a reactant? Name the gas and cite the source.";
+const question = "According to this photosynthesis article, what happens to atmospheric carbon dioxide? Name the process and cite the source.";
 const source = { id: "website-photosynthesis", title: "Photosynthesis", type: "website", content: `In plants, algae, and cyanobacteria, sugars are synthesized by a subsequent sequence of light-independent reactions called the Calvin cycle.\n\n${literal}[6] ${next}` };
 const refs = [{ id: source.id, title: source.title, type: source.type, index: 1 }];
 const json = text => JSON.stringify({ status: "supported", sentences: [{ sourceIndex: 1, text }] });
