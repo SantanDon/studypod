@@ -21,7 +21,7 @@ export const getPlayableChapterPosition = (
 
 const safeLabel = (value: string): string => value
   .replace(/\b(?:book|chapter|section)\s+(?:\d+|[ivxlcdm]+)\b/gi, 'reading section')
-  .replace(/[\r\n\[\]]/g, ' ')
+  .replace(/[\r\n[\]]/g, ' ')
   .trim();
 
 /** Only canonical structural labels can narrow evidence; arbitrary titles stay descriptive. */
@@ -75,7 +75,7 @@ export const withAudiobookReadingContext = (
   // can retrieve the same titled section. Do not derive this scope from the
   // learner's wording; the backend accepts it only from this generated block.
   const exactTitle = context.chapterTitle
-    ?.replace(/[\r\n\[\]]/g, ' ')
+    ?.replace(/[\r\n[\]]/g, ' ')
     .replace(/\s+/g, ' ')
     .trim()
     .slice(0, 160);

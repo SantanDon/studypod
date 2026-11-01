@@ -29,7 +29,7 @@ function parseJson(response: string): unknown {
   let depth = 0;
   let quoted = false;
   let escaped = false;
-  if (start >= 0 && !/[\[\]{}]/.test(text.slice(0, start))) {
+  if (start >= 0 && !/[[\]{}]/.test(text.slice(0, start))) {
     for (let index = start; index < text.length; index++) {
       const char = text[index];
       if (quoted) {
@@ -40,7 +40,7 @@ function parseJson(response: string): unknown {
       else if (char === '{') depth++;
       else if (char === '}' && --depth === 0) {
         // Extract only one already complete object. Never close or repair truncated output.
-        if (!/[\[\]{}]/.test(text.slice(index + 1))) {
+        if (!/[[\]{}]/.test(text.slice(index + 1))) {
           try { return JSON.parse(text.slice(start, index + 1)); } catch { break; }
         }
         break;

@@ -40,7 +40,7 @@ const formatPageRange = (request: AudioListeningQuestionRequest) => {
 };
 
 const safePromptLabel = (value: string) =>
-  value.replace(/[\r\n\[\]<>]/g, " ").replace(/\s+/g, " ").trim();
+  value.replace(/[\r\n[\]<>]/g, " ").replace(/\s+/g, " ").trim();
 
 export const buildAudioListeningQuestionMessage = (
   request: AudioListeningQuestionRequest,

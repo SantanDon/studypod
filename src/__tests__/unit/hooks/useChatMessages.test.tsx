@@ -4,6 +4,7 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { validateAIResponse, validateCitations } from '@/lib/extraction/contentValidator';
 import { buildLocalConversation, isPracticeContext, isPracticeRequest, localLearningSystemPrompt } from '@/lib/chat/localLearningGuidance';
+import type { EnhancedChatMessage } from '@/types/message';
 
 const mocks = vi.hoisted(() => ({ toast: vi.fn(), send: vi.fn(), getMessages: vi.fn(), localContext: vi.fn(), saveLocalTurn: vi.fn(), localCompletion: vi.fn(), localEnabled: false }));
 vi.mock('@/hooks/useAuthState', () => ({ useAuthState: () => ({ user: { id: 'qa-owner' } }) }));
@@ -52,12 +53,12 @@ describe('signed-in chat failure and retry', () => {
   });
 
   it('keeps practice guidance for a recheck after a practice question', () => {
-    const history = [
-      { message: { type: 'human', content: 'Help me practise the main idea. Ask one question at a time.' } },
-      { message: { type: 'ai', content: 'What is the central claim? [1]' } },
-      { message: { type: 'human', content: 'It is about repeated results.' } },
-      { message: { type: 'ai', content: 'The source says they repeated twice [1].' } },
-    ] as any;
+    const history: EnhancedChatMessage[] = [
+      { id: 'practice-prompt', message: { type: 'human', content: 'Help me practise the main idea. Ask one question at a time.' } },
+      { id: 'practice-question', message: { type: 'ai', content: 'What is the central claim? [1]' } },
+      { id: 'practice-attempt', message: { type: 'human', content: 'It is about repeated results.' } },
+      { id: 'practice-feedback', message: { type: 'ai', content: 'The source says they repeated twice [1].' } },
+    ];
     expect(isPracticeContext(history, 'Please recheck my answer and do not give me another quiz.')).toBe(true);
     expect(isPracticeContext([], 'Explain how practice questions help memory.')).toBe(false);
   });
