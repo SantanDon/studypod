@@ -3,6 +3,7 @@ import { rateLimit } from 'express-rate-limit';
 import { authenticateToken, requireScope } from '../middleware/auth.js';
 import { dispatchToTitan } from '../services/titanProvider.js';
 import { logger } from '../utils/logger.js';
+import { withPersonalProvider, testPersonalProvider, sendPersonalProviderError } from '../services/personalProviderService.js';
 
 const router = express.Router();
 const MAX_MESSAGES = 50;
@@ -40,7 +41,15 @@ function normalizeMessages(value) {
   return messages;
 }
 
-router.post('/generate', requireScope('chat:all'), async (req, res) => {
+router.post('/provider/test', requireScope('chat:all'), withPersonalProvider, async (req, res) => {
+  try { res.json(await testPersonalProvider()); }
+  catch (error) {
+    if (sendPersonalProviderError(res, error)) return;
+    res.status(502).json({ error: 'Provider connection test failed' });
+  }
+});
+
+router.post('/generate', requireScope('chat:all'), withPersonalProvider, async (req, res) => {
   const controller = new AbortController();
   const onClose = () => { if (!res.writableFinished) controller.abort(); };
   res.on('close', onClose);
@@ -63,10 +72,18 @@ router.post('/generate', requireScope('chat:all'), async (req, res) => {
     if (timeoutMs !== undefined && (typeof timeoutMs !== 'number' || !Number.isFinite(timeoutMs) || timeoutMs <= 0)) {
       return res.status(400).json({ error: 'timeoutMs must be a positive finite number' });
     }
-    const result = await dispatchToTitan({ messages, priority, temperature, timeoutMs, signal: controller.signal });
+    const { maxOutputTokens, jsonMode } = req.body;
+    if (maxOutputTokens !== undefined && (!Number.isInteger(maxOutputTokens) || maxOutputTokens < 1 || maxOutputTokens > 8192)) {
+      return res.status(400).json({ error: 'maxOutputTokens must be an integer between 1 and 8192' });
+    }
+    if (jsonMode !== undefined && typeof jsonMode !== 'boolean') {
+      return res.status(400).json({ error: 'jsonMode must be a boolean' });
+    }
+    const result = await dispatchToTitan({ messages, priority, temperature, timeoutMs, maxOutputTokens, jsonMode, signal: controller.signal });
     res.json(result);
   } catch (error) {
     if (controller.signal.aborted) return;
+    if (sendPersonalProviderError(res, error)) return;
     if (error.code === 'PROVIDER_UNAVAILABLE') {
       return res.status(503).json({
         error: 'No server AI provider is currently available. Configure OPENAI_API_KEY or another server provider.',

@@ -7,6 +7,7 @@
 
 export { API_BASE_URL } from "@/config/api";
 import { API_BASE_URL } from "@/config/api";
+import { getPersonalProviderRequestHeaders, redactPersonalProviderKey } from "@/lib/ai/personalProviderContext";
 import type {
   CreateDocumentInput,
   DocumentArtifact,
@@ -592,6 +593,37 @@ export const ApiService = {
     return response.json();
   },
 
+  async getLocalChatContext(notebookId: string, sourceIds: string[] | undefined, token: string, message?: string) {
+    const response = await fetch(`${API_BASE_URL}/notebooks/${notebookId}/local-chat/context`, {
+      method: "POST",
+      headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+      body: JSON.stringify({ sourceIds, message }),
+      credentials: "include",
+    });
+    if (!response.ok) throw new Error((await response.json().catch(() => ({}))).error || "Failed to load local chat context");
+    return response.json() as Promise<{ notebookId: string; sources: Array<{ id: string; title: string; type: string; content: string }>; sectionScope?: { matched: boolean } }>;
+  },
+
+  async saveLocalChatTurn(notebookId: string, params: {
+    turnId: string;
+    question: string;
+    answer: string;
+    sourceIds: string[];
+    citationMap: Array<{ citationId: number; sourceId: string; excerpt?: string }>;
+  }, token: string) {
+    const response = await fetch(`${API_BASE_URL}/notebooks/${notebookId}/local-chat/turn`, {
+      method: "POST",
+      headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+      body: JSON.stringify(params),
+      credentials: "include",
+    });
+    if (!response.ok) {
+      const data = await response.json().catch(() => ({}));
+      throw Object.assign(new Error(data.error || "Failed to save local chat turn"), { status: response.status, code: data.code });
+    }
+    return response.json() as Promise<{ answer: string; messages: unknown[] }>;
+  },
+
   async sendChatMessage(
     notebookId: string,
     params: {
@@ -610,6 +642,7 @@ export const ApiService = {
         headers: {
           Authorization: `Bearer ${token}`,
           "Content-Type": "application/json",
+          ...getPersonalProviderRequestHeaders(),
         },
         body: JSON.stringify(params),
         credentials: "include",
@@ -620,7 +653,7 @@ export const ApiService = {
       const detailedMessage = errorData.details
         ? `${errorData.error}: ${errorData.details}`
         : errorData.error;
-      const error = new Error(detailedMessage || "Failed to send chat message") as Error & {
+      const error = new Error(redactPersonalProviderKey(detailedMessage || "Failed to send chat message")) as Error & {
         status: number;
         code?: string;
       };

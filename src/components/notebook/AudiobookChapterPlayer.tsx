@@ -31,6 +31,8 @@ import { Slider } from "@/components/ui/slider";
 import { Input } from "@/components/ui/input";
 import { formatChapterTitle, formatDisplayTitle } from "@/lib/utils/displayTitle";
 import { queueAudioListeningQuestion } from "@/lib/audio/listeningQuestion";
+import { getPlayableChapterPosition } from "@/lib/audio/readingContext";
+import { useAudiobookStore } from "@/stores/audiobookStore";
 import {
   adjacentPlayableAudiobookChapter,
   calculateAudiobookProgress,
@@ -80,13 +82,69 @@ const formatTime = (seconds: number) => {
     : `${minutes}:${String(remainder).padStart(2, "0")}`;
 };
 
-const statusLabel = (status: AudiobookPlaybackManifest["status"]) => {
-  if (status === "completed") return "Complete";
-  if (status === "paused") return "Ready to resume generation";
-  if (status === "failed") return "Generation stopped";
-  if (status === "processing") return "Still generating";
+export const audiobookStatusLabel = (status: AudiobookPlaybackManifest["status"], available = 0, total = 0) => {
+  if (status === "completed") {
+    return total > 0 && available >= total
+      ? `All ${total} chapters are ready`
+      : available > 0
+        ? `Audio available · ${available} of ${total} chapters ready`
+        : "No audio available yet";
+  }
+  if (status === "paused") return `Generation paused · ${available} of ${total} chapters ready`;
+  if (status === "failed") return `Generation stopped · ${available} of ${total} chapters ready`;
+  if (status === "processing") return `Still generating · ${available} of ${total} chapters ready`;
   if (status === "pending") return "Preparing chapters";
   return "Not started";
+};
+
+export const audiobookBufferingStatus = (isBuffering: boolean, error: string | null) =>
+  isBuffering && !error
+    ? "Audio is buffering. Playback controls will be available as soon as it is ready."
+    : null;
+
+export const assignAudiobookAudioNode = (
+  audioRef: { current: HTMLAudioElement | null },
+  node: HTMLAudioElement | null,
+) => {
+  // React may detach and reattach callback refs during commits. Keep ref
+  // ownership bookkeeping-only; media teardown belongs to explicit actions.
+  audioRef.current = node;
+};
+
+export const ownsAudiobookReadingContext = (
+  context: { audiobookId?: string; sourceId?: string } | null | undefined,
+  owner: { audiobookId: string; sourceId: string } | null,
+) => Boolean(
+  context &&
+  owner &&
+  context.sourceId === owner.sourceId &&
+  context.audiobookId === owner.audiobookId,
+);
+
+export const resolveChapterResumePosition = (args: {
+  selectedChapterId: string;
+  savedChapterId: string | null;
+  savedPosition: number;
+  activeChapterId: string | null;
+  activePosition: number | null | undefined;
+}) => {
+  if (args.activeChapterId === args.selectedChapterId && args.activePosition != null) {
+    return Math.max(0, args.activePosition);
+  }
+  if (args.savedChapterId === args.selectedChapterId) {
+    return Math.max(0, args.savedPosition);
+  }
+  return 0;
+};
+
+export const resolveListeningQuestionPosition = (
+  mediaPosition: number | null | undefined,
+  renderedPosition: number,
+  refPosition: number,
+) => {
+  if (Number.isFinite(mediaPosition)) return Math.max(0, mediaPosition as number);
+  if (Number.isFinite(renderedPosition)) return Math.max(0, renderedPosition);
+  return Number.isFinite(refPosition) ? Math.max(0, refPosition) : 0;
 };
 
 const nextNarratableChapter = (
@@ -115,6 +173,7 @@ export default function AudiobookChapterPlayer({
   onManifestChange,
   onAudioDeleted,
 }: AudiobookChapterPlayerProps) {
+  const setReadingContext = useAudiobookStore((state) => state.setReadingContext);
   const [manifest, setManifest] = useState<AudiobookPlaybackManifest | null>(
     null,
   );
@@ -127,6 +186,7 @@ export default function AudiobookChapterPlayer({
   const [audioBlobUrl, setAudioBlobUrl] = useState<string | null>(null);
   const [isLoadingManifest, setIsLoadingManifest] = useState(true);
   const [isLoadingAudio, setIsLoadingAudio] = useState(false);
+  const [isBuffering, setIsBuffering] = useState(false);
   const [isPlaying, setIsPlaying] = useState(false);
   const [currentTime, setCurrentTime] = useState(0);
   const [duration, setDuration] = useState(0);
@@ -144,19 +204,15 @@ export default function AudiobookChapterPlayer({
   const mountedRef = useRef(true);
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const attachAudio = useCallback((node: HTMLAudioElement | null) => {
-    const previous = audioRef.current;
-    if (previous && previous !== node) {
-      previous.pause();
-      previous.removeAttribute("src");
-      previous.load();
-    }
-    audioRef.current = node;
+    assignAudiobookAudioNode(audioRef, node);
   }, []);
   useEffect(() => {
     mountedRef.current = true;
     return () => { mountedRef.current = false; };
   }, []);
   const manifestRef = useRef<AudiobookPlaybackManifest | null>(null);
+  const authHeadersRef = useRef(authHeaders);
+  authHeadersRef.current = authHeaders;
   const listenerStateRef = useRef(listenerState);
   const selectedChapterIdRef = useRef<string | null>(null);
   const pendingSeekRef = useRef(0);
@@ -164,6 +220,7 @@ export default function AudiobookChapterPlayer({
   const lastLocalSaveAtRef = useRef(0);
   const lastRemoteSaveAtRef = useRef(0);
   const audioBlobUrlRef = useRef<string | null>(null);
+  const audioBlobChapterIdRef = useRef<string | null>(null);
   const currentTimeRef = useRef(0);
   const durationRef = useRef(0);
 
@@ -200,7 +257,7 @@ export default function AudiobookChapterPlayer({
       if (!silent) setIsLoadingManifest(true);
       try {
         const response = await fetch(manifestEndpoint, {
-          headers: authHeaders(),
+          headers: authHeadersRef.current(),
           cache: "no-store",
         });
         if (!response.ok) {
@@ -213,16 +270,21 @@ export default function AudiobookChapterPlayer({
         const nextManifest =
           (await response.json()) as AudiobookPlaybackManifest;
         if (!mountedRef.current || deletedAudioRef.current) return;
-        const localProgress = loadLocalAudiobookProgress(fileName);
+        const activeRenderId = nextManifest.renderId || renderId;
+        const localProgress = loadLocalAudiobookProgress(
+          fileName,
+          undefined,
+          activeRenderId,
+        );
         const clientProgress = mergeAudiobookListenerState(
           listenerStateRef.current,
           localProgress,
-          nextManifest.renderId || renderId,
+          activeRenderId,
         );
         const mergedProgress = mergeAudiobookListenerState(
           nextManifest.listenerState,
           clientProgress,
-          nextManifest.renderId || renderId,
+          activeRenderId,
         );
         mergedProgress.progressPercent = calculateAudiobookProgress(
           nextManifest,
@@ -248,7 +310,6 @@ export default function AudiobookChapterPlayer({
       }
     }, [
       applyListenerState,
-      authHeaders,
       fileName,
       manifestEndpoint,
       onManifestChange,
@@ -298,25 +359,75 @@ export default function AudiobookChapterPlayer({
     [manifest, selectedChapterId],
   );
 
+  const readingContextOwnerRef = useRef<{ audiobookId: string; sourceId: string } | null>(null);
+
+  useEffect(() => {
+    const clearOwnedContext = () => {
+      const owner = readingContextOwnerRef.current;
+      const context = useAudiobookStore.getState().readingContextByNotebook[notebookId];
+      if (ownsAudiobookReadingContext(context, owner)) {
+        setReadingContext(notebookId, null);
+      }
+      readingContextOwnerRef.current = null;
+    };
+
+    if (!manifest || !selectedChapter) {
+      clearOwnedContext();
+      return;
+    }
+    const playbackPosition = getPlayableChapterPosition(manifest, selectedChapter.id);
+    if (!playbackPosition) {
+      clearOwnedContext();
+      return;
+    }
+    const owner = {
+      audiobookId: manifest.renderId || renderId || fileName,
+      sourceId,
+    };
+    setReadingContext(notebookId, {
+      audiobookId: owner.audiobookId,
+      sourceId,
+      bookTitle: title,
+      chapterId: selectedChapter.id,
+      chapterIndex: playbackPosition.chapterIndex,
+      chapterCount: playbackPosition.chapterCount,
+      chapterTitle: selectedChapter.title,
+      progressPercent: Math.round(listenerState.progressPercent),
+      isPlaying,
+    });
+    readingContextOwnerRef.current = owner;
+  }, [manifest, selectedChapter, notebookId, sourceId, title, renderId, fileName, listenerState.progressPercent, isPlaying, setReadingContext]);
+
   useEffect(() => {
     const audioUrl = selectedChapter?.audioUrl;
     if (!audioUrl) {
       setAudioBlobUrl(null);
       setIsPlaying(false);
+      setIsBuffering(false);
       return undefined;
     }
 
     const controller = new AbortController();
     const loadChapterAudio = async () => {
       setIsLoadingAudio(true);
+      setIsBuffering(false);
       setError(null);
-      setCurrentTime(0);
+      const activeAudio = audioRef.current;
+      const resumePosition = resolveChapterResumePosition({
+        selectedChapterId: selectedChapter.id,
+        savedChapterId: listenerStateRef.current.currentChapterId,
+        savedPosition: listenerStateRef.current.currentTimeSeconds,
+        activeChapterId: activeAudio?.currentSrc ? audioBlobChapterIdRef.current : null,
+        activePosition: activeAudio?.currentSrc ? activeAudio.currentTime : null,
+      });
+      pendingSeekRef.current = resumePosition;
+      setCurrentTime(resumePosition);
       setDuration(selectedChapter.durationSeconds || 0);
       try {
         const response = await fetch(
           resolveAudiobookApiUrl(audioUrl, API_BASE_URL),
           {
-            headers: authHeaders(),
+            headers: authHeadersRef.current(),
             signal: controller.signal,
           },
         );
@@ -332,7 +443,11 @@ export default function AudiobookChapterPlayer({
           URL.revokeObjectURL(audioBlobUrlRef.current);
         }
         audioBlobUrlRef.current = nextBlobUrl;
+        audioBlobChapterIdRef.current = selectedChapter.id;
         setAudioBlobUrl(nextBlobUrl);
+        // Blob creation does not mean the media element has buffered enough to
+        // play. Keep the user informed until the browser reports canplay.
+        setIsBuffering(true);
       } catch (audioError) {
         if (controller.signal.aborted) return;
         setError(
@@ -347,7 +462,7 @@ export default function AudiobookChapterPlayer({
 
     void loadChapterAudio();
     return () => controller.abort();
-  }, [authHeaders, selectedChapter?.audioUrl, selectedChapter?.durationSeconds]);
+  }, [selectedChapter?.id, selectedChapter?.audioUrl, selectedChapter?.durationSeconds]);
 
   const persistProgress = useCallback(
     (
@@ -401,7 +516,7 @@ export default function AudiobookChapterPlayer({
           method: "PUT",
           headers: {
             "Content-Type": "application/json",
-            ...authHeaders(),
+            ...authHeadersRef.current(),
           },
           body: JSON.stringify(nextState),
           keepalive: options.keepalive,
@@ -409,7 +524,7 @@ export default function AudiobookChapterPlayer({
       ).catch((saveError) => {
         console.warn("Audiobook progress sync failed", saveError);
       });
-    }, [applyListenerState, authHeaders, fileName, renderId],
+    }, [applyListenerState, fileName, renderId],
   );
 
   const openListeningQuestion = useCallback(() => {
@@ -427,23 +542,30 @@ export default function AudiobookChapterPlayer({
     if (!question || !currentManifest || !chapterId) return;
     const chapter = currentManifest.chapters.find((item) => item.id === chapterId);
     if (!chapter) return;
+    const playablePosition = getPlayableChapterPosition(currentManifest, chapter.id);
+    if (!playablePosition) return;
 
     queueAudioListeningQuestion({
       notebookId,
       sourceId,
       sourceTitle: formatDisplayTitle(title, currentManifest.title || "Audiobook"),
       chapterId: chapter.id,
+      chapterIndex: playablePosition.chapterIndex,
       chapterTitle: formatChapterTitle(chapter.title),
       pageStart: chapter.pageStart,
       pageEnd: chapter.pageEnd,
-      timeSeconds: currentTimeRef.current,
+      timeSeconds: resolveListeningQuestionPosition(
+        audioRef.current?.currentTime,
+        currentTime,
+        currentTimeRef.current,
+      ),
       durationSeconds: durationRef.current || chapter.durationSeconds || 0,
       question,
     });
     setAskQuestion("");
     setAskOpen(false);
     toast.success("Question sent to StudyPod chat");
-  }, [askQuestion, notebookId, sourceId, title]);
+  }, [askQuestion, currentTime, notebookId, sourceId, title]);
 
   useEffect(() => {
     const persistBeforeLeaving = () => {
@@ -466,7 +588,7 @@ export default function AudiobookChapterPlayer({
     setDeletingAudio(true);
     try {
       const response = await fetch(`${API_BASE_URL}/audiobook/books/${encodeURIComponent(fileName)}/audio`, {
-        method: "DELETE", headers: authHeaders(), credentials: "include",
+        method: "DELETE", headers: authHeadersRef.current(), credentials: "include",
       });
       if (!response.ok) throw new Error(response.status === 409
         ? "Cancel generation and wait for the worker to stop before deleting saved audio."
@@ -484,6 +606,7 @@ export default function AudiobookChapterPlayer({
       setAudioBlobUrl(null);
       setManifest(null);
       setIsPlaying(false);
+      setReadingContext(notebookId, null);
       onAudioDeleted?.();
       toast.success("Saved audio deleted. Your source is still available.");
     } catch (error) {
@@ -691,7 +814,7 @@ export default function AudiobookChapterPlayer({
           method: "POST",
           headers: {
             "Content-Type": "application/json",
-            ...authHeaders(),
+            ...authHeadersRef.current(),
           },
           body: JSON.stringify({
             chapterId: chapter.id,
@@ -727,7 +850,7 @@ export default function AudiobookChapterPlayer({
         `${API_BASE_URL}/audiobook/books/${encodeURIComponent(fileName)}/bookmarks/${encodeURIComponent(bookmarkId)}`,
         {
           method: "DELETE",
-          headers: authHeaders(),
+          headers: authHeadersRef.current(),
         },
       );
       if (!response.ok) throw new Error(await response.text());
@@ -830,7 +953,7 @@ export default function AudiobookChapterPlayer({
               {manifest.availableChapterCount}/{manifest.totalNarratableChapters}{" "}
               chapters ready
             </p>
-            <p>{statusLabel(manifest.status)}</p>
+            <p>{audiobookStatusLabel(manifest.status, manifest.availableChapterCount, manifest.totalNarratableChapters)}</p>
             <Button variant="ghost" size="sm" disabled={deletingAudio || manifest.status === "processing" || manifest.status === "pending"}
               onClick={deleteSavedAudio}>
               <Trash2 className="mr-1 h-3 w-3" />{deletingAudio ? "Deleting saved audio…" : "Delete saved audio"}
@@ -1043,8 +1166,8 @@ export default function AudiobookChapterPlayer({
                 </Button>
               </div>
               <p className="mt-2 text-[10px] leading-4 text-muted-foreground">
-                StudyPod will ground the answer to this book and use the current
-                chapter/page range until sentence-level audio timing is available.
+                Answers use available text from this book and point to a chapter
+                or page.
               </p>
             </form>
           )}
@@ -1053,6 +1176,11 @@ export default function AudiobookChapterPlayer({
             <p className="mt-3 rounded-lg bg-primary/5 px-3 py-2 text-center text-[11px] leading-5 text-muted-foreground">
               The next chapter is still generating. Playback will continue
               automatically when it is ready.
+            </p>
+          )}
+          {audiobookBufferingStatus(isBuffering, error) && (
+            <p role="status" className="mt-3 rounded-lg bg-primary/5 px-3 py-2 text-center text-[11px] leading-5 text-muted-foreground">
+              {audiobookBufferingStatus(isBuffering, error)}
             </p>
           )}
           {error && (
@@ -1198,8 +1326,13 @@ export default function AudiobookChapterPlayer({
         onLoadedMetadata={handleLoadedMetadata}
         onTimeUpdate={handleTimeUpdate}
         onPlay={() => setIsPlaying(true)}
+        onWaiting={() => setIsBuffering(true)}
+        onStalled={() => setIsBuffering(true)}
+        onCanPlay={() => setIsBuffering(false)}
+        onPlaying={() => setIsBuffering(false)}
         onPause={() => {
           setIsPlaying(false);
+          setIsBuffering(false);
           persistProgress({}, { forceRemote: true });
         }}
         onEnded={handleEnded}

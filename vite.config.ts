@@ -7,9 +7,9 @@ import { Agent } from "node:http";
 // https://vitejs.dev/config/
 export default defineConfig(async ({ mode }) => {
   const env = loadEnv(mode, process.cwd(), "");
+  const configuredApiPort = process.env.VITE_API_PORT || env.VITE_API_PORT;
   const explicit =
-    process.env.VITE_API_PORT ||
-    env.VITE_API_PORT ||
+    configuredApiPort ||
     process.env.PORT ||
     env.PORT ||
     "3001";
@@ -35,9 +35,11 @@ export default defineConfig(async ({ mode }) => {
   }
 
   async function resolveBackendPort(): Promise<string> {
-    const candidates = [explicit, "3001", "4000", "4001", "4002"].filter(
-      (value, index, all) => all.indexOf(value) === index,
-    );
+    const candidates = configuredApiPort
+      ? [explicit]
+      : [explicit, "3001", "4000", "4001", "4002"].filter(
+          (value, index, all) => all.indexOf(value) === index,
+        );
 
     for (const port of candidates) {
       if (await isPortListening(Number.parseInt(port, 10))) return port;

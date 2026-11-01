@@ -1,4 +1,4 @@
-import { concatenatePcmWav } from "./pcmWav";
+import { concatenatePcmWav, encodeSpeechPcmWav } from "./pcmWav";
 /**
  * Streaming TTS Generator - HYBRID VERSION
  *
@@ -269,7 +269,8 @@ class StreamingTTSGenerator {
       }
 
       // Optimize segments
-      const optimizedSegments = this.optimizeSegments(script.segments);
+      const optimizedSegments = this.optimizeSegments(script.segments)
+        .flatMap((segment) => this.splitLongSegment(segment));
       const totalSegments = optimizedSegments.length;
 
       onProgress({
@@ -400,7 +401,7 @@ class StreamingTTSGenerator {
         currentSegment: totalSegments,
         totalSegments,
         percentage: 100,
-        message: "High-quality podcast ready! Click play to listen.",
+        message: "Speech generated. Preparing your episode…",
         canPlay: true,
         usingKokoro: true,
       });
@@ -822,6 +823,7 @@ class StreamingTTSGenerator {
    * NEVER produces a corrupt multi-header WAV.
    */
   async combineAudios(enableStudioEQ: boolean = true): Promise<string | null> {
+    const assemblyRunId = this.runId;
     if (this.generatedAudios.length === 0) {
       if (this.usingKokoro) throw new Error("No generated audio is available to assemble");
       return null;
@@ -854,6 +856,7 @@ class StreamingTTSGenerator {
       const combined = await this.combineWavsProperly(
         validAudios,
         enableStudioEQ,
+        () => this.runId !== assemblyRunId,
       );
       const url = URL.createObjectURL(combined);
 
@@ -899,15 +902,18 @@ class StreamingTTSGenerator {
   private async combineWavsProperly(
     validAudios: GeneratedAudio[],
     enableStudioEQ: boolean,
+    isCancelled: () => boolean,
   ): Promise<Blob> {
     // Primary path: AudioContext decode + re-encode
     try {
-      return await this.combineViaAudioContext(validAudios, enableStudioEQ);
+      return await this.combineViaAudioContext(validAudios, enableStudioEQ, isCancelled);
     } catch (decodeError) {
+      if (isCancelled() || (decodeError instanceof DOMException && decodeError.name === "AbortError")) throw decodeError;
       console.warn(
         "[StreamingTTSGenerator] AudioContext decode failed, using manual PCM extraction:",
         decodeError,
       );
+      if (isCancelled()) throw new DOMException("Podcast audio assembly cancelled.", "AbortError");
       return this.combineViaPcmExtraction(validAudios);
     }
   }
@@ -918,6 +924,7 @@ class StreamingTTSGenerator {
   private async combineViaAudioContext(
     validAudios: GeneratedAudio[],
     enableStudioEQ: boolean,
+    isCancelled: () => boolean,
   ): Promise<Blob> {
     const audioContext = new AudioContext();
     const audioBuffers: AudioBuffer[] = [];
@@ -1029,7 +1036,7 @@ class StreamingTTSGenerator {
       }
 
       const renderedBuffer = await offlineCtx.startRendering();
-      const wavBlob = this.audioBufferToWav(renderedBuffer);
+      const wavBlob = await this.audioBufferToWav(renderedBuffer, isCancelled);
       console.log(
         `[StreamingTTSGenerator] Mastered via OfflineAudioContext: ${wavBlob.size} bytes`,
       );
@@ -1055,7 +1062,7 @@ class StreamingTTSGenerator {
         offset += buffer.length + pauseFrames[index];
       }
 
-      const wavBlob = this.audioBufferToWav(combinedBuffer);
+      const wavBlob = await this.audioBufferToWav(combinedBuffer, isCancelled);
       console.log(
         `[StreamingTTSGenerator] Combined flat: ${wavBlob.size} bytes`,
       );
@@ -1087,56 +1094,9 @@ class StreamingTTSGenerator {
   /**
    * Convert AudioBuffer to WAV Blob
    */
-  private audioBufferToWav(buffer: AudioBuffer): Blob {
-    const numChannels = buffer.numberOfChannels;
-    const sampleRate = buffer.sampleRate;
-    const format = 1; // PCM
-    const bitDepth = 16;
-
-    const bytesPerSample = bitDepth / 8;
-    const blockAlign = numChannels * bytesPerSample;
-
-    const dataLength = buffer.length * blockAlign;
-    const bufferLength = 44 + dataLength;
-
-    const arrayBuffer = new ArrayBuffer(bufferLength);
-    const view = new DataView(arrayBuffer);
-
-    // WAV header
-    const writeString = (offset: number, str: string) => {
-      for (let i = 0; i < str.length; i++) {
-        view.setUint8(offset + i, str.charCodeAt(i));
-      }
-    };
-
-    writeString(0, "RIFF");
-    view.setUint32(4, bufferLength - 8, true);
-    writeString(8, "WAVE");
-    writeString(12, "fmt ");
-    view.setUint32(16, 16, true); // fmt chunk size
-    view.setUint16(20, format, true);
-    view.setUint16(22, numChannels, true);
-    view.setUint32(24, sampleRate, true);
-    view.setUint32(28, sampleRate * blockAlign, true);
-    view.setUint16(32, blockAlign, true);
-    view.setUint16(34, bitDepth, true);
-    writeString(36, "data");
-    view.setUint32(40, dataLength, true);
-
-    // Write audio data
-    let offset = 44;
-    for (let i = 0; i < buffer.length; i++) {
-      for (let channel = 0; channel < numChannels; channel++) {
-        const sample = Math.max(
-          -1,
-          Math.min(1, buffer.getChannelData(channel)[i]),
-        );
-        const intSample = sample < 0 ? sample * 0x8000 : sample * 0x7fff;
-        view.setInt16(offset, intSample, true);
-        offset += 2;
-      }
-    }
-
+  private async audioBufferToWav(buffer: AudioBuffer, isCancelled: () => boolean): Promise<Blob> {
+    const channels = Array.from({ length: buffer.numberOfChannels }, (_, channel) => buffer.getChannelData(channel));
+    const arrayBuffer = await encodeSpeechPcmWav(channels, buffer.sampleRate, isCancelled);
     return new Blob([arrayBuffer], { type: "audio/wav" });
   }
 
@@ -1178,6 +1138,47 @@ class StreamingTTSGenerator {
     return optimized;
   }
 
+  /** Split long narration at sentence boundaries, retaining every character and speaker. */
+  private splitLongSegment(segment: PodcastSegment, maxLength = 420): PodcastSegment[] {
+    if (segment.text.length <= maxLength) return [segment];
+
+    const sentences: string[] = [];
+    const boundary = /[.!?](?:["')\]]*)?(?:\s+|$)/g;
+    let start = 0;
+    let match: RegExpExecArray | null;
+    while ((match = boundary.exec(segment.text))) {
+      sentences.push(segment.text.slice(start, match.index + match[0].length));
+      start = match.index + match[0].length;
+    }
+    if (start < segment.text.length) sentences.push(segment.text.slice(start));
+
+    const chunks: string[] = [];
+    let chunk = "";
+    for (const sentence of sentences) {
+      if (sentence.length > maxLength) {
+        if (chunk) chunks.push(chunk);
+        chunk = "";
+        let offset = 0;
+        while (offset < sentence.length) {
+          let end = Math.min(offset + maxLength, sentence.length);
+          if (end < sentence.length) {
+            const whitespace = sentence.lastIndexOf(" ", end - 1);
+            if (whitespace > offset) end = whitespace + 1;
+          }
+          chunks.push(sentence.slice(offset, end));
+          offset = end;
+        }
+      } else if (chunk.length + sentence.length > maxLength) {
+        chunks.push(chunk);
+        chunk = sentence;
+      } else {
+        chunk += sentence;
+      }
+    }
+    if (chunk) chunks.push(chunk);
+    return chunks.map((text) => ({ ...segment, text }));
+  }
+
   private async synthesizeWithRetry(
     workerManager: TTSWorkerManager,
     text: string,
@@ -1187,16 +1188,40 @@ class StreamingTTSGenerator {
     onRetry: () => void,
   ): Promise<SynthesisResult> {
     let lastError: unknown;
+    let synthesisAttempts = 0;
+    let initializationRetries = 0;
 
-    for (let attempt = 1; attempt <= 2; attempt += 1) {
+    while (synthesisAttempts < 2) {
+      if (!workerManager.isWorkerReady()) {
+        try {
+          await workerManager.initialize();
+          if (!workerManager.isWorkerReady()) {
+            throw new Error("Worker initialization completed without becoming ready");
+          }
+        } catch (error) {
+          if (this.shouldCancel) throw error;
+          lastError = error;
+          if (initializationRetries >= 1) throw error;
+          initializationRetries += 1;
+          onRetry();
+          await new Promise((resolve) => setTimeout(resolve, 250));
+          if (this.shouldCancel) throw error;
+          continue;
+        }
+      }
+
+      if (this.shouldCancel) throw new Error("Cancelled");
+      synthesisAttempts += 1;
       try {
+        // A timeout or worker-level failure disposes the worker. Recreate it
+        // before retrying (or moving on to the next chunk).
         return await workerManager.synthesize(text, voice, speed, onProgress);
       } catch (error) {
         // Cancellation rejects the pending worker request. Never retry that run,
         // including when cancellation arrives during the retry backoff.
         if (this.shouldCancel) throw error;
         lastError = error;
-        if (attempt < 2) {
+        if (synthesisAttempts < 2) {
           onRetry();
           await new Promise((resolve) => setTimeout(resolve, 250));
           if (this.shouldCancel) throw error;

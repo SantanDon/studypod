@@ -7,6 +7,7 @@ import {
   buildBookResponse,
   cleanPlainText,
   displayTitleFromFileName,
+  extractEpubChapters,
   extractBookFromFile,
   getChapterTextFromManifest,
   inferPdfMetadata,
@@ -19,6 +20,7 @@ import {
   splitPdfPagesIntoChapters,
   splitTextIntoChapters,
   stripHtmlToText,
+  validatePdfExtractionCompleteness,
   uniqueSafeFileName,
 } from "../services/audiobookBookService.js";
 
@@ -51,6 +53,110 @@ afterEach(() => {
 });
 
 describe("audiobookBookService", () => {
+  it("admits text PDFs with complete extraction using the established 90% coverage bar", () => {
+    const source = "A complete paragraph of extracted source text. ".repeat(30);
+    const result = validatePdfExtractionCompleteness(source, [{ text: source }]);
+
+    expect(result.coverage).toBe(1);
+    expect(() => validatePdfExtractionCompleteness(source, [
+      { text: source.slice(0, Math.floor(source.length * 0.89)) },
+    ])).toThrow(expect.objectContaining({
+      status: 400,
+      message: expect.stringMatching(/extraction appears incomplete.*OCR it/i),
+    }));
+  });
+
+  it("rejects scanned and unusably short PDFs with actionable OCR guidance", () => {
+    expect(() => validatePdfExtractionCompleteness("\f\n\n", [])).toThrow(expect.objectContaining({
+      status: 400,
+      message: expect.stringMatching(/Scanned PDFs need OCR/i),
+    }));
+    expect(() => validatePdfExtractionCompleteness("A short selectable phrase.", [
+      { text: "A short selectable phrase." },
+    ])).toThrow(/no usable selectable text.*OCR/i);
+  });
+
+  it("keeps Gutenberg front matter and real book titles while excluding navigation and license text", async () => {
+    const entries = [
+      { id: "contents", href: "contents.xhtml", title: "Contents" },
+      { id: "intro", href: "intro.xhtml", title: "Introduction and Analysis" },
+      { id: "persons", href: "persons.xhtml", title: "Persons" },
+      ...Array.from({ length: 10 }, (_, index) => ({
+        id: `book-${index + 1}`,
+        href: `book-${index + 1}.xhtml`,
+        title: `Chapter ${index + 4}`,
+      })),
+      { id: "license", href: "license.xhtml", title: "Full Project Gutenberg License" },
+    ];
+    const bodies = {
+      contents: "<h1>Contents</h1><p>Book I ... 1</p><p>Book II ... 20</p>",
+      intro: "<h1>Introduction and Analysis</h1><p>Historical editorial matter.</p>",
+      persons: "<h1>Persons</h1><p>Socrates and his companions.</p>",
+      ...Object.fromEntries(Array.from({ length: 10 }, (_, index) => [
+        `book-${index + 1}`,
+        `<h1>BOOK ${["I", "II", "III", "IV", "V", "VI", "VII", "VIII", "IX", "X"][index]}</h1><p>Original text ${index + 1}.</p>`,
+      ])),
+      license: "<h1>Full Project Gutenberg License</h1><p>Terms and conditions follow.</p>",
+    };
+    const epub = {
+      toc: entries.map(({ id, href, title }) => ({ id, href, title })),
+      flow: entries.map(({ id, href }) => ({ id, href })),
+      getChapter: async (id) => bodies[id],
+    };
+
+    const chapters = await extractEpubChapters(epub);
+    expect(chapters.map(({ title }) => title)).toEqual([
+      "Introduction and Analysis",
+      "Persons",
+      "BOOK I", "BOOK II", "BOOK III", "BOOK IV", "BOOK V",
+      "BOOK VI", "BOOK VII", "BOOK VIII", "BOOK IX", "BOOK X",
+    ]);
+    expect(chapters.map(({ order }) => order)).toEqual(
+      Array.from({ length: 12 }, (_, index) => index + 1),
+    );
+    expect(chapters[0].text).toContain("Historical editorial matter.");
+    expect(chapters[1].text).toContain("Socrates and his companions.");
+    expect(chapters[2].text).toContain("Original text 1.");
+    expect(chapters.some(({ text }) => /contents|terms and conditions/i.test(text))).toBe(false);
+  });
+
+  it("reassembles Gutenberg flow fragments and excludes the trademarked license heading", async () => {
+    const flow = [
+      { id: "header", title: "Chapter 1" },
+      { id: "intro", title: "INTRODUCTION AND ANALYSIS." },
+      ...Array.from({ length: 8 }, (_, index) => ({ id: `intro-${index}`, title: `Chapter ${index + 3}` })),
+      { id: "persons", title: "THE REPUBLIC." },
+      ...["I", "II", "III", "IV", "V", "VI", "VII", "VIII", "IX", "X"].map((book) => ({ id: `book-${book}`, title: `BOOK ${book}.` })),
+      { id: "notes-license", title: "THE FULL PROJECT GUTENBERG™ LICENSE" },
+    ];
+    const bodies = {
+      header: "The Project Gutenberg eBook of The Republic\n*** START OF THE PROJECT GUTENBERG EBOOK THE REPUBLIC ***\nContents\nINTRODUCTION AND ANALYSIS.\nBOOK I.\nBOOK II.\nBOOK III.\nBOOK IV.\nBOOK V.\nBOOK VI.\nBOOK VII.\nBOOK VIII.\nBOOK IX.\nBOOK X.",
+      intro: "INTRODUCTION AND ANALYSIS.\nFirst source fragment.",
+      ...Object.fromEntries(Array.from({ length: 8 }, (_, index) => [`intro-${index}`, `Unheaded source continuation ${index + 1}.`])),
+      persons: "THE REPUBLIC.\nPERSONS OF THE DIALOGUE.\nSocrates.",
+      ...Object.fromEntries(["I", "II", "III", "IV", "V", "VI", "VII", "VIII", "IX", "X"].map((book) => [`book-${book}`, `BOOK ${book}.\nBook ${book} source text.`])),
+      "notes-license": "Transcriber’s Notes\nA public-domain cover note.\n*** END OF THE PROJECT GUTENBERG EBOOK THE REPUBLIC ***\nTHE FULL PROJECT GUTENBERG™ LICENSE\nGeneral Terms of Use and Redistributing Project Gutenberg-tm electronic works.",
+    };
+    const epub = {
+      toc: flow.map(({ id, title }) => ({ id, title })),
+      flow,
+      getChapter: async (id) => `<p>${bodies[id].replace(/\n/g, "</p><p>")}</p>`,
+    };
+
+    const chapters = await extractEpubChapters(epub);
+    expect(chapters.map(({ title }) => title)).toEqual([
+      "INTRODUCTION AND ANALYSIS.", "THE REPUBLIC.",
+      ...["I", "II", "III", "IV", "V", "VI", "VII", "VIII", "IX", "X"].map((book) => `BOOK ${book}.`),
+      "Transcriber’s Notes",
+    ]);
+    expect(chapters[0].text).toContain("First source fragment.");
+    expect(chapters[0].text).toContain("Unheaded source continuation 1.");
+    expect(chapters[0].text).toContain("Unheaded source continuation 8.");
+    expect(chapters[0].text.indexOf("Unheaded source continuation 1.")).toBeLessThan(chapters[0].text.indexOf("Unheaded source continuation 8."));
+    expect(chapters.at(-1).text).toContain("A public-domain cover note.");
+    expect(chapters.some(({ title, text }) => /LICENSE/i.test(title) || /General Terms of Use/i.test(text))).toBe(false);
+  });
+
   it("infers title and author from a plain-text title page", () => {
     expect(
       inferTextBookMetadata(

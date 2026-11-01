@@ -28,6 +28,14 @@ describe("Groq brief rate-window recovery", () => {
   const success = () => ({ ok: true, json: async () => ({ choices: [{ message: { content: "Recovered grounded answer" } }] }) });
   afterEach(() => { vi.useRealTimers(); vi.unstubAllEnvs(); vi.unstubAllGlobals(); vi.clearAllMocks(); });
 
+  it("forwards structured discussion budgets to managed chat providers", async () => {
+    const { dispatchToTitan } = await setup();
+    const fetchMock = vi.fn().mockResolvedValue(success());
+    vi.stubGlobal("fetch", fetchMock);
+    await dispatchToTitan({ ...request, maxOutputTokens: 4096, jsonMode: true });
+    expect(JSON.parse(fetchMock.mock.calls[0][1].body)).toMatchObject({ max_tokens: 4096, response_format: { type: "json_object" } });
+  });
+
   it("uses the explicit subsecond request window instead of the full token refill", async () => {
     const { dispatchToTitan, getAvailableProviders } = await setup();
     vi.useFakeTimers();
@@ -91,6 +99,16 @@ describe("Groq brief rate-window recovery", () => {
     vi.stubGlobal("fetch", fetchMock);
     await expect(dispatchToTitan(request)).rejects.toMatchObject({ code: "PROVIDER_UNAVAILABLE" });
     expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("logs provider failure status without logging provider response bodies", async () => {
+    const { dispatchToTitan } = await setup();
+    const fetchMock = vi.fn(async () => failure("invalid key sk-secret-fixture", {}, 401));
+    vi.stubGlobal("fetch", fetchMock);
+    await expect(dispatchToTitan(request)).rejects.toMatchObject({ code: "PROVIDER_UNAVAILABLE" });
+    const warningText = log.warn.mock.calls.flat().join(" ");
+    expect(warningText).toContain("failed with status 401");
+    expect(warningText).not.toContain("sk-secret-fixture");
   });
 
   it("does not spend the remaining request budget on a rate wait", async () => {
@@ -409,9 +427,8 @@ describe("Titan provider configuration", () => {
     expect(log.warn).toHaveBeenCalledWith(
       expect.stringContaining("retry after ~63s"),
     );
-    expect(log.warn).toHaveBeenCalledWith(
-      expect.stringContaining("Daily provider allowance exhausted"),
-    );
+    expect(log.warn).toHaveBeenCalledWith(expect.stringContaining("failed with status 429"));
+    expect(log.warn.mock.calls.flat().join(" ")).not.toContain("Daily provider allowance exhausted");
   });
 
   it("fits grounded chat output inside the configured provider request budget", async () => {

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { concatenatePcmWav } from '@/lib/tts/pcmWav';
+import { concatenatePcmWav, encodeSpeechPcmWav, selectSpeechPcmSampleRate } from '@/lib/tts/pcmWav';
 function wav(values: number[], { format = 3, bits = 32, rate = 24000, channels = 1 } = {}) {
     const bytes = values.length * bits / 8;
     const buffer = new ArrayBuffer(44 + bytes);
@@ -27,6 +27,18 @@ function wav(values: number[], { format = 3, bits = 32, rate = 24000, channels =
 }
 const samples = (buffer: ArrayBuffer) => { const v = new DataView(buffer); return Array.from({ length: (buffer.byteLength - 44) / 2 }, (_, i) => v.getInt16(44 + i * 2, true)); };
 describe('podcast WAV fallback integrity', () => {
+    it('keeps normal speech at 24 kHz and lowers long output only enough to fit', async () => {
+        const normal = await encodeSpeechPcmWav([new Float32Array(48000)], 48000);
+        expect(new DataView(normal).getUint32(24, true)).toBe(24000);
+        const thirtyMinutesOf48k = 30 * 60 * 48000;
+        expect(selectSpeechPcmSampleRate(48000, thirtyMinutesOf48k)).toBe(12000);
+        expect(44 + Math.round(thirtyMinutesOf48k * 12000 / 48000) * 2).toBeLessThan(48 * 1024 * 1024);
+    });
+    it('allows long WAV encoding to be cancelled cooperatively', async () => {
+        let checks = 0;
+        await expect(encodeSpeechPcmWav([new Float32Array(40000)], 24000, () => ++checks > 1))
+            .rejects.toMatchObject({ name: 'AbortError' });
+    });
     it('preserves every signed PCM16 sample exactly', () => {
         const values = Array.from({ length: 65536 }, (_, i) => i - 32768);
         expect(samples(concatenatePcmWav([{ buffer: wav(values, { format: 1, bits: 16 }) }]))).toEqual(values);
@@ -36,6 +48,13 @@ describe('podcast WAV fallback integrity', () => {
         expect(new DataView(result).getUint16(20, true)).toBe(1);
         expect(new DataView(result).getUint16(34, true)).toBe(16);
         expect(samples(result)).toEqual([0, 16384, -16384, 32767, -32768]);
+    });
+    it('downmixes stereo and resamples 48 kHz speech to 24 kHz mono PCM', () => {
+        const result = concatenatePcmWav([{ buffer: wav([1, -1, 0.5, 0.5], { rate: 48000, channels: 2 }) }]);
+        const view = new DataView(result);
+        expect(view.getUint16(22, true)).toBe(1);
+        expect(view.getUint32(24, true)).toBe(24000);
+        expect(samples(result)).toEqual([8192]);
     });
     it('joins different supported sample formats in the original order', () => {
         const result = concatenatePcmWav([{ buffer: wav([0.5]) }, { buffer: wav([-16384], { format: 1, bits: 16 }) }]);

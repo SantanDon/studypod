@@ -6,6 +6,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import SourcesSidebar from './SourcesSidebar';
 import ChatArea from './ChatArea';
 import { Citation } from '@/types/message';
+import { SOURCE_LEARNING_QUESTION_EVENT, type SourceLearningQuestionRequest } from '@/lib/sources/sourceLearningQuestion';
 import {
   AUDIO_LISTENING_QUESTION_EVENT,
   type AudioListeningQuestionRequest,
@@ -90,9 +91,15 @@ const MobileNotebookTabs = ({
     const onAudioTool = (event: Event) => {
       if ((event as CustomEvent<{ notebookId?: string }>).detail?.notebookId === notebookId) setActiveTab('studio');
     };
+    const onLearningQuestion = (event: Event) => {
+      const request = (event as CustomEvent<SourceLearningQuestionRequest>).detail;
+      if (request?.notebookId === notebookId) setActiveTab('chat');
+    };
+    window.addEventListener(SOURCE_LEARNING_QUESTION_EVENT, onLearningQuestion);
     window.addEventListener(AUDIO_LISTENING_QUESTION_EVENT, onAudioQuestion);
     window.addEventListener(OPEN_STUDIO_AUDIO_EVENT, onAudioTool);
     return () => {
+      window.removeEventListener(SOURCE_LEARNING_QUESTION_EVENT, onLearningQuestion);
       window.removeEventListener(AUDIO_LISTENING_QUESTION_EVENT, onAudioQuestion);
       window.removeEventListener(OPEN_STUDIO_AUDIO_EVENT, onAudioTool);
     };

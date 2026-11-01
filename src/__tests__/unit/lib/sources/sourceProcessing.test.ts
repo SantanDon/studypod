@@ -1,6 +1,8 @@
 import { describe, expect, it } from 'vitest';
 import {
   buildSourceProcessingError,
+  getInitialSourceProcessingState,
+  getPendingEbookRecoveryUpdates,
   isSourceUsableForGroundedChat,
   isSourceUsableForGroundedWork,
   parseSourceProcessingMetadata,
@@ -62,6 +64,66 @@ describe('source processing contract', () => {
     expect(shouldSkipClientSemanticIndexing(757_010, 250_000)).toBe(true);
     expect(shouldSkipClientSemanticIndexing(250_000, 250_000)).toBe(false);
     expect(shouldSkipClientSemanticIndexing(249_999, 250_000)).toBe(false);
+  });
+
+  it('makes pre-extracted ebook imports available without claiming semantic indexing completed', () => {
+    const state = getInitialSourceProcessingState(
+      'ebook',
+      'Full chapter text',
+      { chapters: [{ title: 'Book I' }], source: 'gutenberg' },
+    );
+
+    expect(state.processing_status).toBe('degraded');
+    expect(state.metadata).toMatchObject({
+      chapters: [{ title: 'Book I' }],
+      source: 'gutenberg',
+      processingStage: 'degraded',
+      processingError: {
+        code: 'SOURCE_INDEXING_SKIPPED_IMPORT',
+        retryable: false,
+      },
+      indexingSkipped: true,
+      indexingStrategy: 'keyword_only',
+      contentLength: 17,
+    });
+    expect(isSourceUsableForGroundedWork({
+      type: 'ebook',
+      content: 'Full chapter text',
+      processing_status: state.processing_status,
+      metadata: state.metadata,
+    })).toBe(true);
+  });
+
+  it('leaves empty ebooks pending and respects explicit terminal states', () => {
+    expect(getInitialSourceProcessingState('ebook', '', {}, 'pending').processing_status).toBe('pending');
+    expect(getInitialSourceProcessingState('ebook', 'text', {}, 'failed').processing_status).toBe('failed');
+    expect(getInitialSourceProcessingState('pdf', 'text', {}, 'pending').processing_status).toBe('pending');
+  });
+
+  it('recovers existing pending ebook text through a metadata-preserving retry update', () => {
+    const updates = getPendingEbookRecoveryUpdates({
+      type: 'ebook',
+      content: 'Existing chapter text',
+      processing_status: 'pending',
+      metadata: JSON.stringify({ chapters: [{ title: 'Book I' }], source: 'gutenberg' }),
+    });
+
+    expect(updates).toMatchObject({
+      processing_status: 'degraded',
+      metadata: {
+        chapters: [{ title: 'Book I' }],
+        source: 'gutenberg',
+        indexingSkipped: true,
+        indexingStrategy: 'keyword_only',
+        processingError: { code: 'SOURCE_INDEXING_SKIPPED_IMPORT' },
+      },
+    });
+    expect(getPendingEbookRecoveryUpdates({
+      type: 'pdf', content: 'text', processing_status: 'pending',
+    })).toBeNull();
+    expect(getPendingEbookRecoveryUpdates({
+      type: 'ebook', content: '', processing_status: 'pending',
+    })).toBeNull();
   });
 
   it('parses serialized metadata and creates structured retry errors', () => {

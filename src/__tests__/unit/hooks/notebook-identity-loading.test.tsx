@@ -5,13 +5,13 @@ import { useNotebooks } from '@/hooks/useNotebooks';
 
 const state = vi.hoisted(() => ({
   loading: true, userId: null as string | null, guestId: null as string | null,
-  cloud: vi.fn(), local: vi.fn(),
+  cloud: vi.fn(), local: vi.fn(), create: vi.fn(),
 }));
 vi.mock('@/hooks/useAuth', () => ({ useAuth: () => ({ loading: state.loading, session: state.userId ? { access_token: 'COOKIE_SESSION' } : null }) }));
 vi.mock('@/hooks/useAuthState', () => ({ useAuthState: () => ({ user: state.userId ? { id: state.userId } : null, isSignedIn: !!state.userId }) }));
 vi.mock('@/hooks/useGuest', () => ({ useGuest: () => ({ guestId: state.guestId, isGuest: !!state.guestId, incrementUsage: vi.fn() }) }));
-vi.mock('@/hooks/useSyncTrigger', () => ({ useSyncTrigger: () => ({ triggerSync: vi.fn() }) }));
-vi.mock('@/services/apiService', () => ({ ApiService: { fetchNotebooks: state.cloud } }));
+vi.mock('@/hooks/useSyncTrigger', () => ({ useSyncTrigger: () => ({ triggerSync: vi.fn().mockResolvedValue(undefined) }) }));
+vi.mock('@/services/apiService', () => ({ ApiService: { fetchNotebooks: state.cloud, createNotebook: state.create } }));
 vi.mock('@/integrations/local/localNotebookStore', () => ({ localNotebookStore: { getNotebooks: state.local } }));
 
 const clients: QueryClient[] = [];
@@ -23,7 +23,7 @@ const open = () => {
 afterEach(() => { cleanup(); clients.splice(0).forEach(client => client.clear()); });
 beforeEach(() => {
   state.loading = true; state.userId = null; state.guestId = null;
-  state.cloud.mockReset(); state.local.mockReset();
+  state.cloud.mockReset(); state.local.mockReset(); state.create.mockReset();
 });
 
 describe('notebook identity hydration', () => {
@@ -61,5 +61,16 @@ describe('notebook identity hydration', () => {
     const view = open();
     await waitFor(() => expect(view.result.current.isLoading).toBe(false));
     expect(view.result.current.notebooks).toEqual([]);
+  });
+  it('adds a newly created owner notebook to the active list before refetch settles', async () => {
+    state.loading = false; state.userId = 'synthetic-owner';
+    state.cloud.mockResolvedValueOnce([]).mockImplementation(() => new Promise(() => {}));
+    state.create.mockResolvedValue({ id: 'new-notebook', userId: 'synthetic-owner', title: 'Untitled' });
+    const view = open();
+    await waitFor(() => expect(view.result.current.isLoading).toBe(false));
+
+    act(() => view.result.current.createNotebook({ title: 'Untitled' }));
+    await waitFor(() => expect(view.result.current.notebooks.some((notebook: Record<string, unknown>) => notebook.id === 'new-notebook')).toBe(true));
+    expect(view.result.current.notebooks[0]).toMatchObject({ id: 'new-notebook', user_id: 'synthetic-owner' });
   });
 });

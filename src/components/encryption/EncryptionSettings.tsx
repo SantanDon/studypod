@@ -14,6 +14,9 @@ import { SecurityLogs } from './SecurityLogs';
 import { MfaSettings } from './MfaSettings';
 import { DeveloperSettings } from '../settings/DeveloperSettings';
 import { ChatGPTSettings } from '../settings/ChatGPTSettings';
+import { LocalInferenceSettings } from '../settings/LocalInferenceSettings';
+import { CloudInferenceSettings } from '../settings/CloudInferenceSettings';
+import { PersonalProviderConnection } from '../settings/PersonalProviderConnection';
 import { Shield, Cloud, Download, ScrollText, Code2, Sparkles } from 'lucide-react';
 
 export function EncryptionSettings() {
@@ -29,34 +32,34 @@ export function EncryptionSettings() {
       </div>
 
       <Tabs value={activeTab} onValueChange={setActiveTab} className="space-y-6">
-        <TabsList className="grid w-full grid-cols-7">
-          <TabsTrigger value="sync" className="flex items-center gap-2">
+        <TabsList className="grid h-auto w-full grid-cols-2 sm:grid-cols-4 lg:grid-cols-7">
+          <TabsTrigger value="sync" aria-label="Sync" className="flex h-auto min-w-0 flex-col items-center gap-1 px-2 py-2 text-xs sm:flex-row sm:gap-2 sm:text-sm">
             <Cloud className="w-4 h-4" />
-            <span className="hidden sm:inline">Sync</span>
+            <span>Sync</span>
           </TabsTrigger>
-          <TabsTrigger value="security" className="flex items-center gap-2">
+          <TabsTrigger value="security" aria-label="Security" className="flex h-auto min-w-0 flex-col items-center gap-1 px-2 py-2 text-xs sm:flex-row sm:gap-2 sm:text-sm">
             <Shield className="w-4 h-4" />
-            <span className="hidden sm:inline">Security</span>
+            <span>Security</span>
           </TabsTrigger>
-          <TabsTrigger value="selective" className="flex items-center gap-2">
+          <TabsTrigger value="selective" aria-label="Selective" className="flex h-auto min-w-0 flex-col items-center gap-1 px-2 py-2 text-xs sm:flex-row sm:gap-2 sm:text-sm">
             <Shield className="w-4 h-4" />
-            <span className="hidden sm:inline">Selective</span>
+            <span>Selective</span>
           </TabsTrigger>
-          <TabsTrigger value="backup" className="flex items-center gap-2">
+          <TabsTrigger value="backup" aria-label="Backup" className="flex h-auto min-w-0 flex-col items-center gap-1 px-2 py-2 text-xs sm:flex-row sm:gap-2 sm:text-sm">
             <Download className="w-4 h-4" />
-            <span className="hidden sm:inline">Backup</span>
+            <span>Backup</span>
           </TabsTrigger>
-          <TabsTrigger value="logs" className="flex items-center gap-2">
+          <TabsTrigger value="logs" aria-label="Logs" className="flex h-auto min-w-0 flex-col items-center gap-1 px-2 py-2 text-xs sm:flex-row sm:gap-2 sm:text-sm">
             <ScrollText className="w-4 h-4" />
-            <span className="hidden sm:inline">Logs</span>
+            <span>Logs</span>
           </TabsTrigger>
-          <TabsTrigger value="models" className="flex items-center gap-2">
+          <TabsTrigger value="models" aria-label="Models" className="flex h-auto min-w-0 flex-col items-center gap-1 px-2 py-2 text-xs sm:flex-row sm:gap-2 sm:text-sm">
             <Sparkles className="w-4 h-4" />
-            <span className="hidden sm:inline">Models</span>
+            <span>Models</span>
           </TabsTrigger>
-          <TabsTrigger value="developer" className="flex items-center gap-2">
+          <TabsTrigger value="developer" aria-label="Developer" className="flex h-auto min-w-0 flex-col items-center gap-1 px-2 py-2 text-xs sm:flex-row sm:gap-2 sm:text-sm">
             <Code2 className="w-4 h-4" />
-            <span className="hidden sm:inline">Developer</span>
+            <span>Developer</span>
           </TabsTrigger>
         </TabsList>
 
@@ -126,6 +129,9 @@ export function EncryptionSettings() {
 
         <TabsContent value="models" className="space-y-6">
           <ChatGPTSettings />
+          <LocalInferenceSettings />
+          <PersonalProviderConnection />
+          <CloudInferenceSettings />
         </TabsContent>
 
       </Tabs>

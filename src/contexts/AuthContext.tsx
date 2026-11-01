@@ -2,6 +2,7 @@ import {
   useEffect,
   useState,
   useCallback,
+  useRef,
   ReactNode,
 } from "react";
 import { AuthContext, AuthContextType } from "./AuthContextInstance";
@@ -10,6 +11,7 @@ import { localStorageService } from "@/services/localStorageService";
 import { useEncryptionStore } from "@/stores/encryptionStore";
 import { safeGetItem, safeParseJSON } from "@/lib/utils/contextUtils";
 import { ApiService } from "@/services/apiService";
+import { clearPersonalProviderConnection } from "@/lib/ai/personalProviderContext";
 
 
 interface AuthProviderProps {
@@ -23,9 +25,12 @@ export const AuthProvider = ({ children }: AuthProviderProps) => {
   const [error, setError] = useState<string | null>(null);
   const [mfaRequired, setMfaRequired] = useState(false);
   const [mfaToken, setMfaToken] = useState<string | null>(null);
+  const authUserIdRef = useRef<string | null>(null);
 
   const updateAuthState = useCallback(
     (newUser: LocalUser | null, newSession: LocalSession | null) => {
+      if (authUserIdRef.current && authUserIdRef.current !== (newUser?.id ?? null)) clearPersonalProviderConnection();
+      authUserIdRef.current = newUser?.id ?? null;
       console.log(
         "AuthContext: Updating auth state:",
         newUser?.email || newUser?.displayName || "No user",
@@ -38,6 +43,8 @@ export const AuthProvider = ({ children }: AuthProviderProps) => {
   );
 
   const clearAuthState = useCallback(() => {
+    clearPersonalProviderConnection();
+    authUserIdRef.current = null;
     console.log("AuthContext: Clearing auth state");
     setUser(null);
     setSession(null);
@@ -121,6 +128,7 @@ export const AuthProvider = ({ children }: AuthProviderProps) => {
   };
 
   const signOut = useCallback(async () => {
+    clearPersonalProviderConnection();
     try {
       console.log("AuthContext: Starting logout process...");
 

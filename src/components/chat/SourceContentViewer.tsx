@@ -2,6 +2,8 @@
 import { useEffect, useRef, useState } from 'react';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Citation } from '@/types/message';
+import { Button } from '@/components/ui/button';
+import { createSourceLearningQuestion, queueSourceLearningQuestion, type SourceLearningAction } from '@/lib/sources/sourceLearningQuestion';
 import {
   Accordion,
   AccordionContent,
@@ -10,6 +12,7 @@ import {
 } from '@/components/ui/accordion';
 
 interface SourceContentViewerProps {
+  notebookId?: string;
   citation: Citation | null;
   sourceContent?: string;
   sourceSummary?: string;
@@ -29,6 +32,7 @@ interface SourceContentViewerProps {
 }
 
 const SourceContentViewer = ({ 
+  notebookId,
   citation, 
   sourceContent, 
   sourceSummary,
@@ -259,6 +263,21 @@ const SourceContentViewer = ({
             </a>
           )}
         </div>
+        {!isOpenedFromSourceList && notebookId && createSourceLearningQuestion(notebookId, citation, sourceContent, 'explain') && (
+          <div className="mt-3 space-y-2" aria-label="Learn from this passage">
+            <p className="text-xs text-slate-500">Explore the highlighted passage · lines {citation.chunk_lines_from}–{citation.chunk_lines_to}</p>
+            <div className="flex flex-wrap gap-2">
+              {(['explain', 'practice'] as SourceLearningAction[]).map((action) => (
+                <Button key={action} variant="outline" size="sm" className="h-auto min-h-9 whitespace-normal border-blue-200 text-blue-700 hover:bg-blue-50" onClick={() => {
+                  const request = createSourceLearningQuestion(notebookId, citation, sourceContent, action);
+                  if (request) queueSourceLearningQuestion(request);
+                }}>
+                  {action === 'explain' ? 'Explain this passage' : 'Test my understanding'}
+                </Button>
+              ))}
+            </div>
+          </div>
+        )}
       </div>
 
 

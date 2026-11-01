@@ -551,6 +551,9 @@ describe("AI chat grounding", () => {
     expect(directive).toContain("combined intervention");
     expect(directive).toContain('"Active Recall Field Study"');
     expect(directive).toContain("Explore next:");
+    expect(directive).toContain("Skip it when it would feel repetitive or add no value");
+    expect(directive).toContain("invent a limitation");
+    expect(directive).toContain("compare a source with itself");
   });
 
   it("keeps direct factual questions brief and continuation-free", () => {
@@ -561,6 +564,155 @@ describe("AI chat grounding", () => {
 
     expect(directive).toContain("one to three sentences");
     expect(directive).toContain("omit an Explore next line");
+  });
+
+  it("honors an exact sentence count and explicit no-follow-up request without changing default teaching", () => {
+    const directive = buildQuestionEvidenceDirective(
+      "Explain active recall in exactly two sentences, and don't ask me any follow-up questions.",
+      sourceRefs,
+    );
+    const ordinaryTeaching = buildQuestionEvidenceDirective(
+      "Explain active recall in simpler terms.",
+      sourceRefs,
+    );
+
+    expect(directive).toContain("answer prose must contain exactly 2 sentences");
+    expect(directive).toContain("Do not add a follow-up question, invitation, offer, or next step");
+    expect(directive).toContain("CITATIONS metadata");
+    expect(directive).not.toContain("When a concrete, evidence-linked next step would help");
+    expect(ordinaryTeaching).not.toContain("EXPLICIT PRESENTATION OVERRIDE");
+    expect(ordinaryTeaching).toContain("When a concrete, evidence-linked next step would help");
+  });
+
+  it("teaches explanations through evidence and labeled examples without requiring practice", () => {
+    const directive = buildQuestionEvidenceDirective("Explain active recall in simpler terms.", sourceRefs);
+    expect(directive).toContain("meaning in plain language");
+    expect(directive).toContain("source-stated reasoning");
+    expect(directive).toContain("connect that explanation to a cited passage");
+    expect(directive).toContain("Label any illustrative inference and its assumptions");
+    expect(directive).not.toContain("The user requested practice");
+    expect(buildSystemPrompt("human", "conversational")).toContain("never require a quiz before answering");
+  });
+
+  it("honors natural quote requests and keeps quotation separate from explanation", () => {
+    const directive = buildQuestionEvidenceDirective(
+      "Can you share a memorable quote from this chapter?",
+      sourceRefs,
+    );
+    const prompt = buildSystemPrompt("human", "conversational");
+
+    expect(directive).toContain("Do not require a source to label a passage");
+    expect(directive).toContain("concise, exact, verbatim line");
+    expect(directive).toContain("keep your explanation outside the quote");
+    expect(prompt).toContain("selecting the best supported material");
+    expect(prompt).toContain("Keep exact quotations verbatim");
+  });
+
+  it("keeps response structure and learner follow-ups flexible", () => {
+    const prompt = buildSystemPrompt("human", "conversational");
+
+    expect(prompt).toContain("amount of structure the question needs");
+    expect(prompt).toContain("genuinely multi-part explanation");
+    expect(prompt).not.toContain("DO NOT use markdown headers");
+    expect(prompt).toContain("Do not routinely append \"Explore next:\"");
+    expect(prompt).toContain("vary the form and wording");
+  });
+
+  it("respects brief explanation requests instead of forcing a lesson", () => {
+    const directive = buildQuestionEvidenceDirective("Explain active recall in one sentence.", sourceRefs);
+    expect(directive).toContain("one to three sentences");
+    expect(directive).not.toContain("Teach the requested idea");
+  });
+
+  it("recognizes passage learning actions without loosening their evidence contract", () => {
+    const explanation = buildQuestionEvidenceDirective("Explain this passage in simpler terms, grounded in the source.", sourceRefs);
+    expect(explanation).toContain("Teach the requested idea");
+    expect(explanation).toContain("connect that explanation to a cited passage");
+    expect(explanation).toContain("without inventing a cause or effort claim");
+    expect(explanation).toContain("CITATIONS: on its own line");
+    expect(explanation).toContain("one source marker at its end");
+    const practice = buildQuestionEvidenceDirective("Test my understanding of this passage. Ask one question and wait for my answer.", sourceRefs);
+    expect(practice).toContain("ask one focused question and wait");
+    expect(practice).toContain("only the question and its source marker");
+    expect(practice).toContain("Do not quote or paraphrase the answer");
+    expect(practice).toContain("Omit Explore next and other extra questions");
+    expect(practice).toContain("wait for the learner's attempt before revealing or explaining its answer");
+    expect(practice).toContain("An immediate-answer request does not change this one-question-at-a-time flow");
+    expect(practice).not.toContain("include them instead");
+    expect(practice).toContain("Keep all required source markers and literal citation excerpts");
+  });
+
+  it("distinguishes interactive practice from a requested question set and discussion of quizzes", () => {
+    const interactive = buildQuestionEvidenceDirective("Quiz me on active recall.", sourceRefs);
+    expect(interactive).toContain("ask one focused question and wait");
+    expect(interactive).toContain("practice never overrides the evidence contract");
+    const immediateAnswers = buildQuestionEvidenceDirective("Quiz me on active recall and tell me the answer now.", sourceRefs);
+    expect(immediateAnswers).toContain("wait for the learner's attempt before revealing or explaining its answer");
+    expect(immediateAnswers).not.toContain("include them instead");
+    expect(interactive).not.toContain("you may end with one short question");
+    const batch = buildQuestionEvidenceDirective("Give me three practice questions with answers.", sourceRefs);
+    expect(batch).toContain("match the requested format and count");
+    expect(batch).not.toContain("ask one focused question and wait");
+    const discussion = buildQuestionEvidenceDirective("Explain how practice questions help in this study.", sourceRefs);
+    expect(discussion).not.toContain("The user requested practice");
+  });
+
+  it("recognizes natural practise tutoring requests without treating discussion as a quiz request", () => {
+    const practiceRequest = buildQuestionEvidenceDirective(
+      "Help me practise the main idea from these sources. Ask one question at a time and wait for my answer before revealing the answer. Then give brief feedback supported by a source citation and help me correct any misunderstanding.",
+      sourceRefs,
+    );
+    expect(practiceRequest).toContain("The user requested practice");
+    expect(practiceRequest).toContain("ask one focused question and wait");
+    expect(practiceRequest).toContain("wait for the learner's attempt before revealing or explaining its answer");
+
+    const practiceSpelling = buildQuestionEvidenceDirective("Help me practice the main idea. Ask one question at a time and wait for my answer.", sourceRefs);
+    expect(practiceSpelling).toContain("ask one focused question and wait");
+
+    const discussion = buildQuestionEvidenceDirective("Explain how practice questions help learners remember ideas.", sourceRefs);
+    expect(discussion).not.toContain("The user requested practice");
+  });
+
+  it("recognizes an imperative quick-practice prompt only when it asks for turn-taking", () => {
+    const quickPrompt = buildQuestionEvidenceDirective(
+      "Practise the main idea from these sources. Ask one question at a time and wait for my answer before revealing it.",
+      sourceRefs,
+    );
+    expect(quickPrompt).toContain("The user requested practice");
+    expect(quickPrompt).toContain("ask one focused question and wait");
+    expect(quickPrompt).toContain("visible practice response must contain only the question and its source marker");
+
+    const descriptive = buildQuestionEvidenceDirective(
+      "Explain how practice questions help learners understand the main idea.",
+      sourceRefs,
+    );
+    expect(descriptive).not.toContain("The user requested practice");
+  });
+
+  it.each(["My answer is spaced repetition.", "Why is that wrong?", "Check my reasoning."])("gives evidence-based feedback for %s", (message) => {
+    const directive = buildQuestionEvidenceDirective(message, sourceRefs);
+    expect(directive).toContain("explain any specific reasoning gap");
+    expect(directive).toContain("CITATIONS: on its own line");
+    expect(directive).toContain("Omit Explore next and other extra questions");
+    expect(directive).toContain("If the prior question is unavailable, ask for it");
+    expect(directive).not.toContain("you may end with one short question");
+  });
+
+  it("routes short learner attempts to feedback only with a prior assistant question", () => {
+    const history = [
+      { role: "user", content: "Help me practise active recall. Ask one question at a time and wait for my answer." },
+      { role: "assistant", content: "Which method asks you to retrieve without looking at notes? [1]" },
+    ];
+    expect(buildQuestionEvidenceDirective("Active recall.", sourceRefs, history)).toContain("Respond to the learner's attempt");
+    expect(buildQuestionEvidenceDirective("I think active recall.", sourceRefs, history)).toContain("Respond to the learner's attempt");
+    expect(buildQuestionEvidenceDirective("B", sourceRefs, history)).toContain("Respond to the learner's attempt");
+    expect(buildQuestionEvidenceDirective("What is the spacing effect?", sourceRefs, history)).not.toContain("Respond to the learner's attempt");
+    expect(buildQuestionEvidenceDirective("Explain spacing in one sentence.", sourceRefs, history)).not.toContain("Respond to the learner's attempt");
+    expect(buildQuestionEvidenceDirective("B", sourceRefs)).not.toContain("Respond to the learner's attempt");
+    expect(buildQuestionEvidenceDirective("Active recall.", sourceRefs, [
+      { role: "user", content: "What is the main idea?" },
+      { role: "assistant", content: "Which idea do you mean?" },
+    ])).not.toContain("Respond to the learner's attempt");
   });
 
   it("does not guess through an ambiguous source-grounded question", () => {
@@ -596,7 +748,7 @@ describe("AI chat grounding", () => {
     expect(incompleteDirective).toContain("percentage-point difference");
   });
 
-  it("removes generic framing and adds a source-aware continuation for substantive answers", () => {
+  it("removes generic framing without manufacturing a limitation or comparison", () => {
     const answer = [
       "## Introduction to the evidence",
       "The notebook links retrieval practice with immediate feedback and describes spacing as creating desirable difficulty. The field study reports delayed-test scores and limitations, while the review proposes adjustable intervals. The commentary adds a beginner-orientation condition without directly contradicting the trial.",
@@ -615,9 +767,35 @@ describe("AI chat grounding", () => {
 
     expect(finalized).not.toMatch(/## Introduction/i);
     expect(finalized).not.toMatch(/## Conclusion/i);
-    expect(finalized).toContain(
-      'Explore next: Which limitation in "Active Recall Field Study" should we examine next against "Spacing Schedule Review"?',
-    );
+    expect(finalized).not.toContain("Explore next:");
+    expect(finalized).toContain("The practical implication is to orient first");
+  });
+
+  it("does not append a self-comparison to the deployed single-source Plato overview", () => {
+    const answer = "INTRODUCTION AND ANALYSIS The Republic of Plato is the longest of his works with the exception of the Laws, and is certainly the greatest of them[2]. The Republic of Plato is also the first treatise upon education, of which the writings of Milton and Locke, Rousseau, Jean Paul, and Goethe are the legitimate descendants[3].";
+
+    expect(finalizeSourceAwareAnswer(answer, "what is Plato republic about", [
+      { index: 1, title: "plato_-_the_republic.pdf" },
+    ])).toBe(answer);
+  });
+
+  it.each([
+    "Compare the study and the review.",
+    "How should I apply this for my exam?",
+    "Do these sources prove this always works?",
+  ])("does not invent unresolved gaps or exam tasks after answering %s", (question) => {
+    const answer = "The study reports higher delayed-test scores for the retrieval group, while the review recommends adjusting intervals after recall. [1][2] The sources describe separate findings; neither source establishes the effects of a combined intervention. Their recommendations can be described without adding an unsupported claim about a causal mechanism. [1][2]";
+
+    expect(finalizeSourceAwareAnswer(answer, question, [
+      { index: 1, title: "Active Recall Field Study" },
+      { index: 2, title: "Spacing Schedule Review" },
+    ])).toBe(answer);
+  });
+
+  it("preserves a specific continuation already supplied with the grounded answer", () => {
+    const answer = "The review recommends adjusting intervals after successful or failed recall. [1]\n\nExplore next: Which interval adjustment does the review recommend after failed recall?";
+
+    expect(finalizeSourceAwareAnswer(answer)).toBe(answer);
   });
 
   it("does not append a continuation to a direct factual answer", () => {
@@ -713,7 +891,7 @@ describe("AI chat grounding", () => {
           id: "pdf",
           title: "SA-Constitution.pdf",
           type: "pdf",
-          content: `${"Contents and introductory material. ".repeat(160)}CHAPTER 1 FOUNDING PROVISIONS Republic of South Africa 1. The Republic is founded on the following values: (a) Human dignity, the achievement of equality and the advancement of human rights and freedoms. (b) Non-racialism and non-sexism. (c) Supremacy of the constitution and the rule of law.`,
+          content: `${"Contents and introductory material. ".repeat(160)}\nCHAPTER 1 FOUNDING PROVISIONS\nSECTION 1 — FOUNDING PROVISIONS\nThe Republic is founded on the following values: (a) Human dignity, the achievement of equality and the advancement of human rights and freedoms. (b) Non-racialism and non-sexism. (c) Supremacy of the constitution and the rule of law.`,
         },
       ],
       [],
@@ -725,6 +903,247 @@ describe("AI chat grounding", () => {
     expect(result.context).toContain("achievement of equality");
     expect(result.context).toContain("Supremacy of the constitution");
   });
+
+  it("scopes long-book retrieval to the requested Plato book heading", () => {
+    const content = [
+      "Introduction: Plato's Republic contains Book IV, and this overview repeats justice and harmony many times. ".repeat(50),
+      "BOOK I — Justice and the City",
+      "Book I evidence: justice means paying debts and returning what is owed.",
+      "BOOK IV — Justice and the Soul",
+      "Book IV evidence: justice is harmony among the parts of the soul and the city.",
+      "The guardians preserve harmony through education and shared civic duties.",
+      "BOOK V — The Philosopher Rulers",
+      "Book V evidence: philosophers should rule because they know the good.",
+    ].join("\n");
+    const selected = selectRelevantContent(
+      content,
+      "According to Plato's Republic, explain Book IV and its account of justice.",
+      1800,
+      "Plato's Republic",
+    );
+
+    expect(selected).toContain("Book IV evidence: justice is harmony");
+    expect(selected).toContain("guardians preserve harmony");
+    expect(selected).not.toContain("Introduction:");
+    expect(selected).not.toContain("Book I evidence");
+    expect(selected).not.toContain("Book V evidence");
+  });
+
+  it("prefers structural EPUB headings over repeated introduction titles", () => {
+    const selected = selectRelevantContent([
+      "INTRODUCTION AND ANALYSIS",
+      "--- BOOK I. The Republic opens with a truly Greek scene ---",
+      "The introduction mentions Atlantis and summarizes justice.",
+      "--- BOOK II. Thrasymachus is pacified ---",
+      "More introductory analysis, not the structural book.",
+      "--- BOOK I ---",
+      "I went down yesterday to the Piraeus with Glaucon.",
+      "Socrates asks what justice is; the discussion considers whether it benefits the stronger.",
+      "BOOK II. appears in this paragraph as a reference, not a heading.",
+      "--- BOOK II ---",
+      "The next book begins with a different argument.",
+    ].join("\n"), "At Reader position: Structural section: Book I. Explain the opening discussion of justice.", 1800, "Plato Republic");
+    expect(selected).toContain("I went down yesterday to the Piraeus");
+    expect(selected).toContain("what justice is");
+    expect(selected).toContain("BOOK II. appears in this paragraph");
+    expect(selected).not.toContain("INTRODUCTION AND ANALYSIS");
+    expect(selected).not.toContain("Atlantis");
+    expect(selected).not.toContain("next book begins");
+  });
+
+  it("accepts EPUB BOOK I. headings and stops at the standalone BOOK II. boundary", () => {
+    const selected = selectRelevantContent(
+      [
+        "Introduction: BOOK I. and BOOK II. are listed in this overview, alongside Atlantis.",
+        "BOOK I.",
+        "I went down yesterday to the Piraeus with Glaucon.",
+        "The phrase BOOK II. appears in prose here and must not end this section.",
+        "BOOK II.",
+        "With these words, the argument turns to a different question.",
+      ].join("\n"),
+      "At Reader position: Structural section: Book I. Explain what happens at the Piraeus.",
+      1800,
+      "Plato's Republic",
+    );
+
+    expect(selected).toContain("I went down yesterday to the Piraeus");
+    expect(selected).toContain("The phrase BOOK II. appears in prose");
+    expect(selected).not.toContain("Introduction:");
+    expect(selected).not.toContain("With these words");
+  });
+
+  it("deduplicates adjacent EPUB Book I heading variants while keeping the Book II boundary", () => {
+    const selected = selectRelevantContent(
+      [
+        "Introduction: Atlantis and justice are discussed here, but are not Book I evidence.",
+        "--- BOOK I. ---",
+        "",
+        "BOOK I.",
+        "I went down yesterday to the Piraeus with Glaucon.",
+        "Socrates and Cephalus discuss justice before Thrasymachus enters the debate.",
+        "--- BOOK II. ---",
+        "The second book begins with a different argument.",
+      ].join("\n"),
+      "At Reader position: Structural section: Book I. Explain the opening discussion of justice.",
+      1800,
+      "Plato's Republic",
+    );
+
+    expect(selected).toContain("I went down yesterday to the Piraeus");
+    expect(selected).toContain("Socrates and Cephalus discuss justice");
+    expect(selected).not.toContain("Introduction:");
+    expect(selected).not.toContain("second book begins");
+  });
+
+  it("does not substitute unrelated evidence when an explicitly requested book is absent", () => {
+    const selected = selectRelevantContent(
+      "Introduction mentions Book IV, but the extracted text has no Book IV heading.\nBOOK I\nJustice is discussed here.",
+      "Explain Book IV.",
+      1200,
+      "Plato's Republic",
+    );
+    expect(selected).toBe("");
+  });
+
+  it("omits notebook notes without section provenance from explicit chapter context only", () => {
+    const notebook = { title: "Plato's Republic" };
+    const sources = [{
+      id: "republic",
+      title: "Plato's Republic",
+      type: "epub",
+      content: "BOOK I.\nSocrates goes down to the Piraeus and discusses justice.\nBOOK II.\nA different discussion begins.",
+    }];
+    const notes = [{ content: "Introduction note: Atlantis is mentioned before Book I.", created_at: "2026-10-22" }];
+
+    const chapterContext = buildNotebookContext(
+      notebook,
+      sources,
+      notes,
+      "[Reader position: 146 seconds. Structural section: Book I.] Explain the opening discussion of justice.",
+    );
+    expect(chapterContext.context).toContain("Piraeus");
+    expect(chapterContext.context).not.toContain("=== NOTES");
+    expect(chapterContext.context).not.toContain("Atlantis");
+
+    const unscopedContext = buildNotebookContext(
+      notebook,
+      sources,
+      notes,
+      "Summarize my notes about Atlantis.",
+    );
+    expect(unscopedContext.context).toContain("=== NOTES");
+    expect(unscopedContext.context).toContain("Atlantis");
+  });
+
+  it("rejects a heading-only requested book without falling back to introduction text", async () => {
+    const sourceContent = [
+      "Introduction: Atlantis and justice are discussed here, but are not Book I evidence.",
+      "BOOK I.",
+      "BOOK II.",
+      "The second book contains unrelated material.",
+    ].join("\n");
+    const message = "At Reader position: Structural section: Book I. Explain the opening discussion of justice.";
+    const selected = selectRelevantContent(
+      sourceContent,
+      message,
+      1200,
+      "Plato's Republic",
+    );
+
+    expect(selected).toBe("");
+    await expect(chatWithNotebook({
+      notebook: { id: "notebook-1", title: "Plato's Republic" },
+      sources: [{ id: "republic", title: "Plato's Republic", type: "epub", content: sourceContent }],
+      notes: [],
+      message,
+      allowWebFallback: false,
+    })).rejects.toMatchObject({ code: "REQUESTED_SECTION_NOT_FOUND" });
+  });
+
+  it("fails closed when a reader-position book is only mentioned in prose", async () => {
+    const message = "What does justice mean here? [Reader position: 146 seconds. Structural section: Book I.]";
+
+    expect(shouldUseConversationHistory(message, [
+      { role: "assistant", content: "The introduction discusses Atlantis." },
+    ])).toBe(false);
+
+    await expect(
+      chatWithNotebook({
+        notebook: { id: "notebook-1", title: "Plato's Republic" },
+        sources: [{
+          id: "republic",
+          title: "Plato's Republic",
+          type: "epub",
+          content: "Introduction mentions Book I, justice, and Atlantis, but no structural Book I heading was extracted.",
+        }],
+        notes: [],
+        message,
+        history: [{ role: "assistant", content: "The introduction discusses Atlantis." }],
+        allowWebFallback: false,
+      }),
+    ).rejects.toMatchObject({ code: "REQUESTED_SECTION_NOT_FOUND" });
+  });
+
+  it("scopes explicit chapter requests to that chapter through the next chapter heading", () => {
+    const selected = selectRelevantContent(
+      "CHAPTER 3\nEarlier chapter evidence about memory and attention.\nCHAPTER 4\nChapter four explains memory through spaced recall.\nCHAPTER 5\nLater evidence about attention.",
+      "Explain Chapter 4 memory.",
+      1200,
+    );
+    expect(selected).toContain("Chapter four explains memory");
+    expect(selected).not.toContain("Earlier chapter evidence");
+    expect(selected).not.toContain("Later evidence");
+  });
+
+  it("does not mistake numbered prose or list items for an explicit section heading", () => {
+    const selected = selectRelevantContent(
+      [
+        "Introduction mentions Section 1, and cites 1. in passing.",
+        "- 1. A numbered list item describes human dignity.",
+        "1. The ordinary list continues with equality.",
+        "2. The next list item mentions supremacy.",
+      ].join("\n"),
+      "Explain Section 1.",
+      1200,
+    );
+    expect(selected).toBe("");
+  });
+
+  it("keeps Chapter N of Book M inside that book even when another book repeats the chapter", () => {
+    const selected = selectRelevantContent(
+      [
+        "Introduction: Book I and Book II each discuss justice.",
+        "BOOK I — First Book",
+        "CHAPTER 3 — Earlier",
+        "Book I chapter three: background.",
+        "CHAPTER 4 — Target",
+        "Book I chapter four evidence: justice is tested through the philosopher's knowledge.",
+        "CHAPTER 5 — Later",
+        "Book I chapter five: additional material.",
+        "BOOK II — Second Book",
+        "CHAPTER 4 — Repeated chapter number",
+        "Book II chapter four evidence: justice depends on military discipline and courage.",
+      ].join("\n"),
+      "According to the text, explain Chapter 4 of Book I and justice.",
+      1200,
+      "Plato's Republic",
+    );
+    expect(selected).toContain("Book I chapter four evidence");
+    expect(selected).not.toContain("Book II chapter four evidence");
+    expect(selected).not.toContain("Book I chapter three");
+    expect(selected).not.toContain("Book I chapter five");
+    expect(selected).not.toContain("Introduction:");
+  });
+
+  it("returns no evidence when the requested chapter is absent from the named book", () => {
+    const selected = selectRelevantContent(
+      "BOOK I\nCHAPTER 4\nOnly chapter four is present.\nBOOK II\nCHAPTER 4\nWrong book evidence.",
+      "Explain Chapter 5 of Book I.",
+      1200,
+    );
+    expect(selected).toBe("");
+  });
+
   it("rejects an unusable explicit source scope instead of falling back to the web", async () => {
     await expect(
       chatWithNotebook({
@@ -764,5 +1183,30 @@ describe("AI chat grounding", () => {
         "Name three founding constitutional values.",
       ),
     ).toBe(false);
+  });
+
+  it.each(["My answer is retrieval practice.", "Check my answer.", "Why is that wrong?", "Give me a hint.", "Next question."])("retains learning context for explicit follow-up %s", (message) => {
+    expect(shouldUseConversationHistory(message)).toBe(true);
+  });
+
+  it("retains quiz attempts with a prior question while isolating fresh research", () => {
+    const history = [{ role: "user", content: "Quiz me." }, { role: "assistant", content: "Which method uses retrieval? A. Recall B. Rereading" }];
+    expect(shouldUseConversationHistory("A", history)).toBe(true);
+    expect(shouldUseConversationHistory("I think recall.", history)).toBe(true);
+    expect(shouldUseConversationHistory("I think recall.", [])).toBe(false);
+    expect(shouldUseConversationHistory("B", [{ role: "assistant", content: "Recall uses retrieval." }])).toBe(false);
+    expect(shouldUseConversationHistory("I think this is a new topic. What is d_model?", history)).toBe(false);
+    expect(shouldUseConversationHistory("According to the Constitution, name the founding values.", history)).toBe(false);
+  });
+
+  it("inherits practice context for a bare subject answer but not an unrelated new question", () => {
+    const history = [
+      { role: "user", content: "Help me practise the main idea. Ask one question at a time and wait for my answer." },
+      { role: "assistant", content: "Which method asks you to retrieve information from memory? [1]" },
+    ];
+
+    expect(shouldUseConversationHistory("Active recall.", history)).toBe(true);
+    expect(shouldUseConversationHistory("What is the spacing effect?", history)).toBe(false);
+    expect(shouldUseConversationHistory("Explain the spacing effect.", history)).toBe(false);
   });
 });

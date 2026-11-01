@@ -2,7 +2,8 @@
 
 .podcast-generation-indicator {
   position: fixed;
-  bottom: max(20px, env(safe-area-inset-bottom));
+  /* Keep the chat composer and its Send button available during generation. */
+  bottom: calc(224px + env(safe-area-inset-bottom, 0px));
   right: 20px;
   background: #111827;
   border: 1px solid hsl(var(--primary) / 0.3);

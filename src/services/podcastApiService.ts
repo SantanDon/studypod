@@ -6,8 +6,12 @@ export interface PodcastRecord extends LocalPodcast { script: PodcastScript; sou
 export interface PodcastSave { id?: string; title: string; blob: Blob; duration?: number; script: PodcastScript; sourceIds: string[] }
 export type RecentPodcast = Pick<PodcastRecord, 'id' | 'notebook_id' | 'title' | 'created_at' | 'duration' | 'persistence'>;
 const CHUNK_BYTES = 1024 * 1024;
+const DOWNLOAD_CONCURRENCY = 3;
 const MAX_BYTES = 50 * CHUNK_BYTES;
 const REQUEST_TIMEOUT_MS = 15_000;
+// A full 50 MiB download can require 17 chunk waves. Allow three 15s attempts
+// per chunk plus setup/verification time, while still bounding a stuck transfer.
+const MAX_AUDIO_DOWNLOAD_MS = 15 * 60_000;
 async function boundedFetch(url: string, init: RequestInit): Promise<Response> {
  const controller = new AbortController();
  const caller = init.signal;
@@ -44,6 +48,10 @@ async function requireSuccess(response: Response): Promise<Response> {
 const invalidTransfer = () => new StudioApiError('The saved audio could not be verified. Please retry.', 422, 'PODCAST_INVALID_TRANSFER');
 async function sha256(bytes: ArrayBuffer): Promise<string> {
  return Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256', bytes)), b => b.toString(16).padStart(2, '0')).join('');
+}
+function isAmbiguousCompletionError(error: unknown): boolean {
+ if (error instanceof StudioApiError) return error.code === 'PODCAST_TRANSFER_TIMEOUT' || error.status >= 500;
+ return error instanceof Error && error.name !== 'AbortError';
 }
 export async function latestSavedPodcast(token?: string): Promise<RecentPodcast | null> {
  const response = await requireSuccess(await boundedFetch(`${API_BASE_URL}/notebooks/studio/podcasts/recent`, { credentials: 'include', headers: authorization(token) }));
@@ -89,25 +97,67 @@ export function podcastApi(notebookId: string, token?: string) {
    for (let index = 0; index < chunkCount; index++) {
     await request(`${uploadPath}/chunks/${index}`, {method:'PUT', headers:{'Content-Type':'application/octet-stream'}, body:bytes.slice(index * CHUNK_BYTES, Math.min((index + 1) * CHUNK_BYTES, bytes.byteLength))}, true);
    }
-   return (await (await request('', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({uploadId:upload.uploadId})}, true)).json()).podcast;
+   try {
+    return (await (await request('', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({uploadId:upload.uploadId})}, true)).json()).podcast;
+   } catch (error) {
+    if (!isAmbiguousCompletionError(error)) throw error;
+    // Completion may have committed even when its response was lost. Reconcile
+    // by the stable transfer ID before surfacing the failure or risking a duplicate.
+    let saved: PodcastRecord;
+    try { saved = (await (await request(`/${encodeURIComponent(savedMetadata.id)}`)).json()).podcast; }
+    catch (reconcileError) {
+     if (reconcileError instanceof StudioApiError && reconcileError.status === 404) throw error;
+     throw reconcileError;
+    }
+    if (saved?.id !== savedMetadata.id || saved.audio_sha256?.toLowerCase() !== digest || saved.byte_length !== bytes.byteLength) throw invalidTransfer();
+    return saved;
+   }
   },
   audio: async (id: string): Promise<Blob> => {
+   const downloadController = new AbortController();
+   let downloadTimedOut = false;
+   const downloadTimer = setTimeout(() => {
+    downloadTimedOut = true;
+    downloadController.abort();
+   }, MAX_AUDIO_DOWNLOAD_MS);
+   try {
    const path = `/${encodeURIComponent(id)}`;
-   const podcast: PodcastRecord = (await (await request(path)).json()).podcast;
+   const podcast: PodcastRecord = (await (await request(path, {signal:downloadController.signal})).json()).podcast;
    const length = podcast.byte_length;
    if (!Number.isSafeInteger(length) || length! < 44 || length! > MAX_BYTES || !/^[0-9a-f]{64}$/i.test(podcast.audio_sha256 || '')) throw invalidTransfer();
    const bytes = new Uint8Array(length!);
-   for (let index = 0; index < Math.ceil(length! / CHUNK_BYTES); index++) {
-    const response = await request(`${path}/audio/chunks/${index}`, {}, true);
-    const expected = Math.min(CHUNK_BYTES, length! - index * CHUNK_BYTES);
-    const advertised = response.headers.get('Content-Length');
-    if (advertised !== null && Number(advertised) !== expected) { await response.body?.cancel(); throw invalidTransfer(); }
-    const chunk = await response.arrayBuffer();
-    if (chunk.byteLength !== expected) throw invalidTransfer();
-    bytes.set(new Uint8Array(chunk), index * CHUNK_BYTES);
-   }
+   const chunkCount = Math.ceil(length! / CHUNK_BYTES);
+   let nextIndex = 0;
+   let downloadFailure: unknown;
+   const downloadWorker = async () => {
+    while (!downloadController.signal.aborted && nextIndex < chunkCount) {
+     const index = nextIndex++;
+     try {
+      const response = await request(`${path}/audio/chunks/${index}`, {signal:downloadController.signal}, true);
+      const expected = Math.min(CHUNK_BYTES, length! - index * CHUNK_BYTES);
+      const advertised = response.headers.get('Content-Length');
+      if (advertised !== null && Number(advertised) !== expected) { await response.body?.cancel(); throw invalidTransfer(); }
+      const chunk = await response.arrayBuffer();
+      if (chunk.byteLength !== expected) throw invalidTransfer();
+      bytes.set(new Uint8Array(chunk), index * CHUNK_BYTES);
+     } catch (error) {
+      if (!downloadController.signal.aborted) {
+       downloadFailure = error;
+       downloadController.abort();
+      }
+      throw error;
+     }
+    }
+   };
+   try { await Promise.all(Array.from({length: Math.min(DOWNLOAD_CONCURRENCY, chunkCount)}, downloadWorker)); }
+   catch (error) { downloadController.abort(); throw downloadTimedOut ? new StudioApiError('Audio took too long to load. Please try again.', 408, 'PODCAST_DOWNLOAD_TIMEOUT') : downloadFailure ?? error; }
    if (await sha256(bytes.buffer) !== podcast.audio_sha256!.toLowerCase()) throw invalidTransfer();
+   if (downloadTimedOut) throw new StudioApiError('Audio took too long to load. Please try again.', 408, 'PODCAST_DOWNLOAD_TIMEOUT');
    return new Blob([bytes], {type:'audio/wav'});
+   } catch (error) {
+    if (downloadTimedOut) throw new StudioApiError('Audio took too long to load. Please try again.', 408, 'PODCAST_DOWNLOAD_TIMEOUT');
+    throw error;
+   } finally { clearTimeout(downloadTimer); }
   },
   remove: async (id: string) => { await request(`/${encodeURIComponent(id)}`, {method:'DELETE'}); },
  };

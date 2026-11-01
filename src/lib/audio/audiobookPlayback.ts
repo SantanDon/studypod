@@ -100,8 +100,11 @@ const validTimestamp = (value?: string | null) => {
   return Number.isFinite(timestamp) ? timestamp : 0;
 };
 
-export const audiobookProgressStorageKey = (fileName: string) =>
-  `${LOCAL_PROGRESS_PREFIX}:${encodeURIComponent(String(fileName || "book"))}`;
+export const audiobookProgressStorageKey = (
+  fileName: string,
+  renderId?: string | null,
+) =>
+  `${LOCAL_PROGRESS_PREFIX}:${encodeURIComponent(String(fileName || "book"))}${renderId ? `:${encodeURIComponent(renderId)}` : ""}`;
 
 export function normalizeAudiobookListenerState(
   value: Partial<AudiobookListenerState> | null | undefined,
@@ -146,10 +149,11 @@ export function loadLocalAudiobookProgress(
   fileName: string,
   storage: Pick<Storage, "getItem"> | null =
     typeof window !== "undefined" ? window.localStorage : null,
+  renderId?: string | null,
 ): AudiobookListenerState | null {
   if (!storage) return null;
   try {
-    const stored = storage.getItem(audiobookProgressStorageKey(fileName));
+    const stored = storage.getItem(audiobookProgressStorageKey(fileName, renderId));
     if (!stored) return null;
     return normalizeAudiobookListenerState(
       JSON.parse(stored) as Partial<AudiobookListenerState>,
@@ -162,10 +166,11 @@ export function loadLocalAudiobookProgress(
 export function clearLocalAudiobookProgress(
   fileName: string,
   storage?: Pick<Storage, "removeItem"> | null,
+  renderId?: string | null,
 ) {
   try {
     const target = storage === undefined ? (typeof window !== "undefined" ? window.localStorage : null) : storage;
-    target?.removeItem(audiobookProgressStorageKey(fileName));
+    target?.removeItem(audiobookProgressStorageKey(fileName, renderId));
   } catch { /* Storage may be unavailable, including its getter. */ }
 }
 
@@ -178,7 +183,7 @@ export function saveLocalAudiobookProgress(
   if (!storage) return;
   try {
     storage.setItem(
-      audiobookProgressStorageKey(fileName),
+      audiobookProgressStorageKey(fileName, listenerState.renderId),
       JSON.stringify(normalizeAudiobookListenerState(listenerState)),
     );
   } catch {
@@ -193,26 +198,37 @@ export function mergeAudiobookListenerState(
 ): AudiobookListenerState {
   const normalizedRemote = normalizeAudiobookListenerState(remote);
   const normalizedLocal = normalizeAudiobookListenerState(local);
-  const remoteTimestamp = validTimestamp(normalizedRemote.updatedAt);
-  const localTimestamp = validTimestamp(normalizedLocal.updatedAt);
+  const targetRenderId = currentRenderId || normalizedRemote.renderId || normalizedLocal.renderId;
+  const remoteMatchesRender = !targetRenderId || normalizedRemote.renderId === targetRenderId;
+  const localMatchesRender = !targetRenderId || normalizedLocal.renderId === targetRenderId;
+  const scopedRemote = remoteMatchesRender ? normalizedRemote : normalizeAudiobookListenerState(null);
+  const scopedLocal = localMatchesRender ? normalizedLocal : normalizeAudiobookListenerState(null);
+  const remoteTimestamp = validTimestamp(scopedRemote.updatedAt);
+  const localTimestamp = validTimestamp(scopedLocal.updatedAt);
   const newer =
-    local && localTimestamp > remoteTimestamp
-      ? normalizedLocal
-      : normalizedRemote;
+    localMatchesRender && local && (!remoteMatchesRender || localTimestamp > remoteTimestamp)
+      ? scopedLocal
+      : scopedRemote;
   const completedChapterIds = [
     ...new Set([
-      ...normalizedRemote.completedChapterIds,
-      ...normalizedLocal.completedChapterIds,
+      ...scopedRemote.completedChapterIds,
+      ...scopedLocal.completedChapterIds,
     ]),
   ];
+  const newestForRate =
+    local && validTimestamp(normalizedLocal.updatedAt) > validTimestamp(normalizedRemote.updatedAt)
+      ? normalizedLocal
+      : normalizedRemote;
 
   return {
     ...newer,
-    renderId: currentRenderId || newer.renderId || null,
+    renderId: targetRenderId || null,
+    // Playback speed is a listener preference and intentionally survives render changes.
+    playbackRate: newestForRate.playbackRate,
     completedChapterIds,
     progressPercent: Math.max(
-      normalizedRemote.progressPercent,
-      normalizedLocal.progressPercent,
+      scopedRemote.progressPercent,
+      scopedLocal.progressPercent,
       newer.progressPercent,
     ),
     // Merging is not a listening event: an empty client must remain older

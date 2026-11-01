@@ -3,6 +3,7 @@ import {
   assessTranscriptQuality,
   buildYouTubeStructuredContent,
   classifyYouTubeAvailability,
+  decodeYouTubeCaptionEntities,
   extractParticipantCandidates,
   extractYouTubeVideoId,
   findYouTubeTimestampForExcerpt,
@@ -12,6 +13,11 @@ import {
 } from '../services/youtubeUnderstandingService.js';
 
 describe('YouTube understanding service', () => {
+  it('decodes named and numeric caption entities while preserving invalid code points', () => {
+    expect(decodeYouTubeCaptionEntities('Don&#8217;t use &#x2014; or &amp;')).toBe('Don’t use — or &');
+    expect(decodeYouTubeCaptionEntities('bad &#xD800; entity')).toBe('bad &#xD800; entity');
+  });
+
   it('extracts standard, short, embed, live, and shorts video ids', () => {
     expect(extractYouTubeVideoId('https://www.youtube.com/watch?v=xw-9mwZxl-0&t=30')).toBe('xw-9mwZxl-0');
     expect(extractYouTubeVideoId('https://youtu.be/xw-9mwZxl-0')).toBe('xw-9mwZxl-0');

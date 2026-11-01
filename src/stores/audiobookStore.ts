@@ -54,10 +54,23 @@ export interface AudiobookJob {
   completedAt?: string;
 }
 
+export interface AudiobookReadingContext {
+  audiobookId?: string;
+  sourceId?: string;
+  bookTitle?: string;
+  chapterId?: string;
+  chapterIndex: number;
+  chapterCount?: number;
+  chapterTitle?: string;
+  progressPercent?: number;
+  isPlaying: boolean;
+}
+
 interface AudiobookState {
   selectedVoice: string;
   selectedStyle: string;
   outputFormat: 'mp3' | 'm4b' | 'wav';
+  includeFraming: boolean;
   selectedProvider: string;
   isGenerating: boolean;
   currentChapterId: string | null;
@@ -66,10 +79,13 @@ interface AudiobookState {
   notebookId: string | null;
   jobs: Record<string, AudiobookJob>;
   pronunciationsByBook: Record<string, PronunciationEntry[]>;
+  readingContextByNotebook: Record<string, AudiobookReadingContext>;
+  setReadingContext: (notebookId: string, context: AudiobookReadingContext | null) => void;
 
   setSelectedVoice: (voice: string) => void;
   setSelectedStyle: (style: string) => void;
   setOutputFormat: (format: 'mp3' | 'm4b' | 'wav') => void;
+  setIncludeFraming: (include: boolean) => void;
   setSelectedProvider: (provider: string) => void;
   setGenerating: (isGenerating: boolean) => void;
   setCurrentChapterId: (id: string | null) => void;
@@ -88,6 +104,7 @@ export const useAudiobookStore = create<AudiobookState>()(
       selectedVoice: 'immersive_narrator',
       selectedStyle: 'auto',
       outputFormat: 'mp3',
+      includeFraming: false,
       selectedProvider: 'kokoro',
       isGenerating: false,
       currentChapterId: null as string | null,
@@ -96,10 +113,18 @@ export const useAudiobookStore = create<AudiobookState>()(
       notebookId: null as string | null,
       jobs: {},
       pronunciationsByBook: {},
+      readingContextByNotebook: {},
+      setReadingContext: (notebookId, context) => set((state) => {
+        const readingContextByNotebook = { ...state.readingContextByNotebook };
+        if (context) readingContextByNotebook[notebookId] = context;
+        else delete readingContextByNotebook[notebookId];
+        return { readingContextByNotebook };
+      }),
 
       setSelectedVoice: (voice) => set({ selectedVoice: voice }),
       setSelectedStyle: (style) => set({ selectedStyle: style }),
       setOutputFormat: (format) => set({ outputFormat: format }),
+      setIncludeFraming: (include) => set({ includeFraming: include }),
       setSelectedProvider: (provider) => set({ selectedProvider: provider }),
       setGenerating: (isGenerating) => set({ isGenerating }),
       setCurrentChapterId: (id) => set({ currentChapterId: id }),
@@ -124,23 +149,28 @@ export const useAudiobookStore = create<AudiobookState>()(
     }),
     {
       name: 'studypod:audiobook-workspace',
-      version: 3,
+      version: 6,
       migrate: (persisted, version) => {
         const state = (persisted || {}) as Partial<AudiobookState>;
         return {
           ...state,
           selectedStyle: version < 2 && state.selectedStyle === 'immersive' ? 'auto' : state.selectedStyle || 'auto',
           pronunciationsByBook: state.pronunciationsByBook || {},
+          // Only contexts written by the current version persist. The player
+          // republishes context after validating the manifest and chapter.
+          readingContextByNotebook: version < 6 ? {} : state.readingContextByNotebook || {},
         } as AudiobookState;
       },
       partialize: (state) => ({
         selectedVoice: state.selectedVoice,
         selectedStyle: state.selectedStyle,
         outputFormat: state.outputFormat,
+        includeFraming: state.includeFraming,
         selectedProvider: state.selectedProvider,
         notebookId: state.notebookId,
         jobs: state.jobs,
         pronunciationsByBook: state.pronunciationsByBook,
+        readingContextByNotebook: state.readingContextByNotebook,
       }),
     },
   ),

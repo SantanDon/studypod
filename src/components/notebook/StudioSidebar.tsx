@@ -183,7 +183,7 @@ const StudioSidebar = ({
     };
     if (sourceCount === 0) return {
       label: 'No sources yet',
-      detail: 'Add a source to create grounded audio and study tools.',
+      detail: 'Add a source to create audio and study tools from its contents.',
     };
     const label = `${usableSourceCount} of ${sourceCount} ${sourceCount === 1 ? 'source' : 'sources'} ready`;
     if (usableSourceCount === 0) return {
@@ -192,7 +192,7 @@ const StudioSidebar = ({
     };
     return {
       label,
-      detail: `By default, Audio Overview draws on excerpts from every ready source in this notebook.${usableSourceCount < sourceCount ? ' Other sources are skipped.' : ''}`,
+      detail: `Audio Overview uses selected passages from ready sources in this notebook.${usableSourceCount < sourceCount ? " Sources that aren't ready are skipped." : ''}`,
     };
   })();
   const hasOnlyTweets = sources && sources.length > 0 && sources.every(s => s.type === 'tweet');
@@ -335,13 +335,13 @@ const StudioSidebar = ({
           <section className="space-y-3" aria-label="Create from sources">
             <StudioSectionHeading
               title="Create from sources"
-              description="Turn notebook evidence into durable outputs without leaving the research context."
+              description="Turn notebook sources into study materials and documents."
             />
 
             <StudioActionCard
               icon={FileText}
               title="Documents"
-              description="Draft, revise, version, and export source-grounded Word or PDF-ready work."
+              description="Create, revise, and export documents based on your sources."
               onClick={() => window.dispatchEvent(new CustomEvent('studypod:open-document'))}
               testId="open-document-workspace"
             />
@@ -350,7 +350,7 @@ const StudioSidebar = ({
               <StudioActionCard
                 icon={Headphones}
                 title="Audiobook"
-                description="Build chaptered local audio from owned or public-domain books."
+                description="Create chapter-by-chapter audio from books you own or that are public domain."
                 onClick={() => setActiveWorkspace('audiobook')}
                 testId="audiobook-studio-card"
                 badge="Local beta"
@@ -413,7 +413,7 @@ const StudioSidebar = ({
           <section className="space-y-3" aria-label="Research workflows">
             <StudioSectionHeading
               title="Research workflows"
-              description="Set direction, compare evidence, or hand off bounded work to an agent."
+              description="Set research goals, compare sources, or ask an agent to investigate."
             />
 
             {FEATURE_FLAGS.SIGNAL_QUEUE_VISIBLE && (
@@ -436,7 +436,7 @@ const StudioSidebar = ({
               <StudioToolTrigger
                 icon={Target}
                 title="Research Goals"
-                description="Define the questions and evidence the notebook should resolve."
+                description="Set questions for the notebook to investigate."
                 open={isResearchGoalsSectionOpen}
               />
               <CollapsibleContent className="pt-2">
@@ -452,7 +452,7 @@ const StudioSidebar = ({
               <StudioToolTrigger
                 icon={Bot}
                 title="Agent Missions"
-                description="Run a scoped research job with source-grounded evidence and a clear result."
+                description="Give StudyPod a research task using this notebook's sources."
                 open={isAgentMissionsSectionOpen}
                 badge="Agent"
               />
@@ -467,7 +467,7 @@ const StudioSidebar = ({
                 <StudioToolTrigger
                   icon={GitCompare}
                   title="Compare Sources"
-                  description="Surface agreements, conflicts, and missing evidence across documents."
+                  description="See where sources agree, differ, or leave questions unanswered."
                   open={isComparisonSectionOpen}
                 />
                 <CollapsibleContent className="pt-2">
@@ -502,7 +502,7 @@ const StudioSidebar = ({
                 <StudioToolTrigger
                   icon={Brain}
                   title="Quiz"
-                  description="Generate a focused knowledge check from the selected notebook sources."
+                  description="Generate a focused quiz from notebook sources."
                   open={isQuizSectionOpen}
                 />
                 <CollapsibleContent className="pt-2">
@@ -540,7 +540,7 @@ const StudioSidebar = ({
                 <StudioToolTrigger
                   icon={Layers3}
                   title="Flashcards"
-                  description="Turn key concepts into a deck for active recall and review."
+                  description="Build a deck for active recall and review."
                   open={isFlashcardSectionOpen}
                 />
                 <CollapsibleContent className="pt-2">
@@ -552,7 +552,7 @@ const StudioSidebar = ({
               <StudioToolTrigger
                 icon={Network}
                 title="Concept Map"
-                description="Visualize how ideas, claims, and evidence connect across the notebook."
+                description="See how notebook ideas, claims, and evidence connect."
                 open={isConceptMapSectionOpen}
               />
               <CollapsibleContent className="pt-2">

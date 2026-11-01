@@ -53,7 +53,7 @@ const ChatMessage: React.FC<ChatMessageProps> = ({
         className="flex justify-start w-full relative group"
       >
         <div className="w-full relative pl-2 border-l-2 border-transparent hover:border-blue-500/30 transition-colors duration-500">
-          <div className="max-w-none text-gray-800 dark:text-gray-200">
+          <div className="w-full max-w-[76ch] min-w-0 text-gray-800 dark:text-gray-200">
             <MarkdownRenderer
               content={message.message.content}
               className="prose-blue dark:prose-invert"

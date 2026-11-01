@@ -111,9 +111,31 @@ export const useNotebooks = () => {
       return data;
     },
     onSuccess: (data) => {
-      console.log("Mutation success, invalidating queries");
-      queryClient.invalidateQueries({ queryKey: ["notebooks", effectiveUserId] });
-      
+      console.log("Mutation success, updating notebook cache");
+      // The create flow navigates immediately to the new ID. Seed the active
+      // owner's list so the page cannot mistake stale data for a missing notebook.
+      if (data && effectiveUserId) {
+        const notebook = {
+          ...data,
+          example_questions: data.exampleQuestions || data.example_questions,
+          generation_status: data.generationStatus || data.generation_status,
+          created_at: data.createdAt || data.created_at,
+          updated_at: data.updatedAt || data.updated_at,
+          user_id: data.userId || data.user_id,
+          join_code: data.joinCode || data.join_code,
+          joinCode: data.joinCode || data.join_code,
+        };
+        queryClient.setQueryData<Record<string, unknown>[]>(
+          ["notebooks", effectiveUserId, isAuthenticated],
+          (current = []) =>
+            current.some((existing) => existing.id === notebook.id)
+              ? current
+              : [...current, notebook],
+        );
+      }
+      // Creation returned the authoritative notebook; avoid an immediate list
+      // refetch that can still be stale while backend replicas settle.
+
       // Trigger background sync (even if API, allows EverMemOS sync)
       if (data) {
         triggerSync('notebook', data.id, data, 'create').catch(err => {

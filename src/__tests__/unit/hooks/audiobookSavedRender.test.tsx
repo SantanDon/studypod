@@ -1,13 +1,30 @@
 import { act, renderHook, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { useSavedAudiobookRender } from "../../../components/notebook/AudiobookView";
+import { triggerAudiobookDownload, useSavedAudiobookRender } from "../../../components/notebook/AudiobookView";
 import { useAudiobookStore } from "@/stores/audiobookStore";
 const headers = () => ({ Authorization: "Bearer unit-owner" });
 const props = { identity: "owner:notebook:source", fileName: "owned book.pdf", hasLocalJob: false, authHeaders: headers };
 const manifest = { fileName: props.fileName, renderId: "saved-render", status: "completed", final: { ready: true, url: "/api/owned-download" }, listenerState: { currentChapterId: "chapter-2", playbackRate: 1.5, currentTimeSeconds: 20 }, bookmarks: [{ id: "saved-bookmark" }] };
 const response = (value: unknown, status = 200) => ({ ok: status === 200, status, json: async () => value }) as Response;
 const deferred = () => { let resolve!: (value: Response) => void; const promise = new Promise<Response>(accept => { resolve = accept; }); return { promise, resolve }; };
-afterEach(() => vi.unstubAllGlobals());
+afterEach(() => { vi.useRealTimers(); vi.unstubAllGlobals(); });
+describe("audiobook download handoff", () => {
+ it("keeps the anchor attached during click and defers temporary Blob URL cleanup", () => {
+  vi.useFakeTimers();
+  const click = vi.spyOn(HTMLAnchorElement.prototype, "click").mockImplementation(function () {
+   expect(document.body.contains(this)).toBe(true);
+  });
+  const revoke = vi.spyOn(URL, "revokeObjectURL").mockImplementation(() => {});
+  triggerAudiobookDownload("blob:https://studypod.test/render", "book.mp3", true);
+  expect(click).toHaveBeenCalledOnce();
+  expect(document.querySelector('a[download="book.mp3"]')).toBeNull();
+  expect(revoke).not.toHaveBeenCalled();
+  vi.advanceTimersByTime(999);
+  expect(revoke).not.toHaveBeenCalled();
+  vi.advanceTimersByTime(1);
+  expect(revoke).toHaveBeenCalledWith("blob:https://studypod.test/render");
+ });
+});
 describe("owner saved audiobook discovery", () => {
  it("recovers cloud render, listener state and bookmarks without creating browser jobs", async () => {
   const before = useAudiobookStore.getState().jobs;

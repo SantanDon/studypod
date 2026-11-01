@@ -6,6 +6,7 @@
  */
 
 import "dotenv/config";
+import { getPersonalProvider, generateWithPersonalProvider } from './personalProviderService.js';
 import { logger } from "../utils/logger.js";
 
 function boundedInteger(value, fallback, minimum, maximum) {
@@ -383,6 +384,7 @@ async function makeOpenAIResponsesRequest(
   priority,
   timeoutMs,
   signal,
+  outputOptions = {},
 ) {
   const instructions = messages
     .filter((message) => message.role === "system")
@@ -410,7 +412,8 @@ async function makeOpenAIResponsesRequest(
         ...(instructions ? { instructions } : {}),
         input,
         reasoning: { effort: getReasoningEffort() },
-        max_output_tokens: priority === "context" ? 12_000 : 6_000,
+        max_output_tokens: outputOptions.maxOutputTokens ?? (priority === "context" ? 12_000 : 6_000),
+        ...(outputOptions.jsonMode ? { text: { format: { type: "json_object" } } } : {}),
         store: false,
       }),
     },
@@ -441,6 +444,7 @@ async function makeChatCompletionsRequest(
   priority,
   timeoutMs,
   signal,
+  outputOptions = {},
 ) {
   const isNvidia = titan.provider === "nvidia";
   const systemContent = isNvidia
@@ -477,7 +481,8 @@ async function makeChatCompletionsRequest(
         ...(isNvidia && systemContent ? { instructions: systemContent } : {}),
         temperature,
         max_tokens: priority === "context" ? 8_000 : 4_000,
-        ["max" + "_tokens"]: getChatOutputTokenLimit(titan, messages, priority),
+        ["max" + "_tokens"]: outputOptions.maxOutputTokens ?? getChatOutputTokenLimit(titan, messages, priority),
+        ...(outputOptions.jsonMode ? { response_format: { type: "json_object" } } : {}),
         stream: false,
       }),
     },
@@ -499,7 +504,7 @@ async function makeChatCompletionsRequest(
   };
 }
 
-async function makeAnthropicRequest(titan, messages, temperature, timeoutMs, signal) {
+async function makeAnthropicRequest(titan, messages, temperature, timeoutMs, signal, outputOptions = {}) {
   const system = messages
     .filter((message) => message.role === "system")
     .map((message) => message.content)
@@ -525,7 +530,7 @@ async function makeAnthropicRequest(titan, messages, temperature, timeoutMs, sig
         model: titan.model,
         ...(system ? { system } : {}),
         messages: chatMessages,
-        max_tokens: 6_000,
+        max_tokens: outputOptions.maxOutputTokens ?? 6_000,
         temperature,
       }),
     },
@@ -548,7 +553,7 @@ async function makeAnthropicRequest(titan, messages, temperature, timeoutMs, sig
   };
 }
 
-async function requestProvider(titan, messages, temperature, priority, timeoutMs, signal) {
+async function requestProvider(titan, messages, temperature, priority, timeoutMs, signal, outputOptions = {}) {
   signal?.throwIfAborted();
   const controller = new AbortController();
   const abort = () => controller.abort(signal?.reason);
@@ -558,10 +563,10 @@ async function requestProvider(titan, messages, temperature, priority, timeoutMs
   try {
     let result;
     if (titan.protocol === "responses")
-      result = await makeOpenAIResponsesRequest(titan, messages, priority, timeoutMs, controller.signal);
+      result = await makeOpenAIResponsesRequest(titan, messages, priority, timeoutMs, controller.signal, outputOptions);
     else if (titan.protocol === "anthropic")
-      result = await makeAnthropicRequest(titan, messages, temperature, timeoutMs, controller.signal);
-    else result = await makeChatCompletionsRequest(titan, messages, temperature, priority, timeoutMs, controller.signal);
+      result = await makeAnthropicRequest(titan, messages, temperature, timeoutMs, controller.signal, outputOptions);
+    else result = await makeChatCompletionsRequest(titan, messages, temperature, priority, timeoutMs, controller.signal, outputOptions);
     controller.signal.throwIfAborted();
     return result;
   } finally {
@@ -579,7 +584,11 @@ export async function dispatchToTitan({
   temperature = 0.7,
   timeoutMs,
   signal,
+  maxOutputTokens,
+  jsonMode,
 }) {
+  const personalProvider = getPersonalProvider();
+  if (personalProvider) return generateWithPersonalProvider(personalProvider, { messages, temperature, timeoutMs, signal, maxOutputTokens, jsonMode });
   signal?.throwIfAborted();
   const budget = Number.isFinite(timeoutMs) ? Math.max(0, Math.min(TOTAL_TIMEOUT_MS, timeoutMs)) : TOTAL_TIMEOUT_MS;
   const controller = new AbortController();
@@ -588,14 +597,15 @@ export async function dispatchToTitan({
   if (signal?.aborted) abort();
   const timer = setTimeout(() => controller.abort(), budget);
   try {
-  return await dispatchWithinDeadline({ messages, priority, temperature, deadline: Date.now() + budget, signal: controller.signal });
+  return await dispatchWithinDeadline({ messages, priority, temperature, deadline: Date.now() + budget, signal: controller.signal, maxOutputTokens, jsonMode });
   } finally {
     clearTimeout(timer);
     signal?.removeEventListener("abort", abort);
   }
 }
 
-async function dispatchWithinDeadline({ messages, priority, temperature, deadline, signal }) {
+async function dispatchWithinDeadline({ messages, priority, temperature, deadline, signal, maxOutputTokens, jsonMode }) {
+  const outputOptions = { maxOutputTokens, jsonMode };
   signal.throwIfAborted();
   const chain = PRIORITY_CHAINS[priority] || PRIORITY_CHAINS.context;
   const attempted = new Set();
@@ -628,6 +638,7 @@ async function dispatchWithinDeadline({ messages, priority, temperature, deadlin
           priority,
           requestTimeoutMs,
           signal,
+          outputOptions,
         );
         logger.info(`[Titan] ${name} completed a request with ${titan.model}`);
         return result;
@@ -644,7 +655,7 @@ async function dispatchWithinDeadline({ messages, priority, temperature, deadlin
           try {
             const result = await requestProvider(
               { ...titan, model: LLM7_FALLBACK_MODEL }, messages, temperature, priority,
-              Math.min(FETCH_TIMEOUT_MS, Math.max(0, deadline - Date.now())), signal,
+              Math.min(FETCH_TIMEOUT_MS, Math.max(0, deadline - Date.now())), signal, outputOptions,
             );
             logger.info(`[Titan] TOKENLLM7 completed a request with fallback model ${LLM7_FALLBACK_MODEL}`);
             return result;
@@ -673,6 +684,7 @@ async function dispatchWithinDeadline({ messages, priority, temperature, deadlin
               priority,
               Math.min(FETCH_TIMEOUT_MS, Math.max(0, deadline - Date.now())),
               signal,
+              outputOptions,
             );
             logger.info(
               `[Titan] GROQ completed a request with fallback model ${GROQ_FALLBACK_MODEL}`,
@@ -693,7 +705,7 @@ async function dispatchWithinDeadline({ messages, priority, temperature, deadlin
             try {
               const result = await requestProvider(
                 retryTitan, messages, temperature, priority,
-                Math.min(FETCH_TIMEOUT_MS, deadline - Date.now()), signal,
+                Math.min(FETCH_TIMEOUT_MS, deadline - Date.now()), signal, outputOptions,
               );
               logger.info(`[Titan] GROQ completed a request after a brief rate limit with ${retryTitan.model}`);
               return result;
@@ -718,14 +730,11 @@ async function dispatchWithinDeadline({ messages, priority, temperature, deadlin
         if (handledError?.name === "AbortError") {
           logger.warn(`[Titan] ${name} timed out after ${requestTimeoutMs}ms`);
         } else {
-          const providerDetail = handledError?.providerDetail
-            ? `: ${handledError.providerDetail}`
-            : "";
           const retryDetail = handledError?.retryAfterMs
             ? ` (retry after ~${Math.ceil(handledError.retryAfterMs / 1_000)}s)`
             : "";
           logger.warn(
-            `[Titan] ${name} failed${status ? ` with status ${status}` : ""}${retryDetail}${providerDetail}; trying the next configured provider`,
+            `[Titan] ${name} failed${status ? ` with status ${status}` : ""}${retryDetail}; trying the next configured provider`,
           );
         }
       } finally {

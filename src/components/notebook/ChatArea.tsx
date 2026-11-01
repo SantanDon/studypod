@@ -5,7 +5,7 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Bot, List, Loader2, MessageSquare, RefreshCw, Search, Send, Share2 } from 'lucide-react';
 import { ScrollArea } from '@/components/ui/scroll-area';
-import { useChatMessages } from '@/hooks/useChatMessages';
+import { useChatMessages, type ChatMessageRequest } from '@/hooks/useChatMessages';
 import { useSources } from '@/hooks/useSources';
 import { useGuest, useNotebookLimits } from '@/hooks/useGuest';
 import MarkdownRenderer from '@/components/chat/MarkdownRenderer';
@@ -14,9 +14,12 @@ import SovereignChatIntro from '@/components/chat/SovereignChatIntro';
 import CaptureButtons from './CaptureButtons';
 import ChatEvidenceScope, { ChatEvidenceScopeValue } from './ChatEvidenceScope';
 import { Citation, EnhancedChatMessage } from '@/types/message';
-import { IMMERSIVE_PROMPTS, BOOKMARK_PROMPTS } from '@/config/prompts';
+import { IMMERSIVE_PROMPTS, BOOKMARK_PROMPTS, CHAT_FOLLOW_UP_PROMPTS } from '@/config/prompts';
 import { useToast } from '@/hooks/use-toast';
 import { formatDisplayTitle } from '@/lib/utils/displayTitle';
+import { useAudiobookStore } from '@/stores/audiobookStore';
+import type { AudiobookReadingContext } from '@/stores/audiobookStore';
+import { getReadingFollowUpPrompts, getVisibleChatQuestion, withAudiobookReadingContext } from '@/lib/audio/readingContext';
 import {
   getSourceProcessingStatus,
   isSourceUsableForGroundedChat,
@@ -30,6 +33,16 @@ import {
   type AudioListeningQuestionRequest,
 } from '@/lib/audio/listeningQuestion';
 import AddSourcesDialog from './AddSourcesDialog';
+import {
+  SOURCE_LEARNING_QUESTION_EVENT,
+  buildSourceLearningQuestionMessage,
+  claimSourceLearningQuestion,
+  consumeQueuedSourceLearningQuestion,
+  restoreSourceLearningDraft,
+  serializeSourceLearningDraft,
+  type SourceLearningDraft,
+  type SourceLearningQuestionRequest,
+} from '@/lib/sources/sourceLearningQuestion';
 const ResearchFurtherDialog = lazy(() => import('./ResearchFurtherDialog'));
 
 const DialogLoading = () => (
@@ -38,6 +51,34 @@ const DialogLoading = () => (
       Loading…
     </div>
   </div>
+);
+
+export const resolveChatSourceIds = ({
+  explicitSourceIds,
+  chatScope,
+  activeSourceId,
+  hasExplicitAllScope,
+  readingSourceId,
+  readingSourceUsable,
+}: {
+  explicitSourceIds?: string[];
+  chatScope: ChatEvidenceScopeValue;
+  activeSourceId?: string | null;
+  hasExplicitAllScope: boolean;
+  readingSourceId?: string | null;
+  readingSourceUsable: boolean;
+}): string[] | undefined => {
+  if (explicitSourceIds) return explicitSourceIds;
+  if (chatScope === 'active' && activeSourceId) return [activeSourceId];
+  if (hasExplicitAllScope || !readingSourceUsable || !readingSourceId) return undefined;
+  return [readingSourceId];
+};
+
+export const resolveUsableAudiobookReadingContext = (
+  context: AudiobookReadingContext | undefined,
+  readingSourceUsable: boolean,
+): AudiobookReadingContext | undefined => (
+  readingSourceUsable && context?.sourceId ? context : undefined
 );
 
 import {
@@ -76,7 +117,10 @@ const ChatArea = ({
 }: ChatAreaProps) => {
   const [message, setMessage] = useState('');
   const [failedMessage, setFailedMessage] = useState<string | null>(null);
+  const learningDraftRef = useRef<SourceLearningDraft | null>(null);
+  const learningRequestInFlight = useRef(false);
   const [chatScope, setChatScope] = useState<ChatEvidenceScopeValue>('all');
+  const [hasExplicitAllScope, setHasExplicitAllScope] = useState(false);
   const [hydratedDraftKey, setHydratedDraftKey] = useState<string | null>(null);
   const [pendingUserMessage, setPendingUserMessage] = useState<string | null>(null);
   const [showAiLoading, setShowAiLoading] = useState(false);
@@ -87,6 +131,10 @@ const ChatArea = ({
   const [responseStyle, setResponseStyle] = useState<'dense' | 'conversational'>('dense');
   const { toast } = useToast();
   const [isShareOpen, setIsShareOpen] = useState(false);
+  const retryHandlerRef = useRef<((request: ChatMessageRequest) => void) | null>(null);
+  const readingContext = useAudiobookStore((state) => notebookId
+    ? state.readingContextByNotebook?.[notebookId]
+    : undefined);
   
   const { isGuest, incrementUsage, showAuthPrompt } = useGuest();
   const { canSendMessage, messagesRemaining } = useNotebookLimits(notebookId);
@@ -99,7 +147,7 @@ const ChatArea = ({
     isSending,
     deleteChatHistory,
     isDeletingChatHistory
-  } = useChatMessages(notebookId);
+  } = useChatMessages(notebookId, (request) => retryHandlerRef.current?.(request));
   
   const {
     sources,
@@ -108,6 +156,10 @@ const ChatArea = ({
     error: sourcesError,
     retrySources
   } = useSources(notebookId);
+
+  const readingSourceUsable = Boolean(readingContext?.sourceId && sources?.some((source) =>
+    source.id === readingContext.sourceId && isSourceUsableForGroundedChat(source)));
+  const usableReadingContext = resolveUsableAudiobookReadingContext(readingContext, readingSourceUsable);
   
   const sourceCount = sources?.length || 0;
   const activeSource = sources?.find((source) => source.id === activeSourceId) || null;
@@ -129,48 +181,54 @@ const ChatArea = ({
   const isChatDisabled = sourceCount === 0 || !hasReadySource || (chatScope === 'active' && !activeSourceUsable);
 
   // Track when we send a message to show loading state
-  const [lastMessageCount, setLastMessageCount] = useState(0);
 
   // Ref for auto-scrolling to the most recent message
   const latestMessageRef = useRef<HTMLDivElement>(null);
   const scrollAreaRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
+    learningDraftRef.current = null;
     if (!draftStorageKey) {
+      setMessage('');
       setHydratedDraftKey(null);
       return;
     }
     try {
-      setMessage(localStorage.getItem(draftStorageKey) || '');
+      const restored = restoreSourceLearningDraft(localStorage.getItem(draftStorageKey) || '', notebookId!);
+      learningDraftRef.current = restored.draft;
+      setMessage(restored.content);
     } catch {
       setMessage('');
     }
     setFailedMessage(null);
     setHydratedDraftKey(draftStorageKey);
-  }, [draftStorageKey]);
+  }, [draftStorageKey, notebookId]);
 
   useEffect(() => {
     if (!draftStorageKey || hydratedDraftKey !== draftStorageKey) return;
     try {
-      if (message.trim()) localStorage.setItem(draftStorageKey, message);
+      const draft = learningDraftRef.current;
+      // A reload during a request should recover the scoped question too.
+      const content = message || (draft?.notebookId === notebookId && draft.content === pendingUserMessage ? pendingUserMessage : '') || '';
+      if (content.trim()) localStorage.setItem(draftStorageKey, serializeSourceLearningDraft(content, notebookId!, draft));
       else localStorage.removeItem(draftStorageKey);
     } catch {
       // Draft persistence is best-effort and must never block chat.
     }
-  }, [draftStorageKey, hydratedDraftKey, message]);
+  }, [draftStorageKey, hydratedDraftKey, message, notebookId, pendingUserMessage]);
+
+  const handleMessageChange = useCallback((content: string) => {
+    // Editing creates an ordinary draft; never attach a previous passage's scope.
+    learningDraftRef.current = null;
+    setMessage(content);
+  }, []);
 
   useEffect(() => {
-    if (chatScope === 'active' && !activeSourceUsable) setChatScope('all');
-  }, [activeSourceUsable, chatScope]);
-  useEffect(() => {
-    // If we have new messages and we have a pending message, clear it
-    if (messages.length > lastMessageCount && pendingUserMessage) {
-      setPendingUserMessage(null);
-      setShowAiLoading(false);
+    if (chatScope === 'active' && !activeSourceUsable) {
+      setChatScope('all');
+      setHasExplicitAllScope(false);
     }
-    setLastMessageCount(messages.length);
-  }, [messages.length, lastMessageCount, pendingUserMessage]);
-
+  }, [activeSourceUsable, chatScope]);
   // Auto-scroll when pending message is set, when messages update, or when AI loading appears
   useEffect(() => {
     if (latestMessageRef.current && scrollAreaRef.current) {
@@ -187,10 +245,21 @@ const ChatArea = ({
       }
     }
   }, [pendingUserMessage, messages.length, showAiLoading]);
-  const handleSendMessage = useCallback(async (messageText?: string, sourceIdsOverride?: string[]) => {
+  const handleSendMessage = useCallback(async (messageText?: string, sourceIdsOverride?: string[], isToastRetry = false) => {
     const textToSend = messageText || message.trim();
     if (textToSend && notebookId) {
-      const audioIntent = !sourceIdsOverride ? parseStudioAudioIntent(textToSend) : null;
+      const learningDraft = learningDraftRef.current;
+      const isLearningDraft = learningDraft?.notebookId === notebookId && learningDraft.content === textToSend;
+      const scopedSourceIds = sourceIdsOverride ?? (isLearningDraft ? [learningDraft.sourceId] : undefined);
+      if (isLearningDraft) {
+        const source = sources?.find((item) => item.id === learningDraft.sourceId);
+        if (!source || !isSourceUsableForGroundedChat(source) || isSending || showAiLoading) {
+          setMessage(textToSend);
+          toast({ title: 'Passage question saved as a draft', description: 'Wait for the source and current response to be ready, then send your question.' });
+          return;
+        }
+      }
+      const audioIntent = !scopedSourceIds ? parseStudioAudioIntent(textToSend) : null;
       if (audioIntent) {
         const accepted = useStudioAudioCommands.getState().draft(notebookId, audioIntent, activeSourceId);
         if (accepted) { setMessage(''); setFailedMessage(null); }
@@ -206,10 +275,11 @@ const ChatArea = ({
       console.log('📤 Sending message:', textToSend);
 
       try {
-        setFailedMessage(null);
+        if (!isToastRetry || failedMessage === textToSend) setFailedMessage(null);
         // Store the pending message to display immediately
         setPendingUserMessage(textToSend);
-        setMessage('');
+        const preserveDraft = isToastRetry && message.trim() !== textToSend;
+        if (!preserveDraft) setMessage('');
 
         // Show AI loading immediately
         setShowAiLoading(true);
@@ -218,9 +288,16 @@ const ChatArea = ({
         await sendMessageAsync({
           notebookId: notebookId,
           role: 'user',
-          content: textToSend,
+          content: withAudiobookReadingContext(textToSend, usableReadingContext),
           responseStyle,
-          sourceIds: sourceIdsOverride ?? (chatScope === 'active' && activeSourceId ? [activeSourceId] : undefined),
+          sourceIds: resolveChatSourceIds({
+            explicitSourceIds: scopedSourceIds,
+            chatScope,
+            activeSourceId,
+            hasExplicitAllScope,
+            readingSourceId: readingContext?.sourceId,
+            readingSourceUsable,
+          }),
         });
 
         // Track guest usage
@@ -232,13 +309,18 @@ const ChatArea = ({
 
         // Clear pending message, draft, and loading state after response
         setPendingUserMessage(null);
-        setFailedMessage(null);
+        if (!isToastRetry || failedMessage === textToSend) setFailedMessage(null);
         setShowAiLoading(false);
+        if (learningDraftRef.current === learningDraft) learningDraftRef.current = null;
       } catch (error) {
         console.error('❌ Failed to send message:', error);
-        // Restore the exact draft so the user never loses their question.
-        setMessage(textToSend);
-        setFailedMessage(textToSend);
+        // A newer passage or notebook draft takes precedence over this failed request.
+        if (learningDraftRef.current === learningDraft && (!isToastRetry || message.trim() === textToSend)) {
+          // Keep app-generated listening/reader context in the request for retry,
+          // but show only the learner's question in the composer.
+          setMessage(getVisibleChatQuestion(textToSend));
+          setFailedMessage(textToSend);
+        }
         setPendingUserMessage(null);
         setShowAiLoading(false);
       }
@@ -247,15 +329,32 @@ const ChatArea = ({
     activeSourceId,
     canSendMessage,
     chatScope,
+    hasExplicitAllScope,
+    failedMessage,
     incrementUsage,
     isGuest,
+    isSending,
     message,
     notebookId,
     responseStyle,
+    readingContext,
+    readingSourceUsable,
+    usableReadingContext,
     sendMessageAsync,
     showAuthPrompt,
+    showAiLoading,
+    sources,
     toast,
   ]);
+
+  useEffect(() => {
+    retryHandlerRef.current = (request) => {
+      if (request.notebookId !== notebookId || request.role !== 'user' || !failedMessage) return;
+      if (withAudiobookReadingContext(failedMessage, usableReadingContext) !== request.content) return;
+      void handleSendMessage(failedMessage, request.sourceIds, true);
+    };
+    return () => { retryHandlerRef.current = null; };
+  }, [failedMessage, handleSendMessage, notebookId, usableReadingContext]);
 
   const handleAudioListeningQuestion = useCallback((request: AudioListeningQuestionRequest) => {
     if (!notebookId || request.notebookId !== notebookId) return;
@@ -264,6 +363,7 @@ const ChatArea = ({
     clearQueuedAudioListeningQuestion(notebookId);
     setChatMode('study');
     setChatScope('all');
+    setHasExplicitAllScope(false);
 
     if (!requestedSource || !isSourceUsableForGroundedChat(requestedSource)) {
       setMessage(questionMessage);
@@ -292,6 +392,35 @@ const ChatArea = ({
     window.addEventListener(AUDIO_LISTENING_QUESTION_EVENT, onAudioQuestion);
     return () => window.removeEventListener(AUDIO_LISTENING_QUESTION_EVENT, onAudioQuestion);
   }, [handleAudioListeningQuestion, notebookId]);
+
+  const handleSourceLearningQuestion = useCallback((request: SourceLearningQuestionRequest) => {
+    if (!notebookId || !claimSourceLearningQuestion(request, notebookId)) return;
+    const question = buildSourceLearningQuestionMessage(request);
+    learningDraftRef.current = { notebookId, content: question, sourceId: request.sourceId };
+    setChatMode('study');
+    setChatScope('all');
+    setHasExplicitAllScope(false);
+    const source = sources?.find((item) => item.id === request.sourceId);
+    if (!source || !isSourceUsableForGroundedChat(source) || isSending || showAiLoading || learningRequestInFlight.current || (isGuest && !canSendMessage)) {
+      setMessage(question);
+      toast({ title: 'Passage question saved as a draft', description: 'Your selected passage is kept here. Send it when the source and chat are ready.' });
+      return;
+    }
+    learningRequestInFlight.current = true;
+    void handleSendMessage(question, [request.sourceId]).finally(() => { learningRequestInFlight.current = false; });
+  }, [canSendMessage, handleSendMessage, isGuest, isSending, notebookId, showAiLoading, sources, toast]);
+
+  useEffect(() => {
+    if (!notebookId) return;
+    const onLearningQuestion = (event: Event) => {
+      const request = (event as CustomEvent<SourceLearningQuestionRequest>).detail;
+      if (request) handleSourceLearningQuestion(request);
+    };
+    window.addEventListener(SOURCE_LEARNING_QUESTION_EVENT, onLearningQuestion);
+    const queued = consumeQueuedSourceLearningQuestion(notebookId);
+    if (queued) handleSourceLearningQuestion(queued);
+    return () => window.removeEventListener(SOURCE_LEARNING_QUESTION_EVENT, onLearningQuestion);
+  }, [handleSourceLearningQuestion, notebookId]);
 
   const handleRefreshChat = () => {
     if (notebookId) {
@@ -367,6 +496,13 @@ const ChatArea = ({
         : (notebook?.example_questions?.filter(q => !clickedQuestions.has(q)) || [])
       );
 
+  // Keep useful next-step prompts available after the first exchange, when
+  // notebook starter questions have already been used or dismissed.
+  const contextualFollowUps = usableReadingContext
+    ? getReadingFollowUpPrompts(usableReadingContext)
+    : CHAT_FOLLOW_UP_PROMPTS;
+  const followUpQuestions = contextualFollowUps.filter((question) => !clickedQuestions.has(question));
+
   // Update placeholder text based on processing status
   const getPlaceholderText = () => {
     if (isChatDisabled) {
@@ -436,7 +572,7 @@ const ChatArea = ({
                <div className="hidden md:block">
                   <ChatEvidenceScope
                     value={chatScope}
-                    onChange={setChatScope}
+                    onChange={(scope) => { setChatScope(scope); setHasExplicitAllScope(scope === 'all'); }}
                     activeSourceTitle={activeSource?.title}
                     activeSourceUsable={activeSourceUsable}
                   />
@@ -485,7 +621,7 @@ const ChatArea = ({
               <div className="mt-3 md:hidden">
                 <ChatEvidenceScope
                   value={chatScope}
-                  onChange={setChatScope}
+                  onChange={(scope) => { setChatScope(scope); setHasExplicitAllScope(scope === 'all'); }}
                   activeSourceTitle={activeSource?.title}
                   activeSourceUsable={activeSourceUsable}
                 />
@@ -522,7 +658,7 @@ const ChatArea = ({
                  {!hasConversation && (
                    <div className="mt-4 rounded-xl border border-border bg-card px-4 py-3 text-sm leading-6 text-muted-foreground shadow-sm">
                      {isGenerating ? (
-                       <p>StudyPod is analysing your source and preparing its title and overview.</p>
+                       <p>StudyPod is reading your source and preparing an overview.</p>
                      ) : (
                        <MarkdownRenderer
                          content={notebook?.description || 'Your sources are ready. Ask a question or choose a starting point below.'}
@@ -544,7 +680,7 @@ const ChatArea = ({
                     {messages.map((msg) => <div key={msg.id} className={`group flex ${isUserMessage(msg) ? 'justify-end' : 'justify-start'}`}>
                         <div className={`${isUserMessage(msg) ? 'max-w-xs lg:max-w-md px-4 py-2 bg-blue-500 text-white rounded-lg' : 'w-full'}`}>
                           <div className={isUserMessage(msg) ? '' : 'prose prose-gray dark:prose-invert max-w-none text-gray-800 dark:text-gray-200'}>
-                            <MarkdownRenderer content={msg.message.content} className={isUserMessage(msg) ? '' : ''} onCitationClick={handleCitationClick} isUserMessage={isUserMessage(msg)} />
+                            <MarkdownRenderer content={isUserMessage(msg) && typeof msg.message.content === 'string' ? getVisibleChatQuestion(msg.message.content) : msg.message.content} className={isUserMessage(msg) ? '' : ''} onCitationClick={handleCitationClick} isUserMessage={isUserMessage(msg)} />
                           </div>
                           {isAiMessage(msg) && <div className="mt-2 flex justify-start">
                               <CaptureButtons content={msg.message.content} notebookId={notebookId} />
@@ -555,7 +691,7 @@ const ChatArea = ({
                     {/* Pending user message */}
                     {pendingUserMessage && <div className="flex justify-end">
                         <div className="max-w-xs lg:max-w-md px-4 py-2 bg-blue-500 text-white rounded-lg">
-                          <MarkdownRenderer content={pendingUserMessage} className="" isUserMessage={true} />
+                          <MarkdownRenderer content={getVisibleChatQuestion(pendingUserMessage)} className="" isUserMessage={true} />
                         </div>
                       </div>}
                     
@@ -601,24 +737,24 @@ const ChatArea = ({
           {/* Chat Input - Fixed at bottom */}
           <ChatInput 
             message={message}
-            onMessageChange={setMessage}
+            onMessageChange={handleMessageChange}
             onSend={() => handleSendMessage()}
             disabled={isChatDisabled}
             isLoading={isSending || !!pendingUserMessage}
             sourceCount={sourceCount}
-            exampleQuestions={!hasConversation ? exampleQuestions : []}
+            exampleQuestions={hasConversation ? followUpQuestions : exampleQuestions}
             onExampleQuestionClick={handleExampleQuestionClick}
             placeholder={getPlaceholderText()}
           />
         </div> :
     // Empty State
-    <div className="flex-1 flex flex-col items-center justify-center p-8 overflow-hidden bg-background dark:bg-background">
+    <div className="flex-1 flex flex-col items-center justify-center p-4 sm:p-8 overflow-hidden bg-background dark:bg-background">
           <div className="text-center mb-8">
             <div className="w-16 h-16 rounded-full mx-auto mb-4 flex items-center justify-center bg-gray-100 dark:bg-muted">
               <i className="fi fi-rr-upload h-8 w-8 text-slate-600 dark:text-slate-400"></i>
             </div>
             <h2 className="text-xl font-medium text-gray-900 dark:text-foreground mb-2">Add a source to get started</h2>
-            <p className="mb-4 text-sm text-muted-foreground">Upload a file, paste text, or add a web link. Then ask questions grounded in your material.</p>
+            <p className="mb-4 text-sm text-muted-foreground">Add a file, paste text, or share a link, then ask questions about it.</p>
             <Button onClick={() => setShowAddSourcesDialog(true)}>
               <i className="fi fi-rr-upload h-4 w-4 mr-2"></i>
               Add a source
@@ -627,12 +763,12 @@ const ChatArea = ({
 
           {/* Bottom Input */}
           <div className="w-full max-w-2xl">
-            <div className="flex space-x-4">
-              <Input placeholder="Add a source to get started" disabled className="flex-1" />
-              <div className="flex items-center text-sm text-gray-500">
+            <div className="flex gap-2 sm:gap-4">
+              <Input aria-label="Chat message" value={message} placeholder="Add a source to get started" disabled className="min-w-0 flex-1 h-11 sm:h-10" />
+              <div className="flex shrink-0 items-center text-sm text-gray-500">
                 0 sources
               </div>
-              <Button disabled aria-label="Send message">
+              <Button disabled aria-label="Send message" className="h-11 min-w-11 shrink-0 sm:h-10">
                 <Send className="h-4 w-4" aria-hidden="true" />
               </Button>
             </div>

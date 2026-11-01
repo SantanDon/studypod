@@ -13,6 +13,7 @@ import { logger } from "../utils/logger.js";
 import { recoverNotebookIfAbsent } from "./notebookRecovery.js";
 import { createSingleFlight } from "../utils/singleFlight.js";
 import { withDatabaseRetry } from "../utils/databaseRetry.js";
+import { sortChatMessages } from "../utils/chatMessageOrdering.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -1012,11 +1013,12 @@ export const dbHelpers = {
         const access = await this.getNotebookById(notebookId, userId);
         if (!access) return [];
 
-        return await db
+        const messages = await db
           .select()
           .from(schema.chatMessages)
           .where(eq(schema.chatMessages.notebookId, notebookId))
           .orderBy(asc(schema.chatMessages.createdAt));
+        return sortChatMessages(messages);
       },
       { label: `messages for notebook ${notebookId}` },
     );

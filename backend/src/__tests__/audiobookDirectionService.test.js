@@ -141,9 +141,18 @@ describe('audiobook literary direction', () => {
       voice: 'af_heart',
       provider: 'kokoro',
     });
+    const framed = createNarrationSignature({
+      requestedPreset: 'auto',
+      analysis,
+      pronunciations: [{ term: 'AI', pronunciation: 'A I' }],
+      voice: 'af_heart',
+      provider: 'kokoro',
+      includeFraming: true,
+    });
 
     expect(first).toMatch(/^[a-f0-9]{12}$/);
     expect(second).toBe(first);
     expect(changed).not.toBe(first);
+    expect(framed).not.toBe(first);
   });
 });

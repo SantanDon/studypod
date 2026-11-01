@@ -201,7 +201,7 @@ describe('StudioSidebar', () => {
     const audioStudio = screen.getByRole('region', { name: 'Audio studio' });
     expect(within(audioStudio).getByRole('heading', { name: 'Audio Overview' })).toBeVisible();
     expect(screen.getByText('2 of 3 sources ready')).toBeInTheDocument();
-    expect(screen.getByText('By default, Audio Overview draws on excerpts from every ready source in this notebook. Other sources are skipped.')).toBeInTheDocument();
+    expect(screen.getByText("Audio Overview uses selected passages from ready sources in this notebook. Sources that aren't ready are skipped.")).toBeInTheDocument();
     expect(screen.getByText('Create from sources')).toBeInTheDocument();
     expect(screen.getByText('Research workflows')).toBeInTheDocument();
     expect(screen.getByText('Study and review')).toBeInTheDocument();

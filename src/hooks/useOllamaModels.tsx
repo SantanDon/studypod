@@ -1,13 +1,17 @@
 import { useState, useCallback, useEffect } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import { getOllamaBaseUrl, isOllamaEnabled, setRuntimeOllamaEnabled } from "@/config/ollamaConfig";
 import {
   checkOllamaHealth,
   getAvailableModels,
   pullModel,
 } from "@/lib/ai/ollamaService";
 
-const OLLAMA_BASE_URL =
-  import.meta.env.VITE_OLLAMA_URL || "http://localhost:11434";
+const assertEndpointUnchanged = (endpoint: string) => {
+  if (getOllamaBaseUrl() !== endpoint) {
+    throw new Error("Ollama endpoint changed during discovery; retrying with the current endpoint.");
+  }
+};
 
 export interface ModelInfo {
   name: string;
@@ -127,16 +131,32 @@ interface DefaultModels {
 
 export function useOllamaModels() {
   const queryClient = useQueryClient();
+  const [ollamaEnabled, setOllamaEnabledState] = useState(() => isOllamaEnabled());
+  const [ollamaBaseUrl, setOllamaBaseUrl] = useState(() => getOllamaBaseUrl());
   const [downloadProgress, setDownloadProgress] = useState<Record<string, number>>({});
   const [downloadingModels, setDownloadingModels] = useState<Set<string>>(new Set());
+
+  // Settings may update localStorage in a sibling component. Reconcile the
+  // query identity after that component rerenders so callers need not know
+  // about this hook's cache-key details.
+  useEffect(() => {
+    const configuredEndpoint = getOllamaBaseUrl();
+    if (configuredEndpoint !== ollamaBaseUrl) setOllamaBaseUrl(configuredEndpoint);
+  });
 
   const {
     data: isHealthy = false,
     isLoading: healthLoading,
     refetch: refetchHealth,
   } = useQuery({
-    queryKey: ["ollama-health"],
-    queryFn: checkOllamaHealth,
+    queryKey: ["ollama-health", ollamaEnabled, ollamaBaseUrl],
+    queryFn: async () => {
+      const endpoint = getOllamaBaseUrl();
+      const healthy = await checkOllamaHealth();
+      assertEndpointUnchanged(endpoint);
+      return healthy;
+    },
+    enabled: ollamaEnabled,
     refetchInterval: 10000,
     staleTime: 5000,
   });
@@ -146,9 +166,14 @@ export function useOllamaModels() {
     isLoading: modelsLoading,
     refetch: refetchModels,
   } = useQuery({
-    queryKey: ["ollama-models"],
-    queryFn: getAvailableModels,
-    enabled: isHealthy,
+    queryKey: ["ollama-models", ollamaBaseUrl],
+    queryFn: async () => {
+      const endpoint = getOllamaBaseUrl();
+      const models = await getAvailableModels();
+      assertEndpointUnchanged(endpoint);
+      return models;
+    },
+    enabled: ollamaEnabled && isHealthy,
     staleTime: 30000,
   });
 
@@ -157,19 +182,24 @@ export function useOllamaModels() {
     isLoading: detailsLoading,
     refetch: refetchDetails,
   } = useQuery({
-    queryKey: ["ollama-model-details"],
+    queryKey: ["ollama-model-details", ollamaBaseUrl],
     queryFn: async (): Promise<ModelInfo[]> => {
       if (!isHealthy) return [];
+      const endpoint = getOllamaBaseUrl();
       try {
-        const response = await fetch(`${OLLAMA_BASE_URL}/api/tags`);
+        const response = await fetch(`${endpoint}/api/tags`);
+        assertEndpointUnchanged(endpoint);
         if (!response.ok) throw new Error("Failed to fetch model details");
         const data = await response.json();
         return data.models || [];
       } catch {
+        // A response from an endpoint that is no longer selected must not be
+        // converted into an apparently successful empty-model result.
+        assertEndpointUnchanged(endpoint);
         return [];
       }
     },
-    enabled: isHealthy,
+    enabled: ollamaEnabled && isHealthy,
     staleTime: 30000,
   });
 
@@ -231,7 +261,7 @@ export function useOllamaModels() {
 
   const deleteModelMutation = useMutation({
     mutationFn: async (modelName: string) => {
-      const response = await fetch(`${OLLAMA_BASE_URL}/api/delete`, {
+      const response = await fetch(`${getOllamaBaseUrl()}/api/delete`, {
         method: "DELETE",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ name: modelName }),
@@ -249,7 +279,7 @@ export function useOllamaModels() {
   const getModelInfo = useCallback(
     async (modelName: string): Promise<ModelInfo | null> => {
       try {
-        const response = await fetch(`${OLLAMA_BASE_URL}/api/show`, {
+        const response = await fetch(`${getOllamaBaseUrl()}/api/show`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ name: modelName }),
@@ -280,6 +310,45 @@ export function useOllamaModels() {
     []
   );
 
+  const setOllamaEnabled = useCallback((enabled: boolean) => {
+    setRuntimeOllamaEnabled(enabled);
+    setOllamaEnabledState(enabled);
+    const endpoint = getOllamaBaseUrl();
+
+    // A disabled local provider is not evidence that the endpoint has no
+    // models or is unhealthy. Drop discovery snapshots when toggling either
+    // way so re-enabling always performs fresh health and model discovery.
+    queryClient.removeQueries({ queryKey: ["ollama-health", true, endpoint], exact: true });
+    queryClient.removeQueries({ queryKey: ["ollama-health", false, endpoint], exact: true });
+    queryClient.removeQueries({ queryKey: ["ollama-models", endpoint], exact: true });
+    queryClient.removeQueries({ queryKey: ["ollama-model-details", endpoint], exact: true });
+  }, [queryClient]);
+
+  const refreshEndpoint = useCallback(() => {
+    const endpoint = getOllamaBaseUrl();
+    setOllamaBaseUrl(endpoint);
+    return endpoint;
+  }, []);
+
+  const discoveryStatus = !ollamaEnabled
+    ? "disabled"
+    : healthLoading
+      ? "checking"
+      : !isHealthy
+        ? "unavailable"
+        : modelsLoading
+          ? "checking"
+          : installedModels.length === 0
+            ? "no-models"
+            : "ready";
+  const discoveryMessage = {
+    disabled: "Local Ollama is disabled. Enable it to discover installed models.",
+    checking: "Checking the local Ollama service and installed models…",
+    unavailable: `Could not reach Ollama from this browser at ${ollamaBaseUrl}. Check that Ollama is running and reachable; browser permissions or CORS can also block access.`,
+    "no-models": "Ollama is running, but no models are installed yet.",
+    ready: `${installedModels.length} Ollama model${installedModels.length === 1 ? "" : "s"} available.`,
+  }[discoveryStatus];
+
   const formatBytes = useCallback((bytes: number): string => {
     if (bytes === 0) return "0 B";
     const k = 1024;
@@ -289,6 +358,12 @@ export function useOllamaModels() {
   }, []);
 
   return {
+    ollamaEnabled,
+    ollamaBaseUrl,
+    refreshEndpoint,
+    setOllamaEnabled,
+    discoveryStatus,
+    discoveryMessage,
     isHealthy,
     healthLoading,
     installedModels,

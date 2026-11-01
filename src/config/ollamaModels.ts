@@ -38,10 +38,43 @@ export const ollamaModelMap: Record<OllamaTask, string> = {
   title: "llama3.2:1b",
 };
 
+/** Return a valid browser-selected model without applying build/default fallbacks. */
+export function getRuntimeModelForTask(task: OllamaTask): string | undefined {
+  // Settings stores per-purpose choices in this browser-local record. Read it
+  // at call time so changes made after module load affect the next request.
+  // Treat storage as untrusted (it may be stale, malformed, or unavailable).
+  const settingKey = task === "embeddings" ? "embedding" : task === "code" ? "code" : "chat";
+  try {
+    if (typeof localStorage !== "undefined") {
+      const raw = localStorage.getItem("ollama-default-models");
+      if (raw) {
+        const parsed: unknown = JSON.parse(raw);
+        if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
+          const candidate = (parsed as Record<string, unknown>)[settingKey];
+          if (typeof candidate === "string") {
+            const model = candidate.trim();
+            if (model.length > 0 && model.length <= 256 && /^[A-Za-z0-9_.-]+(?:\/[A-Za-z0-9_.-]+)*(?::[A-Za-z0-9_.-]+)?$/.test(model)) {
+              return model;
+            }
+          }
+        }
+      }
+    }
+  } catch {
+    // Fall back to the built-in mapping when browser storage is inaccessible.
+  }
+
+  return undefined;
+}
+
 export function getModelForTask(task: OllamaTask): string {
-  // Keep self-hosted generation tasks on the model chosen by the operator.
-  // Embeddings require their own model and must never use a generation model.
+  const runtimeModel = getRuntimeModelForTask(task);
+  if (runtimeModel) return runtimeModel;
+
+  // A browser selection is an explicit runtime choice, so it takes precedence
+  // over the build-time default. Embeddings still use their dedicated model.
   const configuredModel = import.meta.env.VITE_OLLAMA_MODEL?.trim();
   if (task !== "embeddings" && configuredModel) return configuredModel;
+
   return ollamaModelMap[task] ?? ollamaModelMap.chat;
 }

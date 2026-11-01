@@ -46,6 +46,24 @@ export const DEFAULT_TTS_CONFIG: TTSConfig = {
   endpoint: 'http://localhost:7860', // Only used if provider is 'ultimate-tts'
 };
 
+/** Maps the persisted provider choice to the backends the streaming podcast
+ * generator can actually run. Remote providers must not be silently replaced
+ * by a different voice when this streaming path is selected.
+ */
+export function getStreamingPodcastProviderConfig(
+  config: TTSConfig = getTTSConfig(),
+): { useKokoro: boolean; forceWebSpeech: boolean } {
+  if (config.provider === 'kokoro') {
+    return { useKokoro: true, forceWebSpeech: false };
+  }
+  if (config.provider === 'web-speech') {
+    return { useKokoro: false, forceWebSpeech: true };
+  }
+  throw new Error(
+    `${config.provider} is configured for speech, but podcast streaming currently supports Kokoro and browser speech only. Choose Kokoro or browser speech in TTS settings.`,
+  );
+}
+
 export function getTTSConfig(): TTSConfig {
   try {
     const stored = localStorage.getItem(TTS_CONFIG_KEY);

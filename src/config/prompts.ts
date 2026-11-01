@@ -65,6 +65,14 @@ export const BOOKMARK_PROMPTS = [
   "📢 Draft social media updates from these bookmarks directly to the Signal Queue"
 ];
 
+/** Short, reusable prompts for continuing a study conversation. */
+export const CHAT_FOLLOW_UP_PROMPTS = [
+  'What evidence from my sources supports that answer?',
+  'Explain the key idea more simply, with an example from the sources.',
+  'What is uncertain or missing from the source material here?',
+  'Help me practise the main idea from these sources. First reply with exactly one source-grounded question and its citation only; do not include an explanation, summary, answer, or hint. Stop and wait for my answer. Then give brief feedback supported by a source citation and help me correct any misunderstanding.',
+];
+
 /**
  * DOCUMENT_PROMPTS
  * Legacy/Administrative prompts for automated document processing.

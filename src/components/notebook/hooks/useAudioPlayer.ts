@@ -2,6 +2,7 @@ import { useState, useRef, useEffect, useCallback } from "react";
 import { useToast } from "@/hooks/use-toast";
 import { localStorageService } from "@/services/localStorageService";
 import { getStreamingTTSGenerator } from "@/lib/tts/streamingTTSGenerator";
+import { downloadAudioBlob } from "@/lib/audio/downloadAudioBlob";
 import {
   clearPlaybackCheckpoint,
   getResumableTime,
@@ -232,7 +233,11 @@ export function useAudioPlayer({
       }
     };
 
-    const handlePause = () => persistPlayback(audio.currentTime);
+    const handlePlay = () => setIsPlaying(true);
+    const handlePause = () => {
+      setIsPlaying(false);
+      persistPlayback(audio.currentTime);
+    };
 
     const handleLoadStart = () => {
       if (autoRetryInProgress) {
@@ -250,6 +255,8 @@ export function useAudioPlayer({
     audio.addEventListener("canplay", handleCanPlay);
     audio.addEventListener("loadstart", handleLoadStart);
     audio.addEventListener("ended", handleEnded);
+    audio.addEventListener("play", handlePlay);
+    audio.addEventListener("playing", handlePlay);
     audio.addEventListener("pause", handlePause);
     audio.addEventListener("error", handleError);
 
@@ -261,6 +268,8 @@ export function useAudioPlayer({
       audio.removeEventListener("canplay", handleCanPlay);
       audio.removeEventListener("loadstart", handleLoadStart);
       audio.removeEventListener("ended", handleEnded);
+      audio.removeEventListener("play", handlePlay);
+      audio.removeEventListener("playing", handlePlay);
       audio.removeEventListener("pause", handlePause);
       audio.removeEventListener("error", handleError);
     };
@@ -357,11 +366,11 @@ export function useAudioPlayer({
       if (playPromise !== undefined) {
         playPromise.catch((error) => {
           console.error("Play failed:", error);
+          setIsPlaying(false);
           setAudioError("Playback failed");
         });
       }
     }
-    setIsPlaying(!isPlaying);
   };
 
   const handleSeek = (value: number[]) => {
@@ -496,14 +505,7 @@ export function useAudioPlayer({
       }
 
       const blob = await response.blob();
-      const blobUrl = URL.createObjectURL(blob);
-      const link = document.createElement("a");
-      link.href = blobUrl;
-      link.download = `${title}.mp3`;
-      document.body.appendChild(link);
-      link.click();
-      document.body.removeChild(link);
-      URL.revokeObjectURL(blobUrl);
+      downloadAudioBlob(blob, title);
 
       toast({
         title: "Download Started",

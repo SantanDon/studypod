@@ -254,7 +254,7 @@ const SourceComparisonView: React.FC<SourceComparisonViewProps> = ({ sources, on
             <h2 className="text-base font-semibold tracking-tight text-foreground sm:text-lg">Compare Sources</h2>
           </div>
           <p className="mt-1 max-w-2xl text-[11px] leading-5 text-muted-foreground">
-            Keep both source texts visible while checking agreements, conflicts, and distinct claims.
+            Keep both sources visible to see where they agree, differ, or make separate claims.
           </p>
         </div>
         <Button variant="ghost" size="icon" onClick={onClose} aria-label="Close comparison" className="shrink-0">
@@ -310,12 +310,12 @@ const SourceComparisonView: React.FC<SourceComparisonViewProps> = ({ sources, on
               {isAnalyzing ? (
                 <>
                   <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" />
-                  Comparing evidence...
+                  Comparing sources...
                 </>
               ) : (
                 <>
                   <GitCompare className="h-4 w-4" aria-hidden="true" />
-                  Compare evidence
+                  Compare sources
                 </>
               )}
             </Button>

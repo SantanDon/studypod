@@ -235,41 +235,93 @@ export function getChaptersWithTitles(epub) {
   });
 }
 
+const GUTENBERG_LICENSE_END = /\*\*\*\s*END OF (?:THE|THIS) PROJECT GUTENBERG EBOOK[^\n]*\*\*\*/i;
+// Gutenberg's current trademarked heading is "THE FULL PROJECT GUTENBERG™ LICENSE".
+// Accept the optional trademark symbol and both common prefixes without matching
+// ordinary prose that merely mentions Project Gutenberg.
+const GUTENBERG_LICENSE_TITLE = /^\s*(?:(?:the|full)\s+){0,2}project\s+gutenberg[\u2122\u00ae]?\s+(?:ebook\s+)?license\b/im;
+const EPUB_NAV_TITLE = /^(?:table\s+of\s+)?contents$/i;
+
+function trimGutenbergLicense(text) {
+  const endMarker = text.search(GUTENBERG_LICENSE_END);
+  const licenseTitle = text.search(GUTENBERG_LICENSE_TITLE);
+  const end = endMarker >= 0 ? endMarker : text.length;
+  return cleanPlainText(text.slice(0, Math.min(licenseTitle >= 0 ? licenseTitle : end, end)));
+}
+
+function isEpubNavigationItem(chapter, title, text) {
+  if (chapter.linear === "no" || /(?:^|\s)nav(?:\s|$)/i.test(chapter.properties || "")) return true;
+  if (EPUB_NAV_TITLE.test(String(title || "").trim())) return true;
+  // Gutenberg packages often expose a publisher-created header/TOC as a flow
+  // item. It is metadata and a table of contents, not book narration.
+  if (
+    /^the project gutenberg ebook of\b/i.test(String(text || "").trim()) &&
+    /\*\*\*\s*START OF THE PROJECT GUTENBERG EBOOK\b/i.test(text) &&
+    /^contents\s*$/im.test(text) &&
+    (String(text).match(/^BOOK\s+[IVXLCDM]+\.?\s*$/gim) || []).length >= 5
+  ) return true;
+  return /^\s*(?:table of )?contents\s*(?:\n|$)/i.test(text);
+}
+
+function titleFromEpubText(title, text) {
+  const firstLine = String(text || "").split("\n").map((line) => line.trim()).find(Boolean);
+  if (/gutenberg.*license/i.test(String(title || "")) && firstLine && /^transcriber[’']s notes$/i.test(firstLine)) {
+    return firstLine;
+  }
+  if (!/^chapter\s*\d+$/i.test(String(title || "").trim())) return title;
+  if (firstLine && /^(?:book|chapter|part)\s+(?:[ivxlcdm]+|\d+)\b/i.test(firstLine)) return firstLine;
+  if (firstLine && /^transcriber[’']s notes$/i.test(firstLine)) return firstLine;
+  return title;
+}
+
+export async function extractEpubChapters(epub) {
+  const titledChapters = getChaptersWithTitles(epub);
+  const chapters = [];
+  for (let i = 0; i < epub.flow.length; i += 1) {
+    const chapter = epub.flow[i];
+    const meta = titledChapters[i] || { id: chapter.id, title: `Chapter ${i + 1}` };
+    try {
+      const rawText = stripHtmlToText(await epub.getChapter(chapter.id) || "");
+      const text = trimGutenbergLicense(rawText);
+      if (!text || isEpubNavigationItem(chapter, meta.title, text)) continue;
+      const title = titleFromEpubText(meta.title || `Chapter ${i + 1}`, text);
+      const isUntitledContinuation =
+        /^chapter\s*\d+$/i.test(String(meta.title || "").trim()) &&
+        title === meta.title;
+      if (isUntitledContinuation && chapters.length > 0) {
+        // Some EPUB builders split one long, explicitly titled section across
+        // files without adding headings to the continuation fragments. Keep
+        // every source word in its original order, attached to that section.
+        chapters[chapters.length - 1].text = `${chapters[chapters.length - 1].text}\n\n${text}`;
+        continue;
+      }
+      chapters.push({
+        id: chapter.id,
+        title,
+        href: chapter.href,
+        text,
+        order: chapters.length + 1,
+      });
+    } catch {
+      if (!isEpubNavigationItem(chapter, meta.title, "")) {
+        chapters.push({
+          id: chapter.id,
+          title: meta.title || `Chapter ${i + 1}`,
+          href: chapter.href,
+          text: "",
+          order: chapters.length + 1,
+          extractionWarning: "Chapter could not be extracted.",
+        });
+      }
+    }
+  }
+  return chapters;
+}
+
 async function extractEpub(filePath, fileName) {
   const epub = await parseEpub(filePath);
   const metadata = epub.metadata || {};
-  const titledChapters = getChaptersWithTitles(epub);
-  const chapters = [];
-
-  for (let i = 0; i < epub.flow.length; i += 1) {
-    const chapter = epub.flow[i];
-    const chapterMeta = titledChapters[i] || {
-      id: chapter.id,
-      title: `Chapter ${i + 1}`,
-    };
-    try {
-      const html = await epub.getChapter(chapter.id);
-      const text = stripHtmlToText(html || "");
-      if (text.length > 1) {
-        chapters.push({
-          id: chapter.id,
-          title: chapterMeta.title || `Chapter ${i + 1}`,
-          href: chapter.href,
-          text,
-          order: i + 1,
-        });
-      }
-    } catch {
-      chapters.push({
-        id: chapter.id,
-        title: chapterMeta.title || `Chapter ${i + 1}`,
-        href: chapter.href,
-        text: "",
-        order: i + 1,
-        extractionWarning: "Chapter could not be extracted.",
-      });
-    }
-  }
+  const chapters = await extractEpubChapters(epub);
 
   return {
     title: metadata.title || displayTitleFromFileName(fileName),
@@ -887,6 +939,38 @@ export function splitPdfPagesIntoChapters(
   return splitPdfPagesIntoChapterResult(pages, fallbackTitle, metadata).chapters;
 }
 
+function normalizePdfCoverageText(text = "") {
+  return String(text)
+    .replace(/^--\s*\d+\s+of\s+\d+\s*--$/gim, "")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+export function validatePdfExtractionCompleteness(sourceText, chapters = []) {
+  const source = normalizePdfCoverageText(sourceText);
+  const extracted = normalizePdfCoverageText(
+    chapters.map((chapter) => chapter?.text || "").join(" "),
+  );
+  const extractedWords = extracted.split(/\s+/).filter(Boolean).length;
+
+  if (!source || extracted.length < 100 || extractedWords < 12) {
+    throw Object.assign(new Error(
+      "This PDF has no usable selectable text. Scanned PDFs need OCR before audiobook generation; try an OCR-processed or text-based PDF.",
+    ), { status: 400 });
+  }
+
+  const coverage = extracted.length / source.length;
+  // Keep the production admission bar aligned with validate_large_book_audiobook.mjs.
+  // Existing 398- and 484-page text-PDF fixtures retain 100% and 98.63% coverage.
+  if (coverage < 0.9) {
+    throw Object.assign(new Error(
+      `PDF text extraction appears incomplete (${(coverage * 100).toFixed(1)}% retained). This PDF may be scanned or use a complex layout; OCR it or try a text-based PDF before generating a full audiobook.`,
+    ), { status: 400 });
+  }
+
+  return { sourceCharacters: source.length, extractedCharacters: extracted.length, coverage };
+}
+
 async function extractPdf(filePath, fileName) {
   const buffer = fs.readFileSync(filePath);
   const mod = await import("pdf-parse");
@@ -933,6 +1017,8 @@ async function extractPdf(filePath, fileName) {
             removedFurnitureLines: 0,
           },
         };
+  const sourceText = text || pages.map((page) => page?.text || "").join("\n");
+  validatePdfExtractionCompleteness(sourceText, chapterResult.chapters);
   return {
     title: metadata.title,
     author: metadata.author,

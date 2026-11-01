@@ -6,6 +6,7 @@ interface LiquidCitationProps {
   citation: Citation;
   index: number;
   triggerType?: 'hover' | 'click';
+  onCitationClick?: (citation: Citation) => void;
 }
 
 const GitHubIcon = () => (
@@ -53,7 +54,7 @@ const getSourceIcon = (sourceType: string = "") => {
   return <DocumentIcon />;
 };
 
-const LiquidCitation = ({ citation, index, triggerType: _triggerType = 'click' }: LiquidCitationProps) => {
+const LiquidCitation = ({ citation, index, triggerType: _triggerType = 'click', onCitationClick }: LiquidCitationProps) => {
   const [isOpen, setIsOpen] = useState(false);
   const evidenceId = useId();
 
@@ -67,6 +68,7 @@ const LiquidCitation = ({ citation, index, triggerType: _triggerType = 'click' }
 
   const handleToggle = (e: React.MouseEvent) => {
     e.stopPropagation();
+    onCitationClick?.(citation);
     setIsOpen((open) => !open);
   };
 

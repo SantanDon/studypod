@@ -31,7 +31,7 @@ describe("audiobookNarrationTextService", () => {
     );
 
     expect(narration).toContain("Chapter 1. A Better System.");
-    expect(narration).toContain("organization improved by 25 percent");
+    expect(narration).toContain("organi- zation improved by 25 percent");
     expect(narration).toContain("A I and A P I adoption grew 10 times");
     expect(narration).toContain("First practical step.");
     expect(narration).not.toContain("www.example.com");
@@ -69,5 +69,54 @@ describe("audiobookNarrationTextService", () => {
     expect(stats.narrationCharacters).toBe(narration.length);
     expect(stats.removedCharacters).toBeGreaterThan(0);
     expect(stats.narrationWords).toBe(2);
+  });
+
+  it("preserves dates, numbers, negation, and paragraph boundaries", () => {
+    const source = [
+      "On 2024-03-09, the 1st cohort did not reach 25% of its target.",
+      "The 2024-03-09 deadline was not extended; 1,250 users remained.",
+    ].join("\n\n");
+    const narration = prepareNarrationText(source, { includeTitle: false });
+
+    expect(narration).toContain("On 2024-03-09, the 1st cohort did not reach 25 percent");
+    expect(narration).toContain("The 2024-03-09 deadline was not extended; 1,250 users remained.");
+    expect(narration).toContain("target.\n\nThe 2024-03-09");
+  });
+
+  it("does not guess whether a line-end hyphen is a wrap or a compound", () => {
+    const narration = prepareNarrationText(
+      "The organi-\nzation and well-\nbeing examples retain their marks.",
+      { includeTitle: false },
+    );
+
+    expect(narration).toBe(
+      "The organi- zation and well- being examples retain their marks.",
+    );
+  });
+
+  it("includes caller-supplied framing as a separate optional paragraph", () => {
+    const narration = prepareNarrationText("The report begins here.", {
+      includeTitle: false,
+      framingText: "Study guide introduction",
+    });
+
+    expect(narration).toBe("Study guide introduction.\n\nThe report begins here.");
+    expect(prepareNarrationText("The report begins here.", { includeTitle: false })).toBe(
+      "The report begins here.",
+    );
+  });
+
+  it("keeps optional intro and outro outside the source wording", () => {
+    const source = "The date is 2024-03-09. Do not change the 1,250 records.";
+    expect(prepareNarrationText(source, { includeTitle: false })).toBe(source);
+    expect(prepareNarrationText(source, {
+      includeTitle: false,
+      framingText: "This recording presents the selected text.",
+      outroText: "End of the selected text.",
+    })).toBe(
+      "This recording presents the selected text.\n\n" +
+      "The date is 2024-03-09. Do not change the 1,250 records.\n\n" +
+      "End of the selected text.",
+    );
   });
 });

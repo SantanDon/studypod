@@ -51,8 +51,23 @@ const ChatInput: React.FC<ChatInputProps> = ({
   const { toast } = useToast();
   const inputRef = useRef<HTMLInputElement>(null);
 
+  const getExampleQuestionLabel = (question: string) => {
+    if (question.startsWith('What evidence from my sources supports')) return 'Show the evidence';
+    if (question.startsWith('Explain the key idea more simply')) return 'Explain simply';
+    if (question.startsWith('What is uncertain or missing')) return 'What is missing?';
+    if (question.startsWith('Help me practise the main idea')) return 'Test my understanding';
+    if (question.startsWith('Help me connect ') && question.endsWith(' to the sources in my notebook.')) return 'Connect this chapter';
+    if (question.startsWith('What should I focus on in ')) return 'What should I focus on?';
+    if (question.startsWith('Ask me one question to check my understanding of ')) return 'Test this chapter';
+    if (question.startsWith('What is still unclear about ')) return 'What is still unclear?';
+    return question;
+  };
+
   const handleKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
+    // Enter confirms a composed character before it should submit the draft.
+    if (e.nativeEvent.isComposing || e.keyCode === 229) return;
     if (e.key === 'Enter' && !disabled && !isLoading && message.trim()) {
+      e.preventDefault();
       onSend();
     }
   };
@@ -90,9 +105,9 @@ const ChatInput: React.FC<ChatInputProps> = ({
   const shouldShowExamples = !disabled && !isLoading && !message.trim() && exampleQuestions.length > 0;
 
   return (
-    <div className="p-6 border-t border-border flex-shrink-0 bg-background dark:bg-background">
+    <div className="p-3 sm:p-6 border-t border-border flex-shrink-0 bg-background dark:bg-background">
       <div className="max-w-4xl mx-auto">
-        <div className="flex space-x-4">
+        <div className="flex gap-2 sm:gap-4">
           <div className="min-w-0 flex-1 relative">
             <Input
               ref={inputRef}
@@ -104,7 +119,7 @@ const ChatInput: React.FC<ChatInputProps> = ({
               onPaste={handlePaste}
               onDrop={handleDrop}
               onDragOver={(e) => e.preventDefault()}
-              className={message ? 'pr-3' : 'pr-20'}
+              className={`h-11 sm:h-10 ${message ? 'pr-3' : 'pr-20'}`}
               disabled={disabled || isLoading}
             />
             {!message && (
@@ -114,6 +129,7 @@ const ChatInput: React.FC<ChatInputProps> = ({
             )}
           </div>
           <Button
+            className="h-11 min-w-11 shrink-0 sm:h-10"
             onClick={onSend}
             aria-label="Send message"
             disabled={!message.trim() || disabled || isLoading}
@@ -129,25 +145,27 @@ const ChatInput: React.FC<ChatInputProps> = ({
         {/* Example Questions Carousel */}
         {shouldShowExamples && (
           <div className="mt-4">
-            <Carousel className="w-full max-w-4xl">
+            <Carousel aria-label="Suggested learning questions" className="w-full max-w-4xl">
               <CarouselContent className="-ml-2 md:-ml-4">
                 {exampleQuestions.map((question, index) => (
                   <CarouselItem key={index} className="pl-2 md:pl-4 basis-auto">
                     <Button
                       variant="outline"
                       size="sm"
-                      className="text-left whitespace-nowrap h-auto py-2 px-3 text-sm"
+                      aria-label={`Suggested question: ${getExampleQuestionLabel(question)}`}
+                      title={question}
+                      className="h-auto max-w-[min(82vw,28rem)] whitespace-normal break-words py-2 px-3 text-left text-sm leading-snug sm:max-w-none sm:whitespace-nowrap"
                       onClick={() => onExampleQuestionClick?.(question)}
                     >
-                      {question}
+                      {getExampleQuestionLabel(question)}
                     </Button>
                   </CarouselItem>
                 ))}
               </CarouselContent>
               {exampleQuestions.length > 2 && (
                 <>
-                  <CarouselPrevious className="left-0" />
-                  <CarouselNext className="right-0" />
+                  <CarouselPrevious className="left-0 hidden sm:inline-flex" />
+                  <CarouselNext className="right-0 hidden sm:inline-flex" />
                 </>
               )}
             </Carousel>

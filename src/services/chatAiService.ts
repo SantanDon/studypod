@@ -4,6 +4,105 @@ import { search } from "@/lib/search/semanticSearch";
 import { getContextualPrompt, formatPrompt } from "@/config/prompts";
 import { buildChatHistoryMessages } from "@/utils/chatHistoryBuilder";
 import { isSourceUsableForGroundedChat } from "@/lib/sources/sourceProcessing";
+import { getAudiobookChapterScope, getVisibleChatQuestion } from "@/lib/audio/readingContext";
+
+const extractStructuralSection = (content: string, requestedSection: string): string | undefined => {
+  const requested = requestedSection.match(/^(Book|Chapter)\s+(\d+|[IVXLCDM]+)$/i);
+  if (!requested) return undefined;
+  const kind = requested[1].toLowerCase();
+  const ordinal = requested[2].toUpperCase();
+  // Whole-source extracts may wrap real structural headings in --- delimiters.
+  // Keep suffixes out of the match: introductory prose often starts with a
+  // phrase like "BOOK II. Thrasymachus..." but is not a chapter boundary.
+  const heading = new RegExp(
+    `^\\s{0,3}(?:#{1,6}\\s*)?(?:${kind}\\s+${ordinal}\\s*\\.?|---\\s*${kind}\\s+${ordinal}\\s*\\.?\\s*---)\\s*$`,
+    "i",
+  );
+  const boundary = new RegExp(
+    `^\\s{0,3}(?:#{1,6}\\s*)?(?:${kind}\\s+(?:\\d+|[IVXLCDM]+)\\s*\\.?|---\\s*${kind}\\s+(?:\\d+|[IVXLCDM]+)\\s*\\.?\\s*---)\\s*$`,
+    "i",
+  );
+  const lines = content.split(/\r?\n/);
+  const start = lines.findIndex((line) => heading.test(line));
+  if (start < 0) return undefined;
+  let end = lines.findIndex((line, index) => index > start && boundary.test(line));
+  if (end < 0) end = lines.length;
+  const section = lines.slice(start, end).join("\n").trim();
+  return section.length > 0 ? section : undefined;
+};
+
+const CHAPTER_CONTEXT_CHAR_LIMIT = 6000;
+const QUESTION_STOP_WORDS = new Set([
+  "about", "after", "also", "because", "does", "from", "have", "into", "more", "most", "only",
+  "other", "should", "that", "their", "them", "there", "these", "they", "this", "through",
+  "what", "when", "where", "which", "while", "with", "would", "your",
+]);
+
+const chapterQuestionTerms = (question: string): string[] => [...new Set(
+  (question.normalize("NFKC").toLocaleLowerCase().match(/[\p{L}\p{N}]{3,}/gu) || [])
+    .filter((term) => !QUESTION_STOP_WORDS.has(term)),
+)];
+
+const paragraphRelevance = (paragraph: string, terms: string[]): number => {
+  if (terms.length === 0) return 0;
+  const words = new Set(paragraph.normalize("NFKC").toLocaleLowerCase().match(/[\p{L}\p{N}]{3,}/gu) || []);
+  return terms.reduce((score, term) => score + Number(words.has(term)), 0);
+};
+
+const excerptAroundQuestionTerm = (text: string, terms: string[], budget: number): string => {
+  if (text.length <= budget) return text;
+  const normalized = text.normalize("NFKC").toLocaleLowerCase();
+  const matchPositions = terms.map((term) => normalized.indexOf(term)).filter((position) => position >= 0);
+  if (matchPositions.length === 0) return text.slice(0, budget);
+  const match = Math.min(...matchPositions);
+  const start = Math.max(0, Math.min(match - Math.floor(budget / 3), text.length - budget));
+  return text.slice(start, start + budget);
+};
+
+/** Select one contiguous, query-relevant chapter window while keeping source text verbatim. */
+const selectChapterWindow = (section: string, terms: string[], budget: number): string => {
+  if (budget <= 0) return "";
+  const paragraphs = section.split(/\n\s*\n/).map((text) => text.trim()).filter(Boolean);
+  if (paragraphs.length === 0) return "";
+  const scores = paragraphs.map((paragraph) => paragraphRelevance(paragraph, terms));
+  const bestScore = Math.max(...scores);
+  const seed = bestScore > 0 ? scores.indexOf(bestScore) : 0;
+  let start = seed;
+  let end = seed;
+  let selected = paragraphs[seed];
+  if (selected.length > budget) return excerptAroundQuestionTerm(selected, terms, budget);
+
+  // Expand only to adjacent paragraphs, preserving a single contiguous window.
+  while (true) {
+    const left = start > 0 ? paragraphs[start - 1] : undefined;
+    const right = end + 1 < paragraphs.length ? paragraphs[end + 1] : undefined;
+    if (!left && !right) break;
+    const candidates = [
+      ...(left ? [{ side: "left" as const, text: left, score: scores[start - 1] }] : []),
+      ...(right ? [{ side: "right" as const, text: right, score: scores[end + 1] }] : []),
+    ].sort((a, b) => b.score - a.score);
+    const candidate = candidates.find((item) => selected.length + 2 + item.text.length <= budget);
+    if (!candidate) break;
+    if (candidate.side === "left") start -= 1;
+    else end += 1;
+    selected = paragraphs.slice(start, end + 1).join("\n\n");
+  }
+  return selected;
+};
+
+const selectChapterEvidence = (
+  sections: Array<{ source: ReturnType<typeof localStorageService.getSources>[number]; section: string }>,
+  question: string,
+): Array<{ source: (typeof sections)[number]["source"]; section: string }> => {
+  const terms = chapterQuestionTerms(question);
+  let remaining = CHAPTER_CONTEXT_CHAR_LIMIT;
+  return sections.flatMap((entry, index) => {
+    const budget = Math.floor(remaining / (sections.length - index));
+    const section = selectChapterWindow(entry.section, terms, budget);
+    remaining -= section.length;
+    return section ? [{ source: entry.source, section }] : [];
+  });
+};
 
 function formatSourcesForPrompt(
   sources: ReturnType<typeof localStorageService.getSources>,
@@ -64,20 +163,53 @@ export async function generateAIResponse(
     const recentUserMessages = historyMessages
       .filter((message) => message.role === "user")
       .slice(-3)
-      .map((message) => message.content)
+      .map((message) => getVisibleChatQuestion(message.content))
       .join("\n\n");
 
-    let semanticQuery = userMessage;
+    // Reader-position metadata conditions the model response, but must not
+    // affect which source passages retrieval selects.
+    const retrievalQuestion = getVisibleChatQuestion(userMessage);
+    const readerChapterScope = getAudiobookChapterScope(userMessage);
+    let semanticQuery = retrievalQuestion;
     if (recentUserMessages) {
-      semanticQuery = `${recentUserMessages}\n\nFollow-up question: ${userMessage}`.slice(0, 800);
+      semanticQuery = `${recentUserMessages}\n\nFollow-up question: ${retrievalQuestion}`.slice(0, 800);
     }
 
     let relevantContext = "";
 
-    if (requestedSourceIds.size > 0) {
+    if (readerChapterScope) {
+      const chapterSections = sources
+        .map((source) => ({ source, section: extractStructuralSection(source.content || "", readerChapterScope) }))
+        .filter((entry): entry is { source: (typeof sources)[number]; section: string } => Boolean(entry.section));
+      if (chapterSections.length === 0) {
+        return `I couldn't identify a ${readerChapterScope} section in the available source text, so I can't answer using that chapter context. Choose a source with extracted chapter headings or ask without the reader chapter context.`;
+      }
+      relevantContext = selectChapterEvidence(chapterSections, retrievalQuestion)
+        .map(({ source, section }, index) => `[${index + 1}] Source: "${source.title}" (${source.type})\nContent: ${section}`)
+        .join("\n\n");
+    } else if (requestedSourceIds.size > 0) {
       // Explicit scopes must remain closed-book. Do not let semantic search add
       // notes or unrelated notebook sources behind the user's back.
-      relevantContext = formatSourcesForPrompt(sources, sources.length);
+      const scopedResults = await search(semanticQuery, {
+        notebookId,
+        types: ["source"],
+        sourceIds: [...requestedSourceIds],
+        limit: 5,
+        useSemanticSearch: true,
+        minScore: 0.05,
+      });
+
+      if (scopedResults.length > 0) {
+        relevantContext = scopedResults
+          .map((result, index) => {
+            const contextContent = result.content.substring(0, 1500);
+            return `[${index + 1}] Source: "${result.title}" (${result.type})\nContent: ${contextContent}\nRelevance Score: ${(result.score || 0).toFixed(3)}\n---`;
+          })
+          .join("\n\n");
+      } else {
+        // Keep the explicit source as a safe fallback when retrieval has no match.
+        relevantContext = formatSourcesForPrompt(sources, sources.length);
+      }
     } else {
       try {
         const searchResults = await search(semanticQuery, {
@@ -126,7 +258,10 @@ export async function generateAIResponse(
         content: string;
       }> = [
         { role: "system", content: promptConfig.system },
-        ...historyMessages,
+        // Prior notebook turns may have been grounded in another source or
+        // chapter. They carry no source/chapter provenance, so including them
+        // here can override the explicitly scoped reader evidence.
+        ...(readerChapterScope ? [] : historyMessages),
         { role: "user", content: userContent },
       ];
 

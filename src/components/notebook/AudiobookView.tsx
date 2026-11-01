@@ -248,6 +248,15 @@ const formatListeningTime = (minutes?: number) => {
   return remainder ? `${hours} hr ${remainder} min` : `${hours} hr`;
 };
 
+const formatActualDuration = (seconds?: number) => {
+  if (!seconds || seconds < 1) return "Duration unavailable";
+  const minutes = Math.round(seconds / 60);
+  const hours = Math.floor(minutes / 60);
+  const remainder = minutes % 60;
+  if (!hours) return minutes + " min";
+  return remainder ? hours + " hr " + remainder + " min" : hours + " hr";
+};
+
 const formatFileSize = (bytes?: number) => {
   if (!bytes) return null;
   const megabytes = bytes / (1024 * 1024);
@@ -263,6 +272,32 @@ const resolveDownloadUrl = (url: string) => {
   }
   return url;
 };
+
+const DOWNLOAD_OBJECT_URL_CLEANUP_DELAY_MS = 1000;
+
+export function triggerAudiobookDownload(
+  href: string,
+  fileName: string,
+  revokeAfterDownload = false,
+) {
+  const link = document.createElement("a");
+  link.href = href;
+  link.download = fileName;
+  try {
+    document.body.appendChild(link);
+    link.click();
+  } finally {
+    link.remove();
+    // The browser consumes the object URL asynchronously after click. Revoking
+    // it in the same task can cancel the download before it is handed off.
+    if (revokeAfterDownload) {
+      window.setTimeout(
+        () => URL.revokeObjectURL(href),
+        DOWNLOAD_OBJECT_URL_CLEANUP_DELAY_MS,
+      );
+    }
+  }
+}
 
 export default function AudiobookView({
   notebookId,
@@ -286,6 +321,8 @@ export default function AudiobookView({
     setSelectedStyle,
     outputFormat,
     setOutputFormat,
+    includeFraming,
+    setIncludeFraming,
     selectedProvider,
     setSelectedProvider,
     isGenerating,
@@ -323,6 +360,10 @@ export default function AudiobookView({
   const [isWarmingExpressive, setIsWarmingExpressive] = useState(false);
   const [playbackMediaId, setPlaybackMediaId] = useState<string | null>(null);
   const [playbackTitle, setPlaybackTitle] = useState("Audiobook");
+  const [chapterSelection, setChapterSelection] = useState<{
+    bookId: string | null;
+    chapterIds: string[];
+  }>({ bookId: null, chapterIds: [] });
   const bookUploadRef = useRef<HTMLInputElement>(null);
   const audioCommand = useStudioAudioCommands((state) => state.requests[notebookId]);
 
@@ -350,6 +391,12 @@ export default function AudiobookView({
     ? formatDisplayTitle(selectedBook.title, "Imported book")
     : "";
   const selectedBookJob = selectedBook ? jobs[selectedBook.id] : undefined;
+  const selectedChapterIds = chapterSelection.bookId === selectedBook?.id
+    ? chapterSelection.chapterIds
+    : [];
+  const selectedSections = (selectedBookMetadata.chapters || []).filter(
+    (chapter) => chapter.narratable !== false && selectedChapterIds.includes(chapter.id),
+  );
   const selectedBookPronunciations = selectedBook
     ? pronunciationsByBook[selectedBook.id] || []
     : [];
@@ -420,7 +467,18 @@ export default function AudiobookView({
         headers: authHeaders(),
         signal,
       });
-      if (!response.ok) throw new Error(await response.text());
+      if (!response.ok) {
+        let message = "Book upload failed";
+        try {
+          const body = await response.json();
+          if (typeof body?.error === "string" && body.error.trim()) {
+            message = body.error.trim();
+          }
+        } catch {
+          // Keep the fallback for non-JSON proxy or network error responses.
+        }
+        throw new Error(message);
+      }
       const data = await response.json();
       if (signal?.aborted) return;
       setVoices(Array.isArray(data.voices) ? data.voices : []);
@@ -555,7 +613,10 @@ export default function AudiobookView({
               completedChapters: data.completedChapters,
               availableChapterCount:
                 data.availableChapterCount ?? job.availableChapterCount,
-              chapterCount: data.chapterCount,
+              // Keep the requested scope from the initial job response when a
+              // status snapshot omits this field. Falling through to the
+              // source's full chapter count would mislabel selected renders.
+              chapterCount: data.chapterCount ?? job.chapterCount,
               cachedChapters: data.cachedChapters,
               canPlay: data.canPlay ?? job.canPlay,
               resumed: data.resumed ?? job.resumed,
@@ -681,7 +742,7 @@ export default function AudiobookView({
       );
     } catch (error) {
       console.error("Book upload failed", error);
-      toast.error("Book upload failed");
+      toast.error(error instanceof Error ? error.message : "Book upload failed");
     } finally {
       setIsUploadingBook(false);
       event.target.value = "";
@@ -810,16 +871,27 @@ export default function AudiobookView({
     }
   };
 
-  const generateFullBook = useCallback(async (book: AudiobookSource): Promise<boolean> => {
+  const generateFullBook = useCallback(async (book: AudiobookSource, requestedChapterIds?: string[]): Promise<boolean> => {
     const metadata = parseMetadata(book.metadata);
     const chapters = metadata.chapters || [];
-    const narratableChapters = chapters.filter(
+    const allNarratableChapters = chapters.filter(
       (chapter) => chapter.narratable !== false,
     );
+    const requestedIds = requestedChapterIds ? new Set(requestedChapterIds) : null;
+    const narratableChapters = requestedIds
+      ? allNarratableChapters.filter((chapter) => requestedIds.has(chapter.id))
+      : allNarratableChapters;
+    if (requestedIds && narratableChapters.length !== requestedIds.size) {
+      toast.error('Could not select those sections. Refresh the section list and try again.');
+      return false;
+    }
     const title = formatDisplayTitle(book.title, "Imported book");
     const fileName = metadata.fileName || book.title || "book.epub";
     const existingJob = useAudiobookStore.getState().jobs[book.id];
-    if (existingJob?.notebookId === notebookId && existingJob.status === 'processing') return true;
+    if (existingJob?.notebookId === notebookId && existingJob.status === 'processing') {
+      toast.error('An audiobook is already generating for this book. Wait for it to finish before choosing another scope.');
+      return false;
+    }
     if (!audiobookRuntimeAvailable || !metadata.fileName || narratableChapters.length === 0) {
       toast.error('Full narration needs the local audiobook runtime and an imported document with chapters.');
       return false;
@@ -837,6 +909,7 @@ export default function AudiobookView({
           voice: selectedVoice,
           style: selectedStyle,
           outputFormat,
+          includeFraming,
           provider: effectiveProvider,
           pronunciations: pronunciationsByBook[book.id] || [],
           chapterIds: narratableChapters.map((chapter) => chapter.id),
@@ -891,12 +964,15 @@ export default function AudiobookView({
         completedAt:
           status === "completed" ? new Date().toISOString() : undefined,
       });
+      const scopeLabel = requestedIds
+        ? `${narratableChapters.length} selected section${narratableChapters.length === 1 ? '' : 's'} of ${title}`
+        : title;
       toast.success(
         status === "completed"
-          ? `${title} is ready to listen to`
+          ? `${scopeLabel} is ready to listen to`
           : data.resumed
-            ? `Resuming ${title} from completed chapters.`
-            : `Started ${title}. Chapters will appear as they finish.`,
+            ? `Resuming ${scopeLabel} from completed chapters.`
+            : `Started ${scopeLabel}. Chapters will appear as they finish.`,
       );
       return true;
     } catch (error) {
@@ -906,7 +982,7 @@ export default function AudiobookView({
     } finally {
       pendingFullBookStarts.delete(startKey);
     }
-  }, [notebookId, audiobookRuntimeAvailable, jsonHeaders, selectedVoice, selectedStyle, outputFormat, effectiveProvider, pronunciationsByBook, upsertJob]);
+  }, [notebookId, audiobookRuntimeAvailable, jsonHeaders, selectedVoice, selectedStyle, outputFormat, includeFraming, effectiveProvider, pronunciationsByBook, upsertJob]);
 
   useEffect(() => {
     if (audioCommand?.kind !== 'audiobook' || audioCommand.phase !== 'queued' || !sources) return;
@@ -1001,14 +1077,11 @@ export default function AudiobookView({
         href = URL.createObjectURL(await response.blob());
       }
 
-      const link = document.createElement("a");
-      link.href = href;
-      link.download = fileName;
-      document.body.appendChild(link);
-      link.click();
-      link.remove();
-      if (href.startsWith("blob:") && href !== audioUrl)
-        URL.revokeObjectURL(href);
+      triggerAudiobookDownload(
+        href,
+        fileName,
+        href.startsWith("blob:") && href !== audioUrl,
+      );
     } catch (error) {
       console.error("Audiobook download failed", error);
       toast.error("Download failed");
@@ -1231,13 +1304,12 @@ export default function AudiobookView({
                 {runtimeCapabilities.localBeta ? "Audiobook is a local beta" : "Audiobook unavailable"}
               </h3>
               {runtimeCapabilities.localBeta && (<p className="mx-auto mt-2 max-w-md text-sm leading-6 text-muted-foreground">
-                The complete book-to-audio workflow currently runs in the local
-                StudyPod app, where narration can continue safely and files
-                remain available after the job finishes.
+                Audiobook creation is in local beta. Keep StudyPod open while it
+                reads your book; finished audio stays available here.
               </p>)}
               <p className="mx-auto mt-3 max-w-md rounded-lg border border-amber-200 bg-background/70 px-3 py-2 text-xs leading-5 text-muted-foreground dark:border-amber-900/70">
                 {runtimeCapabilities?.reason ||
-                  "Full-book narration is unavailable in this environment."}
+                  "This StudyPod setup does not support full-book narration."}
               </p>
             </Card>
           ) : ebooks.length === 0 ? (
@@ -1249,8 +1321,8 @@ export default function AudiobookView({
                 Add your first book
               </h3>
               <p className="mx-auto mt-2 max-w-sm text-sm leading-6 text-muted-foreground">
-                StudyPod reads the structure first, shows you the sections it
-                found, and only then starts narration.
+                StudyPod finds the sections first so you can review them before
+                narration begins.
               </p>
               <div className="mx-auto mt-5 max-w-sm text-left">
                 {renderImportControls()}
@@ -1385,6 +1457,21 @@ export default function AudiobookView({
                     <option value="wav">WAV — very large</option>
                   </select>
                 </label>
+                <label className="mt-4 flex items-start gap-2 text-xs text-foreground">
+                  <input
+                    type="checkbox"
+                    checked={includeFraming}
+                    onChange={(event) => setIncludeFraming(event.target.checked)}
+                    className="mt-0.5"
+                    data-testid="audiobook-include-framing"
+                  />
+                  <span>
+                    <span className="block font-medium">Add a brief intro and outro</span>
+                    <span className="mt-0.5 block text-muted-foreground">
+                      Adds clearly separate generic framing around the selected text. Off by default.
+                    </span>
+                  </span>
+                </label>
               </details>
 
               {selectedBook && (
@@ -1397,10 +1484,10 @@ export default function AudiobookView({
                   {savedRender.manifest && (
                     <div className="space-y-4" data-testid="audiobook-saved-render">
                       <h3 className="text-sm font-semibold">{savedRender.manifest.final?.ready ? "Audiobook ready" : "Saved audiobook"}</h3>
-                      <p className="text-xs text-muted-foreground">{savedRender.manifest.availableChapterCount} chapters ready. Continue listening below with your saved place and bookmarks.</p>
+                      <p className="text-xs text-muted-foreground">{savedRender.manifest.availableChapterCount} of {savedRender.manifest.totalNarratableChapters} chapters have playable audio. Continue listening below with your saved place and bookmarks.</p>
                       {savedRender.manifest.final?.ready && savedRender.manifest.final.url && (
                         <Button className="w-full" variant="outline" onClick={() => downloadAudio(savedRender.manifest!.final!.url!, `${selectedBookTitle.replace(/[^a-zA-Z0-9-_]/g, "_") || "audiobook"}.${savedRender.manifest!.final!.format || savedRender.manifest!.outputFormat || "mp3"}`)}>
-                          <Download />Download full {(savedRender.manifest.final.format || savedRender.manifest.outputFormat || "mp3").toUpperCase()}
+                          <Download />Download available audio ({(savedRender.manifest.final.format || savedRender.manifest.outputFormat || "mp3").toUpperCase()})
                         </Button>
                       )}
                       {!savedRender.manifest.activeJobId && <Button className="w-full" variant="ghost" onClick={() => generateFullBook(selectedBook)}><RefreshCcw />{savedRender.manifest.final?.ready ? "Create a new version" : "Resume generation"}</Button>}
@@ -1471,11 +1558,11 @@ export default function AudiobookView({
                             selectedBookJob.completedChapters ||
                             0}
                           /
-                          {selectedBookJob.chapterCount ||
-                            selectedBookMetadata.stats?.narratableChapterCount ||
+                          {selectedBookJob.chapterCount ??
+                            selectedBookMetadata.stats?.narratableChapterCount ??
                             selectedBookMetadata.chapters?.filter(
                               (chapter) => chapter.narratable !== false,
-                            ).length ||
+                            ).length ??
                             0}{" "}
                           chapters ready ·{" "}
                           {formatDisplayTitle(
@@ -1497,10 +1584,9 @@ export default function AudiobookView({
                         ) : null}
                       </div>
                       <p className="rounded-lg bg-muted/60 px-3 py-2 text-[11px] leading-5 text-muted-foreground">
-                        The chapter player below becomes usable as soon as the
-                        first chapter finishes. Completed chapters and render
-                        state are saved durably, so a retry continues instead of
-                        starting over.
+                        The chapter player is ready when the first chapter
+                        finishes. Finished chapters are saved; a retry may reuse
+                        them.
                       </p>
                       <Button
                         variant="outline"
@@ -1527,13 +1613,10 @@ export default function AudiobookView({
                         </div>
                         <div>
                           <h3 className="text-sm font-semibold">
-                            Audiobook ready
+                            Available audio ready
                           </h3>
                           <p className="mt-1 text-xs text-muted-foreground">
-                            {formatListeningTime(
-                              selectedBookJob.estimatedDurationMinutes,
-                            ) || "Full book"}{" "}
-                            · {selectedBookJob.outputFormat.toUpperCase()}
+                            {formatActualDuration(selectedBookJob.durationSeconds)}{selectedBookJob.activeChapterTitle ? " · " + selectedBookJob.activeChapterTitle : ""} · {selectedBookJob.availableChapterCount || 0} of {selectedBookJob.chapterCount ?? selectedBookMetadata.chapters?.filter((chapter) => chapter.narratable !== false).length ?? 0} chapters · {selectedBookJob.outputFormat.toUpperCase()}
                             {formatFileSize(selectedBookJob.fileSizeBytes)
                               ? ` · ${formatFileSize(selectedBookJob.fileSizeBytes)}`
                               : ""}
@@ -1541,10 +1624,7 @@ export default function AudiobookView({
                         </div>
                       </div>
                       <p className="rounded-lg bg-primary/5 px-3 py-2 text-[11px] leading-5 text-muted-foreground">
-                        Use the chapter player below to continue from your exact
-                        place, change speed, navigate chapters, and return to
-                        saved bookmarks. The complete file is also ready to
-                        download.
+                        This file includes only the playable chapters shown above. Continue below from your saved place or open a bookmark.
                       </p>
                       <Button
                         className="w-full"
@@ -1553,7 +1633,7 @@ export default function AudiobookView({
                         disabled={!selectedBookJob.url}
                       >
                         <Download />
-                        Download full {selectedBookJob.outputFormat.toUpperCase()}
+                        Download available audio ({selectedBookJob.outputFormat.toUpperCase()})
                       </Button>
                       <Button
                         className="w-full"
@@ -1563,7 +1643,7 @@ export default function AudiobookView({
                         data-testid="audiobook-share"
                       >
                         <Share2 />
-                        Share audiobook
+                        Share available audio
                       </Button>
                       <Button
                         variant="ghost"
@@ -1685,37 +1765,110 @@ export default function AudiobookView({
                       <div>
                         <p className="text-sm font-semibold">Sections</p>
                         <p className="mt-0.5 text-[11px] text-muted-foreground">
-                          Preview one section before creating the full book
+                          Preview or create audio for a section.
                         </p>
                       </div>
                       <ChevronDown className="h-4 w-4 text-muted-foreground transition group-open:rotate-180" />
                     </summary>
                     <div className="max-h-72 overflow-y-auto border-t border-border p-2">
                       {selectedBookMetadata.chapters.map((chapter, index) => (
-                        <button
+                        <div
                           key={chapter.id}
-                          type="button"
-                          onClick={() =>
-                            generateChapterPreview(selectedBook, chapter)
-                          }
-                          disabled={
-                            isGenerating || chapter.narratable === false
-                          }
-                          className="group/chapter flex w-full items-center gap-3 rounded-lg px-3 py-2.5 text-left hover:bg-muted disabled:cursor-not-allowed disabled:opacity-60"
+                          className="flex items-center gap-2 rounded-lg px-2 py-2 hover:bg-muted"
                         >
+                          <input
+                            type="checkbox"
+                            className="h-4 w-4 shrink-0 accent-primary"
+                            aria-label={`Select ${formatChapterTitle(chapter.title, index)} for audio`}
+                            checked={selectedChapterIds.includes(chapter.id)}
+                            disabled={
+                              chapter.narratable === false ||
+                              selectedBookJob?.status === "processing" ||
+                              Boolean(savedRender.manifest?.activeJobId)
+                            }
+                            onChange={(event) => {
+                              const nextIds = event.target.checked
+                                ? [...selectedChapterIds, chapter.id]
+                                : selectedChapterIds.filter((id) => id !== chapter.id);
+                              setChapterSelection({ bookId: selectedBook.id, chapterIds: nextIds });
+                            }}
+                          />
                           <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-md bg-muted text-[10px] font-medium text-muted-foreground">
                             {index + 1}
                           </span>
                           <span className="min-w-0 flex-1 truncate text-xs font-medium text-foreground">
                             {formatChapterTitle(chapter.title, index)}
                           </span>
-                          {isGenerating && currentChapterId === chapter.id ? (
-                            <Loader2 className="h-3.5 w-3.5 animate-spin text-primary" />
-                          ) : (
-                            <Play className="h-3.5 w-3.5 text-muted-foreground group-hover/chapter:text-primary" />
-                          )}
-                        </button>
+                          <Button
+                            type="button"
+                            size="sm"
+                            variant="ghost"
+                            aria-label={`Preview ${formatChapterTitle(chapter.title, index)}`}
+                            onClick={() => generateChapterPreview(selectedBook, chapter)}
+                            disabled={isGenerating || chapter.narratable === false}
+                          >
+                            {isGenerating && currentChapterId === chapter.id ? (
+                              <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                            ) : (
+                              <Play className="h-3.5 w-3.5" />
+                            )}
+                            <span className="sr-only">Preview</span>
+                          </Button>
+                          <Button
+                            type="button"
+                            size="sm"
+                            variant="outline"
+                            title={`Create audio for ${formatChapterTitle(chapter.title, index)} only`}
+                            aria-label={`Create audio for ${formatChapterTitle(chapter.title, index)} only`}
+                            onClick={() => {
+                              const sectionTitle = formatChapterTitle(chapter.title, index);
+                              if (window.confirm(`Create audiobook audio for “${sectionTitle}” only?\n\nScope: 1 section of “${selectedBookTitle}”. The full book will not be generated.`)) {
+                                void generateFullBook(selectedBook, [chapter.id]);
+                              }
+                            }}
+                            disabled={
+                              !audiobookRuntimeAvailable ||
+                              isGenerating ||
+                              chapter.narratable === false ||
+                              selectedBookJob?.status === "processing" ||
+                              Boolean(savedRender.manifest?.activeJobId)
+                            }
+                          >
+                            <Headphones className="h-3.5 w-3.5" />
+                            <span>Create</span>
+                          </Button>
+                        </div>
                       ))}
+                      <div className="mt-2 border-t border-border px-2 pt-3">
+                        <p className="mb-2 text-[11px] text-muted-foreground">
+                          Choose chapters to make one shorter audio track. Your existing audio stays saved.
+                        </p>
+                        <Button
+                          type="button"
+                          className="w-full"
+                          variant="outline"
+                          disabled={
+                            selectedSections.length === 0 ||
+                            !audiobookRuntimeAvailable ||
+                            isGenerating ||
+                            selectedBookJob?.status === "processing" ||
+                            Boolean(savedRender.manifest?.activeJobId)
+                          }
+                          onClick={() => {
+                            const titles = selectedSections.map((chapter, index) =>
+                              formatChapterTitle(chapter.title, selectedBookMetadata.chapters?.indexOf(chapter) ?? index),
+                            );
+                            if (window.confirm(
+                              `Create audio for ${titles.length} selected chapter${titles.length === 1 ? "" : "s"}?\n\n${titles.join("\n")}\n\nYour existing audiobook will stay saved.`,
+                            )) {
+                              void generateFullBook(selectedBook, selectedSections.map((chapter) => chapter.id));
+                            }
+                          }}
+                        >
+                          <Headphones className="h-3.5 w-3.5" />
+                          Create selected chapters ({selectedSections.length})
+                        </Button>
+                      </div>
                     </div>
                   </details>
                 )}

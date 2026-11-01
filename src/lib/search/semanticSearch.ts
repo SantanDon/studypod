@@ -32,6 +32,7 @@ export interface SemanticSearchOptions {
 export interface SearchOptions {
   types?: Array<"note" | "source" | "chat">;
   notebookId?: string;
+  sourceIds?: string[];
   limit?: number;
   minScore?: number;
   useSemanticSearch?: boolean;
@@ -395,7 +396,10 @@ async function searchSources(
   notebookId: string,
   options: SearchOptions,
 ): Promise<SearchResult[]> {
-  const sources = localStorageService.getSources(notebookId);
+  const requestedSourceIds = new Set(options.sourceIds || []);
+  const sources = localStorageService.getSources(notebookId).filter(
+    (source) => requestedSourceIds.size === 0 || requestedSourceIds.has(source.id),
+  );
   const results: SearchResult[] = [];
 
   console.log(`🔍 Searching ${sources.length} source(s) for: "${query}"`);
@@ -616,55 +620,40 @@ async function searchSources(
     );
 
     for (const source of sources) {
-      let contentToSearch = source.content || '';
+      const rawChunks = source.metadata && typeof source.metadata === 'object'
+        ? (source.metadata as { chunks?: unknown[] }).chunks
+        : undefined;
+      const chunks = Array.isArray(rawChunks)
+        ? rawChunks.map((raw) => typeof raw === 'string'
+          ? raw
+          : ((raw as Record<string, unknown>)?.content || (raw as Record<string, unknown>)?.text || ''))
+          .filter((text): text is string => typeof text === 'string' && text.trim().length > 0)
+        : [];
+      const candidates = chunks.length > 0
+        ? chunks.map((chunk, index) => ({ content: chunk, id: `${source.id}-chunk-${index}`, title: `${source.title} (Chunk ${index + 1})` }))
+        : [{ content: source.content || '', id: source.id, title: source.title }];
+      const effectiveMinScore = isSemanticDisabled ? 0.001 : (options.minScore || 0.02);
 
-      // Include chunks from metadata if available
-      if (source.metadata && typeof source.metadata === 'object' && 'chunks' in source.metadata) {
-        const chunks = source.metadata.chunks as unknown[];
-        if (Array.isArray(chunks) && chunks.length > 0) {
-          // Chunks may be objects (DocumentChunk) or strings — extract text
-          const chunkTexts = chunks.map(c => typeof c === 'string' ? c : ((c as Record<string, unknown>)?.content || (c as Record<string, unknown>)?.text || '')).filter(t => typeof t === 'string' && t.trim().length > 0);
-          if (chunkTexts.length > 0) {
-            contentToSearch = chunkTexts.join(' ') + ' ' + contentToSearch;
+      for (const candidate of candidates) {
+        if (!candidate.content.trim()) continue;
+        const content = `${source.title} ${candidate.content}`;
+        let score = keywordSearch(query, content);
+        if (source.metadata && typeof source.metadata === 'object') {
+          const validation = (source.metadata as { validation?: { confidenceScore?: number } }).validation;
+          if (validation && typeof validation === 'object' && validation.confidenceScore !== undefined) {
+            score *= validation.confidenceScore;
           }
         }
-      }
+        if (score < effectiveMinScore) continue;
 
-      if (!contentToSearch || contentToSearch.trim().length === 0) {
-        continue;
-      }
-
-      const content = `${source.title} ${contentToSearch}`;
-      let score = keywordSearch(query, content);
-
-      // Apply quality score adjustment based on validation metadata
-      if (source.metadata && typeof source.metadata === 'object') {
-        const validation = (source.metadata as { validation?: { confidenceScore?: number } }).validation;
-        if (validation && typeof validation === 'object' && validation.confidenceScore !== undefined) {
-          const qualityMultiplier = validation.confidenceScore;
-          score = score * qualityMultiplier;
-        }
-      }
-
-      const effectiveMinScore = isSemanticDisabled ? 0.001 : (options.minScore || 0.02);
-      
-      if (score >= effectiveMinScore) {
-        if (isSemanticDisabled) {
-          console.log(`✨ Adding "${source.title}" via aggressive keyword fallback (score: ${score.toFixed(3)})`);
-        } else {
-          console.log(`✨ Adding "${source.title}" via keyword search (score: ${score.toFixed(3)})`);
-        }
+        console.log(`✨ Adding "${candidate.title}" via keyword search (score: ${score.toFixed(3)})`);
         results.push({
-          id: source.id,
+          id: candidate.id,
           type: "source",
-          title: source.title,
-          content: contentToSearch,
+          title: candidate.title,
+          content: candidate.content,
           score,
-          metadata: {
-            type: source.type,
-            created_at: source.created_at,
-            qualityScore: score, // Add quality score to result metadata
-          },
+          metadata: { type: source.type, created_at: source.created_at, qualityScore: score },
           excerpt: extractExcerpt(content, query),
         });
       }

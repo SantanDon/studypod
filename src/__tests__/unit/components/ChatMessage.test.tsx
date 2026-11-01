@@ -130,6 +130,7 @@ describe('ChatMessage Component', () => {
 
     const messageContainer = container.querySelector('.flex.justify-start');
     expect(messageContainer).toBeInTheDocument();
+    expect(container.querySelector('[class*="max-w-[76ch]"]')).toBeInTheDocument();
   });
 
   it('returns null for unknown message type', () => {

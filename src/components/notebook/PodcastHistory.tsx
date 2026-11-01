@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import React, { useEffect, useRef, useState } from "react";
 import { FontAwesomeIcon } from "@fortawesome/react-fontawesome";
 import {
   faPlay,
@@ -16,6 +16,7 @@ import {
   loadPlaybackCheckpoint,
 } from "@/lib/audio/playbackProgress";
 import { useToast } from "@/hooks/use-toast";
+import { downloadAudioBlob } from "@/lib/audio/downloadAudioBlob";
 
 interface PodcastHistoryProps {
   notebookId: string;
@@ -54,8 +55,20 @@ export const PodcastHistory: React.FC<PodcastHistoryProps> = ({
     usePodcastHistory(notebookId);
   const { toast } = useToast();
   const [loadingAudioId, setLoadingAudioId] = useState<string | null>(null);
+  const [preparingDownloadId, setPreparingDownloadId] = useState<string | null>(null);
+  const [preparedDownload, setPreparedDownload] = useState<{ podcastId: string; blob: Blob } | null>(null);
+  const downloadRequestRef = useRef(0);
+
+  useEffect(() => () => {
+    downloadRequestRef.current += 1;
+  }, []);
 
   const handlePlay = async (podcast: PodcastRecord) => {
+    // Playing another saved episode changes the active history selection.
+    // Ignore any outstanding prepare request and discard its prepared blob.
+    downloadRequestRef.current += 1;
+    setPreparedDownload(null);
+    setPreparingDownloadId(null);
     try {
       setLoadingAudioId(podcast.id);
       const blob = await loadAudio(podcast);
@@ -84,21 +97,29 @@ export const PodcastHistory: React.FC<PodcastHistoryProps> = ({
   };
 
   const handleDownload = async (podcast: PodcastRecord) => {
+    if (preparedDownload?.podcastId === podcast.id) {
+      const safeTitle = podcast.title.replace(/[^a-z0-9]/gi, "_").toLowerCase();
+      // This click follows preparation and retains a fresh user gesture.
+      downloadAudioBlob(preparedDownload.blob, safeTitle);
+      return;
+    }
+    if (preparingDownloadId === podcast.id) return;
+
+    const requestId = ++downloadRequestRef.current;
+    setPreparedDownload(null);
+    setPreparingDownloadId(podcast.id);
     try {
       const blob = await loadAudio(podcast);
-      if (blob) {
-        const url = URL.createObjectURL(blob);
-        const a = document.createElement("a");
-        a.href = url;
-        a.download = `${podcast.title.replace(/[^a-z0-9]/gi, "_").toLowerCase()}.wav`;
-        document.body.appendChild(a);
-        a.click();
-        document.body.removeChild(a);
-        URL.revokeObjectURL(url);
+      if (requestId === downloadRequestRef.current && blob) {
+        setPreparedDownload({ podcastId: podcast.id, blob });
+      } else if (requestId === downloadRequestRef.current) {
+        toast({ title: 'Episode unavailable', description: 'The saved audio file is missing. You can remove this history entry and generate it again.', variant: 'destructive' });
       }
     } catch (error) {
       console.error("Error downloading audio:", error);
       toast({ title: 'Could not download episode', description: error instanceof Error ? error.message : 'Please retry.', variant: 'destructive' });
+    } finally {
+      if (requestId === downloadRequestRef.current) setPreparingDownloadId(null);
     }
   };
 
@@ -255,14 +276,36 @@ export const PodcastHistory: React.FC<PodcastHistoryProps> = ({
               </details>
 
               <div className="flex items-center space-x-1 opacity-100 transition-opacity sm:opacity-0 sm:group-hover:opacity-100 sm:group-focus-within:opacity-100">
-                <button
-                  onClick={() => handleDownload(podcast)}
-                  className="min-h-11 min-w-11 p-2 text-gray-500 hover:text-gray-700 dark:hover:text-gray-200 rounded-full hover:bg-gray-200 dark:hover:bg-zinc-800 transition-colors"
-                  aria-label={`Download ${podcast.title}`}
-                  title="Download"
-                >
-                  <FontAwesomeIcon icon={faDownload} className="text-xs" />
-                </button>
+                <div className="flex flex-col items-start">
+                  <button
+                    type="button"
+                    onClick={() => void handleDownload(podcast)}
+                    disabled={preparingDownloadId === podcast.id}
+                    className="min-h-11 min-w-11 p-2 text-gray-500 hover:text-gray-700 dark:hover:text-gray-200 rounded-full hover:bg-gray-200 dark:hover:bg-zinc-800 transition-colors disabled:opacity-50"
+                    aria-label={
+                      preparingDownloadId === podcast.id
+                        ? `Preparing download for ${podcast.title}`
+                        : preparedDownload?.podcastId === podcast.id
+                          ? `Download file for ${podcast.title}`
+                          : `Prepare download for ${podcast.title}`
+                    }
+                    title={preparedDownload?.podcastId === podcast.id ? "Download file" : "Prepare download"}
+                  >
+                    <FontAwesomeIcon icon={faDownload} className="text-xs" />
+                    <span className="ml-2">
+                      {preparingDownloadId === podcast.id
+                        ? "Preparing…"
+                        : preparedDownload?.podcastId === podcast.id
+                          ? "Download file"
+                          : "Prepare download"}
+                    </span>
+                  </button>
+                  {preparedDownload?.podcastId === podcast.id && (
+                    <span role="status" className="px-2 text-xs text-gray-500 dark:text-gray-400">
+                      Audio ready. Select Download file to save it.
+                    </span>
+                  )}
+                </div>
                 <button
                   onClick={() => handleDelete(podcast)}
                   disabled={isDeleting}

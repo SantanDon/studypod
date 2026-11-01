@@ -10,6 +10,34 @@ interface MarkdownRendererProps {
   isUserMessage?: boolean;
 }
 
+// Some model responses close a standalone bold label with one star. Repair only
+// that unambiguous line shape, leaving prose, valid emphasis and code untouched.
+export const normalizeAssistantMarkdown = (text: string): string => {
+  let fence: { marker: string; length: number } | null = null;
+
+  return text.split('\n').map((line) => {
+    const fenceMatch = line.match(/^\s*(`{3,}|~{3,})/);
+    if (fenceMatch) {
+      const marker = fenceMatch[1];
+      if (!fence) {
+        fence = { marker: marker[0], length: marker.length };
+      } else if (marker[0] === fence.marker && marker.length >= fence.length) {
+        fence = null;
+      }
+      return line;
+    }
+    if (fence) return line;
+
+    return line.replace(
+      /^(\s*(?:(?:[-+*]|\d+[.)])\s+|#{1,6}\s+)?)\*\*([^*`\n]{1,100})\*(\s*)$/,
+      (_match, prefix: string, label: string, suffix: string) =>
+        label.trim() && !/\[\d+\]/.test(label) ? `${prefix}**${label}**${suffix}` : _match
+    );
+  }).join('\n');
+};
+
+const answerReadability = 'min-w-0 break-words [&>p]:text-[15px] [&>p]:leading-7 [&>p]:mb-4 [&>ul]:my-4 [&>ol]:my-4 [&>ul>li]:text-[15px] [&>ol>li]:text-[15px] [&>ul>li]:leading-7 [&>ol>li]:leading-7 [&>ul>li]:mb-2 [&>ol>li]:mb-2';
+
 const FragmentComponent = ({ title, children }: { title: string; children: React.ReactNode }) => {
   const [isOpen, setIsOpen] = useState(false);
   return (
@@ -43,6 +71,7 @@ const MarkdownRenderer = ({ content, className = '', onCitationClick, isUserMess
   const handleCitationHover = useCallback((index: number | null) => {
     setHoveredCitation(index);
   }, []);
+  const containerClassName = `${isUserMessage ? 'min-w-0 break-words' : answerReadability} ${className}`.trim();
 
   const renderContent = (segments: MessageSegment[], citations: Citation[]) => {
     return segments.map((segment, idx) => {
@@ -56,7 +85,7 @@ const MarkdownRenderer = ({ content, className = '', onCitationClick, isUserMess
       return (
         <React.Fragment key={idx}>
           {processMarkdownWithCitations(
-            [segment], 
+            [isUserMessage ? segment : { ...segment, text: normalizeAssistantMarkdown(segment.text) }],
             citations, 
             onCitationClick, 
             isUserMessage,
@@ -70,7 +99,7 @@ const MarkdownRenderer = ({ content, className = '', onCitationClick, isUserMess
 
   if (typeof content === 'object' && 'segments' in content) {
     return (
-      <div className={className}>
+      <div className={containerClassName}>
         {renderContent(content.segments, content.citations)}
       </div>
     );
@@ -81,19 +110,10 @@ const MarkdownRenderer = ({ content, className = '', onCitationClick, isUserMess
   const citations: Citation[] = [];
   
   return (
-    <div className={className}>
+    <div className={containerClassName}>
       {renderContent(segments, citations)}
     </div>
   );
 };
 
-export default React.memo(MarkdownRenderer, (prevProps, nextProps) => {
-  // If it's a string, we only care if the string itself changed
-  if (typeof prevProps.content === 'string' && typeof nextProps.content === 'string') {
-    return prevProps.content === nextProps.content;
-  }
-  
-  // If it's an object, we want to allow standard React updates but avoid deep-thrashing
-  // if the segment references haven't shifted out from under us.
-  return prevProps.content === nextProps.content && prevProps.isUserMessage === nextProps.isUserMessage;
-});
+export default React.memo(MarkdownRenderer);

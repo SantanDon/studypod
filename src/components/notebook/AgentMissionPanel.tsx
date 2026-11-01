@@ -248,8 +248,8 @@ const AgentMissionPanel = ({ notebookId }: AgentMissionPanelProps) => {
             Agent Missions
           </h3>
           <p className="mt-0.5 text-[11px] leading-relaxed text-muted-foreground">
-            Give StudyPod a bounded research job. It reads this notebook, audits
-            its evidence, and saves a cited report as a note.
+            Give StudyPod a research task. It reads this notebook, checks its
+            sources, and saves a cited report as a note.
           </p>
         </div>
         <Button
@@ -357,7 +357,7 @@ const AgentMissionPanel = ({ notebookId }: AgentMissionPanelProps) => {
                       )}
                       {mission.status === "failed"
                         ? "Saved failure"
-                        : "Grounded report"}
+                        : "Report based on sources"}
                     </div>
                     <p
                       className={`whitespace-pre-wrap text-[11px] leading-relaxed text-foreground ${isExpanded ? "" : "line-clamp-5"}`}

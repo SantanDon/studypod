@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import VisualEffectsSettings from '@/components/settings/VisualEffectsSettings';
+import { LocalInferenceSettings } from '@/components/settings/LocalInferenceSettings';
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -27,7 +28,7 @@ import { DeveloperSettings } from '@/components/settings/DeveloperSettings';
 
 // Add proper accessibility descriptions for dialogs
 const DIALOG_DESCRIPTIONS = {
-  settings: "Manage your account settings and preferences including theme and storage usage",
+  settings: "Manage your local model connection, account preferences, and storage usage",
   dataManagement: "Export, import, or clear your local data including notebooks, sources, and chat history",
   about: "View information about the application including version and credits"
 };
@@ -296,7 +297,7 @@ export function ProfileMenu() {
 
       {/* Settings Dialog */}
       <Dialog open={showSettings} onOpenChange={setShowSettings}>
-        <DialogContent>
+        <DialogContent className="max-h-[85dvh] overflow-y-auto sm:max-w-2xl">
           <DialogHeader>
             <DialogTitle>Settings</DialogTitle>
             <DialogDescription>
@@ -304,6 +305,7 @@ export function ProfileMenu() {
             </DialogDescription>
           </DialogHeader>
           <div className="space-y-4 py-4">
+            <LocalInferenceSettings />
             {!isGuest && (
               <div className="space-y-2">
                 <Label htmlFor="custom-name">Display Name</Label>

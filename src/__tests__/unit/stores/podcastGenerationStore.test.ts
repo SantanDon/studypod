@@ -10,7 +10,7 @@ vi.mock("@/lib/tts/streamingTTSGenerator", () => ({
   getStreamingTTSGenerator: vi.fn(() => generator),
 }));
 
-const { usePodcastGenerationStore, usePodcastId } =
+const { usePodcastGenerationStore, usePodcastId, usePodcastProgress } =
   await import("@/stores/podcastGenerationStore");
 
 const script = {
@@ -70,6 +70,26 @@ describe("podcast generation identity persistence", () => {
     expect(usePodcastGenerationStore.getState().audioUrl).toBeNull();
   });
 
+  it("keeps finalization ownership and source scope in the store across view remounts", () => {
+    act(() => {
+      usePodcastGenerationStore.getState().startGeneration("notebook-1", script, {
+        sourceIds: ["source-a", "source-b"],
+      });
+    });
+
+    // The remounted view receives the same run script and must not start a second save.
+    expect(usePodcastGenerationStore.getState().sourceIds).toEqual(["source-a", "source-b"]);
+    expect(usePodcastGenerationStore.getState().claimFinalization(script)).toBe(true);
+    expect(usePodcastGenerationStore.getState().claimFinalization(script)).toBe(false);
+
+    act(() => usePodcastGenerationStore.getState().cancelGeneration());
+    expect(usePodcastGenerationStore.getState()).toMatchObject({
+      isGenerating: false,
+      finalizingScript: null,
+      sourceIds: [],
+    });
+  });
+
   it("does not expose one notebook podcast ID in another notebook", () => {
     act(() => {
       usePodcastGenerationStore.setState({
@@ -80,5 +100,51 @@ describe("podcast generation identity persistence", () => {
 
     const { result } = renderHook(() => usePodcastId("notebook-2"));
     expect(result.current).toBeNull();
+  });
+
+  it("keeps browser speech playback explicitly non-downloadable and out of saved history", () => {
+    act(() => {
+      usePodcastGenerationStore.getState().startGeneration("notebook-1", script);
+      usePodcastGenerationStore.getState().setAudioReady(["blob:script-segment"]);
+      usePodcastGenerationStore.getState().setFinalAudio(
+        "webspeech_fallback",
+        "notebook-1",
+        script.title,
+      );
+    });
+
+    expect(usePodcastGenerationStore.getState()).toMatchObject({
+      audioUrl: "webspeech_fallback",
+      podcastId: null,
+      notebookId: "notebook-1",
+      isGenerating: false,
+      canPlayPartial: true,
+    });
+  });
+
+  it("retains a terminal generation error after the generating banner closes", () => {
+    act(() => {
+      usePodcastGenerationStore.getState().startGeneration("notebook-1", script);
+      usePodcastGenerationStore.getState().updateProgress({
+        phase: "error",
+        currentSegment: 2,
+        totalSegments: 4,
+        percentage: 50,
+        message: "Worker initialization failed",
+        canPlay: false,
+      });
+    });
+
+    const state = usePodcastGenerationStore.getState();
+    expect(state.isGenerating).toBe(false);
+    expect(state.script).toEqual(script);
+    expect(state.progress).toMatchObject({
+      phase: "error",
+      message: "Worker initialization failed",
+      percentage: 50,
+    });
+    const remountedView = renderHook(() => usePodcastProgress("notebook-1"));
+    expect(remountedView.result.current?.phase).toBe("error");
+    expect(remountedView.result.current?.message).toBe("Worker initialization failed");
   });
 });

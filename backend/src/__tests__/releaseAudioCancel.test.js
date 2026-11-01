@@ -231,6 +231,107 @@ afterAll(async () => {
 });
 
 describe("release audiobook cancellation lifecycle", () => {
+  it.each(["completed", "failed", "cancelled"])(
+    "clears a matching persisted %s active-job pointer without changing render output state",
+    async (status) => {
+      const ids = freshIds(`stale-${status}`);
+      seedManifest({
+        fileName: ids.bookFile,
+        renderId: ids.renderId,
+        renderStatus: "completed",
+        finalStatus: "completed",
+      });
+      setRenderActiveJob(ids.bookFile, ids.renderId, ids.jobId);
+      seedJob(ids.jobId, {
+        bookFileName: ids.bookFile,
+        renderId: ids.renderId,
+        status,
+        phase: status,
+        progress: status === "completed" ? 100 : 47,
+      });
+
+      expect(await routeModule.reconcileTerminalAudiobookActiveJob({
+        fileName: ids.bookFile,
+        renderId: ids.renderId,
+        jobId: ids.jobId,
+        ownerId: "owner-a",
+      })).toBe(true);
+      const render = loadBookManifest(MANIFEST_DIR, ids.bookFile).renders[ids.renderId];
+      expect(render.activeJobId).toBeNull();
+      expect(render.status).toBe("completed");
+      expect(render.final.status).toBe("completed");
+      expect(render.chapters["ch-1"].status).toBe("completed");
+    },
+  );
+
+  it("preserves unknown, mismatched, foreign, and nonterminal active-job pointers", async () => {
+    const cases = [
+      { tag: "unknown", job: null },
+      {
+        tag: "mismatch",
+        job: { status: "failed", bookFileName: "other.epub" },
+      },
+      {
+        tag: "foreign",
+        job: { status: "failed", ownerId: "owner-b" },
+      },
+      { tag: "processing", job: { status: "processing" } },
+    ];
+    for (const fixture of cases) {
+      const ids = freshIds(`stale-${fixture.tag}`);
+      seedManifest({
+        fileName: ids.bookFile,
+        renderId: ids.renderId,
+        renderStatus: "processing",
+        finalStatus: "processing",
+      });
+      setRenderActiveJob(ids.bookFile, ids.renderId, ids.jobId);
+      if (fixture.job) {
+        seedJob(ids.jobId, {
+          bookFileName: ids.bookFile,
+          renderId: ids.renderId,
+          status: fixture.job.status,
+          ...fixture.job,
+        });
+      }
+      expect(await routeModule.reconcileTerminalAudiobookActiveJob({
+        fileName: ids.bookFile,
+        renderId: ids.renderId,
+        jobId: ids.jobId,
+        ownerId: "owner-a",
+      })).toBe(false);
+      expect(loadBookManifest(MANIFEST_DIR, ids.bookFile).renders[ids.renderId].activeJobId)
+        .toBe(ids.jobId);
+    }
+  });
+
+  it("reconciles a terminal pointer when the playback manifest is read after restart", async () => {
+    const ids = freshIds("stale-playback-read");
+    seedManifest({
+      fileName: ids.bookFile,
+      renderId: ids.renderId,
+      renderStatus: "completed",
+      finalStatus: "completed",
+    });
+    setRenderActiveJob(ids.bookFile, ids.renderId, ids.jobId);
+    seedJob(ids.jobId, {
+      bookFileName: ids.bookFile,
+      renderId: ids.renderId,
+      status: "completed",
+      phase: "completed",
+      progress: 100,
+    });
+
+    const response = await fetch(
+      `${baseUrl}/api/audiobook/books/${encodeURIComponent(ids.bookFile)}/playback-manifest`,
+    );
+    expect(response.status).toBe(200);
+    const persisted = loadBookManifest(MANIFEST_DIR, ids.bookFile);
+    expect(persisted.renders[ids.renderId].activeJobId).toBeNull();
+    const playback = await response.json();
+    expect(playback.renderId).toBe(ids.renderId);
+  });
+
   it("returns 404 for a missing job without revealing state", async () => {
     const response = await fetch(
       `${baseUrl}/api/audiobook/job-status/no-such-job-xyz/cancel`,

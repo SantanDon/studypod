@@ -110,6 +110,56 @@ export function shouldSkipClientSemanticIndexing(
     && contentLength > maxCharacters;
 }
 
+/**
+ * Audiobook imports arrive with their text already extracted and do not pass
+ * through the upload/indexing mutation. Mark that text as keyword-ready at
+ * creation time instead of leaving it indefinitely pending. This does not
+ * claim that semantic indexing completed.
+ */
+export function getInitialSourceProcessingState(
+  sourceType: string,
+  content: string | undefined,
+  metadata: unknown,
+  requestedStatus?: SourceProcessingStatus,
+): { processing_status?: SourceProcessingStatus; metadata: SourceProcessingMetadata } {
+  const parsedMetadata = parseSourceProcessingMetadata(metadata);
+  if (sourceType !== 'ebook' || !content?.trim() || (requestedStatus && requestedStatus !== 'pending')) {
+    return { processing_status: requestedStatus, metadata: parsedMetadata };
+  }
+
+  return {
+    processing_status: 'degraded',
+    metadata: {
+      ...parsedMetadata,
+      processingStage: 'degraded',
+      processingError: buildSourceProcessingError(
+        'SOURCE_INDEXING_SKIPPED_IMPORT',
+        'Extracted book text is available for keyword-grounded work; semantic indexing was not run during import.',
+        'indexing',
+        false,
+      ),
+      indexingSkipped: true,
+      indexingStrategy: 'keyword_only',
+      contentLength: content.length,
+      processedAt: new Date().toISOString(),
+    },
+  };
+}
+
+/** Build a safe, metadata-preserving recovery update for an existing ebook. */
+export function getPendingEbookRecoveryUpdates(
+  source: ProcessableSourceLike,
+): { processing_status: SourceProcessingStatus; metadata: SourceProcessingMetadata } | null {
+  if (source.type !== 'ebook' || getSourceProcessingStatus(source) !== 'pending' || !hasUsableSourceContent(source)) {
+    return null;
+  }
+
+  return getInitialSourceProcessingState('ebook', source.content, source.metadata, 'pending') as {
+    processing_status: SourceProcessingStatus;
+    metadata: SourceProcessingMetadata;
+  };
+}
+
 export function buildSourceProcessingError(
   code: string,
   message: string,

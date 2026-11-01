@@ -16,7 +16,7 @@ type Section = {
 };
 
 const MAJOR_HEADING =
-  /(?:^|\n)\s*((?:BOOK\s+(?:I|II|III|IV|V|VI|VII|VIII|IX|X|\d+))|(?:CHAPTER\s+\d+)|(?:PART\s+(?:I|II|III|IV|V|\d+))|(?:INTRODUCTION(?:\s+AND\s+ANALYSIS)?))\s*(?:\n|$)/gi;
+  /(?:^|\n)\s*(?:#{1,6}\s+)?((?:BOOK\s+(?:I|II|III|IV|V|VI|VII|VIII|IX|X|\d+))|(?:CHAPTER\s+\d+)|(?:PART\s+(?:I|II|III|IV|V|\d+))|(?:INTRODUCTION(?:\s+AND\s+ANALYSIS)?)|(?:ABSTRACT|BACKGROUND|RELATED\s+WORK|LITERATURE\s+REVIEW|MATERIALS\s+AND\s+METHODS|METHODS|METHODOLOGY|RESULTS|FINDINGS|DISCUSSION|CONCLUSION|CONCLUSIONS|LIMITATIONS|REFERENCES|ACKNOWLEDGMENTS?|DATA\s+AVAILABILITY|APPENDIX(?:\s+[A-Z0-9]+)?))\s*(?:\n|$)|(?:^|\n)\s*(?:#{1,6}\s+|\d+(?:\.\d+)*[.)]?\s+)([A-Z][^\n]{1,78}?)(?:\s*\n|$)/gim;
 
 const normalize = (value: string) =>
   value.toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
@@ -39,7 +39,7 @@ function splitMajorSections(content: string): Section[] {
     const end =
       index + 1 < matches.length ? (matches[index + 1].index ?? content.length) : content.length;
     sections.push({
-      heading: match[1].trim(),
+      heading: (match[1] || match[2]).trim().replace(/[.:]+$/, ''),
       text: content.slice(start, end).trim(),
     });
   });
@@ -140,7 +140,7 @@ export function buildPodcastSourceContext(
       : evenly(sections, maximumSections);
     const perSection = Math.floor((bodyBudget - Math.max(0, chosen.length - 1) * 2) / Math.max(1, chosen.length));
     const body = chosen.map(section => {
-      const label = `[${section.heading.slice(0, 65)}]\n`;
+      const label = `[SECTION: ${section.heading.slice(0, 65)}]\n`;
       const budget = Math.max(0, perSection - label.length);
       if (tokens.length && section.text.length > budget) {
         const note = '\n[focused excerpt; other text omitted]';

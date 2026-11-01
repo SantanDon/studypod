@@ -85,8 +85,8 @@ describe("audiobookPlayback", () => {
   });
 
   it("keeps a genuinely newer local speed change during manifest refresh", () => {
-    const durable = { playbackRate: 1.5, currentTimeSeconds: 18, updatedAt: "2026-07-26T12:00:00.000Z" };
-    const local = { playbackRate: 1.75, currentTimeSeconds: 24, updatedAt: "2026-07-26T13:00:00.000Z" };
+    const durable = { renderId: "render-one", playbackRate: 1.5, currentTimeSeconds: 18, updatedAt: "2026-07-26T12:00:00.000Z" };
+    const local = { renderId: "render-one", playbackRate: 1.75, currentTimeSeconds: 24, updatedAt: "2026-07-26T13:00:00.000Z" };
     expect(mergeAudiobookListenerState(durable, local, "render-one")).toMatchObject(local);
     expect(mergeAudiobookListenerState(local, durable, "render-one")).toMatchObject(local);
   });
@@ -123,6 +123,41 @@ describe("audiobookPlayback", () => {
     expect(merged.progressPercent).toBe(40);
   });
 
+  it("drops stale position and completions when a new render reuses chapter IDs", () => {
+    const merged = mergeAudiobookListenerState(
+      {
+        renderId: "old-render",
+        currentChapterId: "chapter-one",
+        currentTimeSeconds: 42,
+        chapterDurationSeconds: 60,
+        playbackRate: 1.25,
+        completedChapterIds: ["chapter-one", "chapter-three"],
+        progressPercent: 100,
+        updatedAt: "2026-07-26T12:00:00.000Z",
+      },
+      {
+        renderId: "new-render",
+        currentChapterId: "chapter-one",
+        currentTimeSeconds: 7,
+        chapterDurationSeconds: 60,
+        playbackRate: 1.5,
+        completedChapterIds: [],
+        progressPercent: 0,
+        updatedAt: "2026-07-26T11:00:00.000Z",
+      },
+      "new-render",
+    );
+
+    expect(merged).toMatchObject({
+      renderId: "new-render",
+      currentChapterId: "chapter-one",
+      currentTimeSeconds: 7,
+      playbackRate: 1.25,
+      completedChapterIds: [],
+      progressPercent: 0,
+    });
+  });
+
   it("calculates book-level progress from completed and partial chapters", () => {
     expect(
       calculateAudiobookProgress(manifest, {
@@ -156,7 +191,7 @@ describe("audiobookPlayback", () => {
     ).toBe("chapter-one");
   });
 
-  it("persists progress under a book-stable key", () => {
+  it("persists progress under a render-scoped key", () => {
     const values = new Map<string, string>();
     const storage = {
       getItem: (key: string) => values.get(key) || null,
@@ -165,6 +200,7 @@ describe("audiobookPlayback", () => {
     saveLocalAudiobookProgress(
       "Long Book.pdf",
       {
+        renderId: "render-one",
         currentChapterId: "chapter-one",
         currentTimeSeconds: 18,
         playbackRate: 1.5,
@@ -173,8 +209,12 @@ describe("audiobookPlayback", () => {
       storage,
     );
 
-    expect(values.has(audiobookProgressStorageKey("Long Book.pdf"))).toBe(true);
-    expect(loadLocalAudiobookProgress("Long Book.pdf", storage)).toMatchObject({
+    expect(values.has(audiobookProgressStorageKey("Long Book.pdf", "render-one"))).toBe(true);
+    expect(audiobookProgressStorageKey("Long Book.pdf", "render-one")).not.toBe(
+      audiobookProgressStorageKey("Long Book.pdf", "render-two"),
+    );
+    expect(loadLocalAudiobookProgress("Long Book.pdf", storage, "render-one")).toMatchObject({
+      renderId: "render-one",
       currentChapterId: "chapter-one",
       currentTimeSeconds: 18,
       playbackRate: 1.5,

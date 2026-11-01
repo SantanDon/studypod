@@ -152,6 +152,9 @@ describe("resume never claims a run it cannot reattach to", () => {
     expect(state.host1Name).toBe("Robin");
     expect(state.progress).toMatchObject({ canPlay: false, percentage: 0 });
     expect(state.progress?.message).toMatch(/interrupted/i);
+    expect(state.progress?.message).toMatch(/no playable audio was recovered in this browser/i);
+    expect(state.progress?.message).toMatch(/check saved audio overviews/i);
+    expect(state.progress?.message).not.toMatch(/audio was not saved/i);
   });
 
   it("does not adopt dead or non-blob handles as playable audio", () => {

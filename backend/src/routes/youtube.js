@@ -12,6 +12,7 @@ import {
   assessTranscriptQuality,
   buildYouTubeStructuredContent,
   classifyYouTubeAvailability,
+  decodeYouTubeCaptionEntities,
   extractParticipantCandidates,
   extractYouTubeVideoId,
   normalizeTranscriptSegments,
@@ -61,15 +62,7 @@ async function fetchOEmbedMetadata(videoId) {
 
 function decodeHtmlEntities(text) {
   if (!text) return "";
-  return text
-    .replace(/&amp;/g, '&')
-    .replace(/&lt;/g, '<')
-    .replace(/&gt;/g, '>')
-    .replace(/&#39;/g, "'")
-    .replace(/&#x27;/g, "'")
-    .replace(/&#x2F;/g, "/")
-    .replace(/&apos;/g, "'")
-    .replace(/&quot;/g, '"')
+  return decodeYouTubeCaptionEntities(text)
     .replace(/\n/g, ' ')
     .trim();
 }

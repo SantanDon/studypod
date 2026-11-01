@@ -132,7 +132,6 @@ const headingKey = (value = "") =>
 
 const collapseNarrationLines = (input = "") => {
   const rawLines = normalizeUnicode(input)
-    .replace(/([A-Za-z])[-]\s*\n\s*([a-z])/g, "$1$2")
     .replace(/\r\n?/g, "\n")
     .split("\n");
   const paragraphs = [];
@@ -179,7 +178,7 @@ const collapseNarrationLines = (input = "") => {
  */
 export function prepareNarrationText(
   input = "",
-  { title = "", includeTitle = true } = {},
+  { title = "", includeTitle = true, framingText = "", outroText = "" } = {},
 ) {
   const paragraphs = collapseNarrationLines(input)
     .map(cleanInlineArtifacts)
@@ -195,6 +194,24 @@ export function prepareNarrationText(
       paragraphs.unshift(spokenTitle);
     }
   }
+
+  // Framing is spoken only when supplied by the caller, and remains a distinct
+  // paragraph so it cannot be mistaken for source text.
+  const framing = String(framingText || "")
+    .split(/\r\n?|\n/)
+    .map((line) => cleanInlineArtifacts(normalizeUnicode(line)))
+    .filter(Boolean)
+    .join(" ");
+  if (framing) paragraphs.unshift(ensureTerminalPause(expandSpeechFriendlyTokens(framing)));
+
+  // Optional closing framing is also kept in its own paragraph. Callers must
+  // provide explicit copy; this service never derives claims from the source.
+  const outro = String(outroText || "")
+    .split(/\r\n?|\n/)
+    .map((line) => cleanInlineArtifacts(normalizeUnicode(line)))
+    .filter(Boolean)
+    .join(" ");
+  if (outro) paragraphs.push(ensureTerminalPause(expandSpeechFriendlyTokens(outro)));
 
   return paragraphs.join("\n\n").replace(/\n{3,}/g, "\n\n").trim();
 }

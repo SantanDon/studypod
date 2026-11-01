@@ -20,6 +20,7 @@
 
 
 import { TIMEOUTS } from "@/lib/constants";
+import { getOllamaBaseUrl } from "@/config/ollamaConfig";
 
 interface OllamaModel {
   name: string;
@@ -32,21 +33,11 @@ interface OllamaListResponse {
   [key: string]: unknown;
 }
 
-const FALLBACK_BASE = "http://localhost:11434";
-
 /**
  * Resolve base URL from environment with Vite-friendly fallback.
  */
 function getBaseUrl(): string {
-  // Prefer Vite-style import.meta.env at runtime in ESM contexts (browsers/Vite dev)
-  const viteEnv =
-    typeof import.meta !== "undefined" ? (import.meta as unknown as Record<string, unknown>).env as Record<string, string> : undefined;
-  const viteBase = viteEnv?.VITE_OLLAMA_BASE_URL || viteEnv?.VITE_OLLAMA_BASE;
-  const nodeEnv =
-    typeof process !== "undefined"
-      ? process.env?.OLLAMA_BASE_URL || process.env?.VITE_OLLAMA_BASE_URL
-      : undefined;
-  return (viteBase || nodeEnv || FALLBACK_BASE).replace(/\/+$/, ""); // trim trailing slashes
+  return getOllamaBaseUrl();
 }
 
 /**
@@ -321,12 +312,21 @@ export async function generateText(
         }
       }
     } catch {
+      opts.signal?.throwIfAborted();
       // fall back to text
-      out.text = await res.text().catch(() => "");
+      out.text = await res.text().catch(() => {
+        opts.signal?.throwIfAborted();
+        return "";
+      });
     }
   } else {
     // Plain text
-    out.text = await res.text().catch(() => "");
+    try {
+      out.text = await res.text();
+    } catch {
+      opts.signal?.throwIfAborted();
+      out.text = "";
+    }
   }
 
   return out;
@@ -343,6 +343,12 @@ export async function generateTextToString(
   if (r instanceof Response) {
     // unlikely because stream was false, but handle defensively
     return await r.text();
+  }
+  const completion = r.raw && typeof r.raw === "object" ? r.raw : undefined;
+  if (completion?.done === false || completion?.done_reason === "length") {
+    throw new Error(
+      "Ollama generation ended before completion (token limit reached). Retry with a shorter request.",
+    );
   }
   return (
     r.text || (typeof r.raw === "string" ? r.raw : JSON.stringify(r.raw || ""))

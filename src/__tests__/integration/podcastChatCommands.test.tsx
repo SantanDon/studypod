@@ -1,5 +1,6 @@
 import React, { StrictMode } from 'react';
-import { act, cleanup, render, waitFor } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import PodcastView from '@/components/notebook/PodcastView';
 import { parseStudioAudioIntent, useStudioAudioCommands } from '@/lib/audio/studioAudioCommands';
@@ -32,8 +33,8 @@ vi.mock('@/lib/tts/kokoroTTSProvider', () => ({ KOKORO_VOICES: { am_onyx: { gend
 vi.mock('@/lib/tts/audioValidator', () => ({ AudioValidator: { validateBlob: vi.fn() } }));
 vi.mock('@/components/notebook/TTSProviderSettings', () => ({ default: () => null }));
 vi.mock('@/components/notebook/TTSSettingsDialog', () => ({ default: () => null }));
-vi.mock('@/components/notebook/AudioPlayer', () => ({ default: () => null }));
-vi.mock('@/components/notebook/PodcastHistory', () => ({ PodcastHistory: () => null }));
+vi.mock('@/components/notebook/AudioPlayer', () => ({ default: ({ audioUrl }: { audioUrl: string }) => <audio data-testid="audio-player" src={audioUrl} /> }));
+vi.mock('@/components/notebook/PodcastHistory', () => ({ PodcastHistory: ({ onPlay }: { onPlay: (url: string, title: string, podcastId: string) => void }) => mock.history.length > 0 ? <button type="button" onClick={() => onPlay('blob:restored-overview', 'Restored overview', 'restored-episode')}>Play saved fixture</button> : null }));
 vi.mock('@/services/indexedDBService', () => ({ indexedDBService: {} }));
 const script = () => ({ title: 'Fixture podcast', segments: [{ speaker: 'Alex', text: 'The solar system fixture.' }, { speaker: 'Sarah', text: 'What does it include?' }] });
 const command = (message: string, sourceIds = ['selected'], notebookId = 'notebook-a') => {
@@ -73,6 +74,16 @@ describe('chat -> existing Podcast Studio handler (mocked providers, real compon
         expect(mock.script).not.toHaveBeenCalled();
         expect(mock.start).not.toHaveBeenCalled();
     });
+    it.each([
+        [['excluded']],
+        [['selected', 'excluded']],
+    ])('saves attribution from actual script evidence (%j)', async (evidenceSourceIds) => {
+        mock.script.mockResolvedValueOnce({ ...script(), metadata: { evidenceSourceIds } });
+        render(<PodcastView notebookId="notebook-a"/>);
+        act(() => { command('Make a podcast', ['selected', 'excluded']); });
+        await waitFor(() => expect(mock.start).toHaveBeenCalledTimes(1));
+        expect(usePodcastGenerationStore.getState().sourceIds).toEqual(evidenceSourceIds);
+    });
     it('does not consume another notebook command', async () => {
         render(<PodcastView notebookId="notebook-b"/>);
         act(() => { command('Make a podcast'); });
@@ -86,11 +97,27 @@ describe('chat -> existing Podcast Studio handler (mocked providers, real compon
         render(<PodcastView notebookId="notebook-a"/>);
         act(() => { command('Make a podcast'); });
         await waitFor(() => expect(mock.script).toHaveBeenCalledTimes(1));
+        const preparationSignal = mock.script.mock.calls[0][1].signal as AbortSignal;
+        expect(preparationSignal.aborted).toBe(false);
         act(() => { command('Cancel my podcast', []); });
         await waitFor(() => expect(useStudioAudioCommands.getState().requests['notebook-a'].phase).toBe('accepted'));
+        expect(preparationSignal.aborted).toBe(true);
         await act(async () => { resolveScript(script()); });
         expect(mock.start).not.toHaveBeenCalled();
         expect(useStudioAudioCommands.getState().requests['notebook-a'].operation).toBe('cancel');
+    });
+    it('treats an aborted preparation as cancellation without an error toast', async () => {
+        mock.script.mockImplementationOnce((_content, options) => new Promise((_resolve, reject) => {
+            options.signal.addEventListener('abort', () => reject(new DOMException('Cancelled', 'AbortError')), { once: true });
+        }));
+        render(<PodcastView notebookId="notebook-a"/>);
+        act(() => { command('Make a podcast'); });
+        await waitFor(() => expect(mock.script).toHaveBeenCalledTimes(1));
+        act(() => { command('Cancel my podcast', []); });
+        await waitFor(() => expect(mock.script.mock.calls[0][1].signal.aborted).toBe(true));
+        await act(async () => {});
+        expect(mock.start).not.toHaveBeenCalled();
+        expect(mock.toast.mock.calls.some(([message]) => message.title === 'Generation Failed')).toBe(false);
     });
     it('ignores old progress callbacks after cancellation and a different notebook becomes active', async () => {
         render(<PodcastView notebookId="notebook-a"/>);
@@ -168,5 +195,93 @@ describe('completed audio publication gate (mocked providers, real view and stor
         expect(usePodcastGenerationStore.getState().script?.title).toBe('New run');
         expect(usePodcastGenerationStore.getState().isGenerating).toBe(true);
         expect(mock.toast).not.toHaveBeenCalledWith(expect.objectContaining({ title: 'Audio check failed' }));
+    });
+});
+
+describe('customizing another saved overview', () => {
+    it('returns to the player when a saved episode is selected during customization', () => {
+        usePodcastGenerationStore.setState({
+            notebookId: 'notebook-a', audioUrl: 'blob:saved-overview',
+            podcastId: 'saved-episode', script: script(), isGenerating: false,
+        });
+        const { rerender } = render(<PodcastView notebookId="notebook-a" />);
+        fireEvent.click(screen.getByRole('button', { name: 'Customize audio' }));
+        mock.history = [{ id: 'restored-episode' }];
+        // Rerender so the history fixture becomes visible in the customization view.
+        rerender(<PodcastView notebookId="notebook-a" />);
+        fireEvent.click(screen.getByRole('button', { name: 'Play saved fixture' }));
+        expect((screen.getByTestId('audio-player') as HTMLAudioElement).src).toContain('blob:restored-overview');
+        expect(screen.queryByLabelText('Episode Focus')).toBeNull();
+        mock.history = [];
+    });
+    it('lets the user cancel script preparation before speech starts', async () => {
+        mock.script.mockImplementationOnce((_content, options) => new Promise((_resolve, reject) => {
+            options.signal.addEventListener('abort', () => reject(new DOMException('Cancelled', 'AbortError')), { once: true });
+        }));
+        render(<PodcastView notebookId="notebook-a"/>);
+        fireEvent.click(screen.getByRole('button', { name: 'Customize audio' }));
+        fireEvent.click(screen.getByRole('button', { name: 'Create audio overview' }));
+        await waitFor(() => expect(mock.script).toHaveBeenCalledTimes(1));
+        fireEvent.click(screen.getByRole('button', { name: 'Cancel preparation' }));
+        await waitFor(() => expect(mock.script.mock.calls[0][1].signal.aborted).toBe(true));
+        await waitFor(() => expect(screen.queryByRole('button', { name: 'Cancel preparation' })).toBeNull());
+        expect(mock.start).not.toHaveBeenCalled();
+        expect(mock.toast.mock.calls.some(([message]) => message.title === 'Generation Failed')).toBe(false);
+    });
+    afterEach(() => { mock.sources = mock.sources.filter((source) => source.id !== 'focused-ebook'); });
+    const restoreSaved = () => {
+        usePodcastGenerationStore.setState({
+            notebookId: 'notebook-a', audioUrl: 'blob:saved-overview',
+            podcastId: 'saved-episode', script: script(), isGenerating: false,
+        });
+        render(<PodcastView notebookId="notebook-a" />);
+    };
+    it('can edit focus and close customization without losing saved playback', async () => {
+        restoreSaved();
+        fireEvent.click(screen.getByRole('button', { name: 'Customize audio' }));
+        fireEvent.change(screen.getByLabelText('Episode Focus'), { target: { value: "Transcriber's Notes" } });
+        expect(usePodcastGenerationStore.getState().audioUrl).toBe('blob:saved-overview');
+        expect(usePodcastGenerationStore.getState().podcastId).toBe('saved-episode');
+        expect(mock.start).not.toHaveBeenCalled();
+        fireEvent.click(screen.getByRole('button', { name: 'Close audio customization' }));
+        expect(screen.getByRole('heading', { name: 'Current audio overview' })).toBeTruthy();
+        expect(usePodcastGenerationStore.getState().audioUrl).toBe('blob:saved-overview');
+        fireEvent.click(screen.getByRole('button', { name: 'Customize audio' }));
+        expect((screen.getByLabelText('Episode Focus') as HTMLInputElement).value).toBe("Transcriber's Notes");
+        expect(mock.save).not.toHaveBeenCalled();
+    });
+    it('creates the next overview with its edited focus rather than immediately regenerating', async () => {
+        restoreSaved();
+        fireEvent.click(screen.getByRole('button', { name: 'Customize audio' }));
+        fireEvent.change(screen.getByLabelText('Episode Focus'), { target: { value: "Transcriber's Notes" } });
+        await userEvent.click(screen.getByRole('tab', { name: 'Deep Dive' }));
+        expect((screen.getByLabelText('Episode Focus') as HTMLInputElement).value).toBe("Transcriber's Notes");
+        fireEvent.click(screen.getByRole('button', { name: 'Create audio overview' }));
+        await waitFor(() => expect(mock.script).toHaveBeenCalledTimes(1));
+        expect(mock.script.mock.calls[0][1].userNotes).toContain("USER-SELECTED EPISODE FOCUS: Transcriber's Notes");
+        expect(mock.script.mock.calls[0][1].type).toBe('deep-dive');
+        await waitFor(() => expect(mock.start).toHaveBeenCalledTimes(1));
+    });
+    it.each(['pending', 'ready'])('respects the requested section when its ebook is %s', async (status) => {
+        mock.sources.push({
+            ...mock.sources[0], id: 'focused-ebook', title: 'The Republic', type: 'ebook', processing_status: status,
+            content: '# Introduction\n\nUnrelated introduction.\n\n[SECTION: Transcriber’s Notes]\n\nNew original cover art is granted to the public domain.',
+        });
+        restoreSaved();
+        fireEvent.click(screen.getByRole('button', { name: 'Customize audio' }));
+        fireEvent.change(screen.getByLabelText('Episode Focus'), { target: { value: 'Transcriber’s Notes' } });
+        fireEvent.click(screen.getByRole('button', { name: 'Create audio overview' }));
+        if (status === 'pending') {
+            await waitFor(() => expect(mock.toast).toHaveBeenCalledWith(expect.objectContaining({ title: 'Requested section is not ready' })));
+            expect(mock.script).not.toHaveBeenCalled();
+            expect(mock.start).not.toHaveBeenCalled();
+            expect(usePodcastGenerationStore.getState().audioUrl).toBe('blob:saved-overview');
+        } else {
+            await waitFor(() => expect(mock.start).toHaveBeenCalledTimes(1));
+            expect(mock.script.mock.calls[0][0]).toContain('New original cover art');
+            expect(mock.script.mock.calls[0][0]).not.toContain('Unrelated introduction');
+            expect(mock.script.mock.calls[0][0]).not.toContain('SELECTED_SOURCE');
+            expect(usePodcastGenerationStore.getState().sourceIds).toEqual(['focused-ebook']);
+        }
     });
 });

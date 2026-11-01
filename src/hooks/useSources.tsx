@@ -8,7 +8,7 @@ import { useGuest } from "@/hooks/useGuest";
 import { useAuth } from "@/hooks/useAuth";
 import { ApiService } from "@/services/apiService";
 import { useEffect } from "react";
-import type { SourceProcessingStatus } from "@/lib/sources/sourceProcessing";
+import { getInitialSourceProcessingState, getPendingEbookRecoveryUpdates, type SourceProcessingStatus } from "@/lib/sources/sourceProcessing";
 
 export interface Source extends LocalSource {
   author_name?: string;
@@ -137,6 +137,12 @@ export const useSources = (notebookId?: string) => {
             : "New Source";
 
       let newSource: Source;
+      const initialProcessing = getInitialSourceProcessingState(
+        sourceData.type,
+        sourceData.content,
+        sourceData.metadata,
+        sourceData.processing_status,
+      );
 
       if (session?.access_token) {
         // Create source in postgres db via ApiService
@@ -150,8 +156,8 @@ export const useSources = (notebookId?: string) => {
           url: sourceData.url,
           file_path: sourceData.file_path,
           file_size: sourceData.file_size,
-          processing_status: sourceData.processing_status,
-          metadata: sourceData.metadata || {},
+          processing_status: initialProcessing.processing_status,
+          metadata: initialProcessing.metadata,
         };
         newSource = (await ApiService.createSource(
           sourceData.notebookId,
@@ -168,8 +174,8 @@ export const useSources = (notebookId?: string) => {
           url: sourceData.url,
           file_path: sourceData.file_path,
           file_size: sourceData.file_size,
-          processing_status: sourceData.processing_status,
-          metadata: (sourceData.metadata as Record<string, unknown>) || {},
+          processing_status: initialProcessing.processing_status,
+          metadata: initialProcessing.metadata,
         })) as Source;
       }
 
@@ -260,12 +266,29 @@ export const useSources = (notebookId?: string) => {
     },
   });
 
+  const retrySources = async () => {
+    const refreshed = await refetch();
+    const pendingEbooks = (refreshed.data || [])
+      .map((source) => ({ source, updates: getPendingEbookRecoveryUpdates(source) }))
+      .filter((entry): entry is { source: Source; updates: NonNullable<typeof entry.updates> } => Boolean(entry.updates));
+
+    if (pendingEbooks.length === 0) return refreshed;
+
+    const recoveryResults = await Promise.allSettled(pendingEbooks.map(({ source, updates }) =>
+      updateSource.mutateAsync({ sourceId: source.id, updates }),
+    ));
+    const failedRecovery = recoveryResults.find((result) => result.status === 'rejected');
+    if (failedRecovery?.status === 'rejected') throw failedRecovery.reason;
+
+    return refetch();
+  };
+
   return {
     sources,
     isLoading,
     isFetching,
     error,
-    retrySources: refetch,
+    retrySources,
     addSource: addSource.mutate,
     addSourceAsync: addSource.mutateAsync,
     isAdding: addSource.isPending,

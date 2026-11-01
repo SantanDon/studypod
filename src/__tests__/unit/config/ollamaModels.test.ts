@@ -1,6 +1,6 @@
 import { afterEach, expect, it, vi } from 'vitest';
 
-afterEach(() => { vi.unstubAllEnvs(); vi.resetModules(); });
+afterEach(() => { localStorage.removeItem('ollama-default-models'); vi.unstubAllEnvs(); vi.resetModules(); });
 
 it('pins generation tasks to the configured local model while keeping embeddings separate', async () => {
   vi.stubEnv('VITE_OLLAMA_MODEL', ' qwen3.5:9b ');
@@ -16,4 +16,19 @@ it('retains task defaults when the deployment model is blank', async () => {
   const { getModelForTask } = await import('@/config/ollamaModels');
   expect(getModelForTask('chat')).toBe('llama3.2:1b');
   expect(getModelForTask('code')).toBe('phi:2.7b');
+});
+
+it('reads valid browser selections on each call and ignores malformed selections', async () => {
+  vi.stubEnv('VITE_OLLAMA_MODEL', 'build-default:7b');
+  const { getModelForTask } = await import('@/config/ollamaModels');
+  localStorage.setItem('ollama-default-models', JSON.stringify({ chat: 'qwen3.5:9b', code: 'deepseek-coder:6.7b', embedding: 'nomic-embed-text' }));
+  expect(getModelForTask('chat')).toBe('qwen3.5:9b');
+  expect(getModelForTask('summarize')).toBe('qwen3.5:9b');
+  expect(getModelForTask('code')).toBe('deepseek-coder:6.7b');
+  expect(getModelForTask('embeddings')).toBe('nomic-embed-text');
+
+  localStorage.setItem('ollama-default-models', '{broken');
+  expect(getModelForTask('chat')).toBe('build-default:7b');
+  localStorage.setItem('ollama-default-models', JSON.stringify({ chat: 'javascript:alert(1)' }));
+  expect(getModelForTask('chat')).toBe('build-default:7b');
 });

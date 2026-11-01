@@ -21,6 +21,18 @@ function normalizeLanguage(value = '') {
   return String(value || '').trim().toLowerCase().replace('_', '-');
 }
 
+export function decodeYouTubeCaptionEntities(value = '') {
+  const named = { amp: '&', lt: '<', gt: '>', quot: '"', apos: "'" };
+  return String(value || '').replace(/&(?:#(\d+)|#x([\da-f]+)|(amp|lt|gt|quot|apos));/gi, (entity, decimal, hex, name) => {
+    if (name) return named[name.toLowerCase()];
+    const codePoint = Number.parseInt(decimal || hex, decimal ? 10 : 16);
+    if (!Number.isInteger(codePoint) || codePoint < 0 || codePoint > 0x10ffff || (codePoint >= 0xd800 && codePoint <= 0xdfff)) {
+      return entity;
+    }
+    return String.fromCodePoint(codePoint);
+  });
+}
+
 export function selectCaptionTrack(tracks = [], preferredLanguage = 'en') {
   if (!Array.isArray(tracks) || tracks.length === 0) return null;
   const preferred = normalizeLanguage(preferredLanguage) || 'en';

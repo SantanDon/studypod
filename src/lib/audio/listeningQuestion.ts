@@ -1,3 +1,5 @@
+import { withAudiobookReadingContext } from "@/lib/audio/readingContext";
+
 export const AUDIO_LISTENING_QUESTION_EVENT = "studypod:audio-listening-question";
 
 const STORAGE_PREFIX = "studypod:audio-listening-question:";
@@ -7,6 +9,7 @@ export type AudioListeningQuestionRequest = {
   sourceId: string;
   sourceTitle: string;
   chapterId: string;
+  chapterIndex: number;
   chapterTitle: string;
   pageStart?: number;
   pageEnd?: number;
@@ -36,6 +39,9 @@ const formatPageRange = (request: AudioListeningQuestionRequest) => {
   return `page ${request.pageStart}`;
 };
 
+const safePromptLabel = (value: string) =>
+  value.replace(/[\r\n\[\]<>]/g, " ").replace(/\s+/g, " ").trim();
+
 export const buildAudioListeningQuestionMessage = (
   request: AudioListeningQuestionRequest,
 ) => {
@@ -48,11 +54,23 @@ export const buildAudioListeningQuestionMessage = (
     .filter(Boolean)
     .join(", ");
 
-  return [
-    `I'm listening to "${request.sourceTitle}" at ${location}.`,
-    `My question: ${request.question.trim()}`,
-    "Answer from this source and cite the relevant passage. If sentence-level audio timing is not available yet, ground the answer to the chapter/page range instead of pretending the timestamp maps to an exact sentence.",
+  const message = [
+    request.question.trim(),
+    [
+      "[Audio listening context:",
+      `Book: ${safePromptLabel(request.sourceTitle)}`,
+      `Position: ${safePromptLabel(location)}`,
+      "Answer from this source and cite the relevant passage. If sentence-level audio timing is not available yet, ground the answer to the chapter/page range instead of pretending the timestamp maps to an exact sentence.",
+      "]",
+    ].join("\n"),
   ].join("\n\n");
+
+  return withAudiobookReadingContext(message, {
+    bookTitle: request.sourceTitle,
+    chapterTitle: request.chapterTitle,
+    chapterIndex: request.chapterIndex,
+    isPlaying: false,
+  });
 };
 
 const storageKey = (notebookId: string) => `${STORAGE_PREFIX}${notebookId}`;

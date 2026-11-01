@@ -389,6 +389,25 @@ const SourcesSidebar = ({
 
   const handleRetrySource = async (source: Source) => {
     if (!notebookId) return;
+    if (source.type === "ebook" && getSourceProcessingStatus(source) === "pending" && hasUsableSourceContent(source)) {
+      setRetryingSourceId(source.id);
+      try {
+        await retrySources();
+        toast({
+          title: "Book text is ready for chat",
+          description: "Keyword-grounded use is available. Semantic indexing was not run.",
+        });
+      } catch (error) {
+        toast({
+          title: "Could not recover book text",
+          description: error instanceof Error ? error.message : "Please try again.",
+          variant: "destructive",
+        });
+      } finally {
+        setRetryingSourceId(null);
+      }
+      return;
+    }
     if (!source.content?.trim()) {
       toast({
         title: "Replace this source",
@@ -538,6 +557,7 @@ const SourcesSidebar = ({
 
         <React.Suspense fallback={<div className="flex flex-1 items-center justify-center text-sm text-muted-foreground">Loading source…</div>}>
           <SourceContentViewer
+            notebookId={notebookId}
             citation={displayCitation}
             sourceContent={sourceContent}
             sourceSummary={sourceSummary}
@@ -704,13 +724,19 @@ const SourcesSidebar = ({
                       {(getSourceProcessingStatus(source) === "failed" || (
                         getSourceProcessingStatus(source) === "degraded"
                         && parseSourceMetadata(source).processingError?.retryable !== false
+                      ) || (
+                        source.type === "ebook"
+                        && getSourceProcessingStatus(source) === "pending"
+                        && hasUsableSourceContent(source)
                       )) && (
                         <ContextMenuItem
                           onClick={() => handleRetrySource(source)}
                           disabled={retryingSourceId === source.id}
                         >
                           <i aria-hidden="true" className={"fi fi-rr-refresh h-4 w-4 mr-2 " + (retryingSourceId === source.id ? "animate-spin" : "")}></i>
-                          {source.content?.trim() ? "Retry indexing" : "Retry / replace source"}
+                          {source.type === "ebook" && getSourceProcessingStatus(source) === "pending"
+                            ? "Enable keyword chat"
+                            : source.content?.trim() ? "Retry indexing" : "Retry / replace source"}
                         </ContextMenuItem>
                       )}
                       <ContextMenuItem onClick={() => handleRenameSource(source)}>

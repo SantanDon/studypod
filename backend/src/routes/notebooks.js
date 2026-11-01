@@ -1,12 +1,14 @@
 import express from "express";
+import { withPersonalProvider, sendPersonalProviderError } from '../services/personalProviderService.js';
 import { v4 as uuidv4 } from "uuid";
+import { createHash } from "node:crypto";
 import { generateSovereignHooks } from "../services/outreachService.js";
-import { dbHelpers } from "../db/database.js";
+import { dbHelpers, getDatabase, schema } from "../db/database.js";
 import { authenticateToken, requireScope } from "../middleware/auth.js";
 import { deepDiveBookmarks } from "../services/bookmarkDeepDiveService.js";
 import { brokerResearchGoals } from "../services/goalBrokerService.js";
 import { MemoryService } from "../services/memoryService.js";
-import { chatWithNotebook, getSafeGroundingFailureReason } from "../services/aiChatService.js";
+import { chatWithNotebook, getSafeGroundingFailureReason, parseExplicitDocumentSection, restrictToExplicitDocumentSection, selectRelevantContent } from "../services/aiChatService.js";
 import { createChatRequestBudget } from "../utils/chatRequestBudget.js";
 import { researchNotebook } from "../services/researchService.js";
 import { discoverSources } from "../services/discoverService.js";
@@ -28,6 +30,120 @@ const router = express.Router();
 
 // Track explicitly deleted notebooks to prevent JIT recovery race condition
 const deletedNotebooks = new Set();
+
+function localTurnMessageId(notebookId, userId, turnId, role) {
+  const hex = createHash("sha256").update(`studypod-local-chat:${userId}:${notebookId}:${turnId}:${role}`).digest("hex").slice(0, 32).split("");
+  hex[12] = "5";
+  hex[16] = ((parseInt(hex[16], 16) & 0x3) | 0x8).toString(16);
+  const value = hex.join("");
+  return `${value.slice(0, 8)}-${value.slice(8, 12)}-${value.slice(12, 16)}-${value.slice(16, 20)}-${value.slice(20)}`;
+}
+
+function boundLocalChatContext(content, limit) {
+  if (content.length <= limit) return content;
+  const bounded = content.slice(0, limit);
+  const wordBoundary = Math.max(bounded.lastIndexOf(" "), bounded.lastIndexOf("\n"), bounded.lastIndexOf("\t"));
+  return wordBoundary > 0 ? bounded.slice(0, wordBoundary).trimEnd() : "";
+}
+
+const LOCAL_CHAPTER_EVIDENCE_CHAR_LIMIT = 6_000;
+
+function selectLocalChapterEvidence(content, message, limit, title) {
+  if (!content || limit <= 0) return "";
+  // selectRelevantContent first scopes to the complete requested section, then
+  // ranks literal sentence/line windows. Remove its editorial separator so the
+  // model receives only source wording.
+  return selectRelevantContent(content, message, limit, title)
+    .replace(/\n\n\[\.\.\. relevant excerpt continues \.\.\.\]\n\n/g, "\n\n");
+}
+
+function getAudioChapterTitle(message) {
+  const audioContext = String(message).match(/\n\n\[Audio listening context:\n([\s\S]*?)\n\]/)?.[1];
+  const position = audioContext?.match(/^Position: chapter "([^"]{1,160})"(?:,|$)/mi)?.[1];
+  return position?.trim() || null;
+}
+
+function getReaderChapterTitle(message) {
+  const readerContext = String(message).match(/\n\n\[Reader position: ([\s\S]*?)\]$/)?.[1];
+  if (!readerContext?.includes("This is navigation metadata, not source evidence.")) return null;
+  const encodedTitle = readerContext.match(/^Audiobook section title \(encoded\): ([^\r\n]{1,480})$/mi)?.[1];
+  if (!encodedTitle) return null;
+  try {
+    const title = decodeURIComponent(encodedTitle).trim();
+    return title && title.length <= 160 ? title : null;
+  } catch {
+    return null;
+  }
+}
+
+function stripGeneratedAudioMetadata(message) {
+  return String(message)
+    .replace(/\n\n\[Reader position: ([\s\S]*?)\]$/, (block, metadata) =>
+      metadata.includes("This is navigation metadata, not source evidence.") ? "" : block)
+    .replace(/\n\n\[Audio listening context:\n([\s\S]*?)\n\]$/, (block, metadata) =>
+      metadata.includes("Answer from this source and cite the relevant passage.") ? "" : block)
+    .trim();
+}
+
+function extractTitledChapter(content, title) {
+  if (!content || !title) return "";
+  const normalize = (value) => value
+    .normalize("NFKC")
+    .replace(/^\s*#{1,6}\s*/, "")
+    .replace(/^\s*---\s*|\s*---\s*$/g, "")
+    .replace(/[’‘‛ʼ]/g, "'")
+    .replace(/[.:]+\s*$/, "")
+    .trim()
+    .toLocaleLowerCase();
+  const lines = String(content).split("\n");
+  const starts = [];
+  let offset = 0;
+  for (const [lineIndex, line] of lines.entries()) {
+    const normalized = normalize(line);
+    if (normalized && normalized === normalize(title)) {
+      const previous = starts.at(-1);
+      // Some EPUB imports preserve both a decorated divider heading and the
+      // repeated plain heading beneath it. Treat that whitespace-only pair as
+      // one section, but keep repeated titles separated by text ambiguous.
+      const between = previous ? String(content).slice(previous.end, offset) : null;
+      if (!previous || between.trim()) starts.push({ start: offset, end: offset + line.length, lineIndex, line });
+      else previous.end = offset + line.length;
+    }
+    offset += line.length + 1;
+  }
+  // Gutenberg EPUB text can contain a title-page label such as
+  // `--- PERSONS OF THE DIALOGUE. ---`, followed by the book title and then
+  // the actual plain section heading. Ignore only that tightly-shaped
+  // decorative duplicate; separated real occurrences remain ambiguous.
+  const isTitlePageDuplicate = (candidate) => {
+    if (!/^\s*---\s*.+?\s*---\s*$/.test(candidate.line)) return false;
+    let next = candidate.lineIndex + 1;
+    while (next < lines.length && !lines[next].trim()) next += 1;
+    if (next >= lines.length) return false;
+    const documentTitle = lines[next].trim();
+    if (documentTitle.length > 100 || documentTitle !== documentTitle.toLocaleUpperCase() || !/[A-Z]/.test(documentTitle)) return false;
+    if (normalize(documentTitle) === normalize(title)) return false;
+    next += 1;
+    while (next < lines.length && !lines[next].trim()) next += 1;
+    return next < lines.length && normalize(lines[next]) === normalize(title) && !/^\s*---\s*.+?\s*---\s*$/.test(lines[next]);
+  };
+  const genuineStarts = starts.filter((candidate) => !isTitlePageDuplicate(candidate));
+  starts.splice(0, starts.length, ...genuineStarts);
+  if (starts.length !== 1) return "";
+  const start = starts[0].start;
+  let end = String(content).length;
+  offset = 0;
+  for (const line of lines) {
+    if (offset > start) {
+      const headingLike = /^\s*(?:#{1,6}\s+|---\s*).+/.test(line)
+        || (line.trim().length > 0 && line.trim().length <= 100 && line.trim() === line.trim().toLocaleUpperCase() && /[A-Z]/.test(line));
+      if (headingLike) { end = offset; break; }
+    }
+    offset += line.length + 1;
+  }
+  const section = String(content).slice(start, end).trim();
+  return section.split("\n").some((line) => line.trim() && normalize(line) !== normalize(title)) ? section : "";
+}
 
 function getActorName(req) {
   if (req.user?.authMethod === "api_key") {
@@ -1061,6 +1177,161 @@ router.delete("/:id/messages", requireScope("chat:all"), async (req, res) => {
   }
 });
 
+// Browser-local inference still needs authenticated, notebook-scoped context
+// and durable chat history. No model/provider work happens on these routes.
+router.post("/:id/local-chat/context", requireScope("chat:all"), async (req, res) => {
+  try {
+    const notebook = await dbHelpers.getNotebookById(req.params.id, req.user.userId);
+    if (!notebook) return res.status(404).json({ error: "Notebook not found" });
+    const requested = req.body?.sourceIds;
+    if (requested !== undefined && (!Array.isArray(requested) || requested.length > 30 || requested.some((id) => typeof id !== "string"))) {
+      return res.status(400).json({ error: "sourceIds must be an array of at most 30 IDs" });
+    }
+    const sources = await dbHelpers.getSourcesByNotebookId(req.params.id, req.user.userId);
+    const selected = requested === undefined ? sources.slice(0, 30) : sources.filter((source) => requested.includes(source.id));
+    if (requested !== undefined && new Set(selected.map((source) => source.id)).size !== new Set(requested).size) {
+      return res.status(400).json({ error: "One or more sources are unavailable in this notebook" });
+    }
+    const message = typeof req.body?.message === "string" ? req.body.message : "";
+    // Generated player metadata can itself contain words such as "Chapter IV".
+    // Parse learner-authored scope only after removing those app-owned suffixes.
+    const learnerMessage = stripGeneratedAudioMetadata(message);
+    const requestedSection = parseExplicitDocumentSection(learnerMessage);
+    const audioChapterTitle = requestedSection ? null : getAudioChapterTitle(message) || getReaderChapterTitle(message);
+    const audioChapterScope = audioChapterTitle ? { kind: "audio-chapter", title: audioChapterTitle } : null;
+    const evidenceScope = requestedSection || audioChapterScope;
+    let remaining = evidenceScope?.kind === "chapter" || evidenceScope?.kind === "audio-chapter" ? LOCAL_CHAPTER_EVIDENCE_CHAR_LIMIT : 72_000;
+    let matchedSection = evidenceScope === null;
+    const scopedSources = selected.map((source) => {
+      const original = typeof source.content === "string" ? source.content : "";
+      const scoped = requestedSection
+        ? restrictToExplicitDocumentSection(original, message)
+        : audioChapterTitle ? extractTitledChapter(original, audioChapterTitle) : original;
+      if (evidenceScope && scoped) matchedSection = true;
+      return { source, scoped };
+    });
+    const chapterMatches = evidenceScope?.kind === "chapter" || evidenceScope?.kind === "audio-chapter"
+      ? scopedSources.filter(({ scoped }) => scoped)
+      : [];
+    let chapterSourcesRemaining = chapterMatches.length;
+    const boundedSources = scopedSources.map(({ source, scoped }) => {
+      let content;
+      if ((evidenceScope?.kind === "chapter" || evidenceScope?.kind === "audio-chapter") && scoped) {
+        const perSourceBudget = Math.ceil(remaining / Math.max(1, chapterSourcesRemaining));
+        content = selectLocalChapterEvidence(scoped, message, perSourceBudget, source.title);
+        remaining -= content.length;
+        chapterSourcesRemaining -= 1;
+      } else {
+        content = boundLocalChatContext(scoped, Math.min(18_000, remaining));
+        remaining -= content.length;
+      }
+      return { id: source.id, title: source.title, type: source.type, content };
+    });
+    res.json({
+      notebookId: notebook.id,
+      sources: evidenceScope && !matchedSection
+        ? boundedSources.map((source) => ({ ...source, content: "" }))
+        : boundedSources,
+      ...(evidenceScope ? { sectionScope: { requestedSection: evidenceScope, matched: matchedSection } } : {}),
+    });
+  } catch (error) {
+    logger.error("Local chat context error:", error);
+    res.status(500).json({ error: "Failed to load local chat context" });
+  }
+});
+
+router.post("/:id/local-chat/turn", requireScope("chat:all"), async (req, res) => {
+  try {
+    const notebookId = req.params.id;
+    const userId = req.user.userId;
+    const notebook = await dbHelpers.getNotebookById(notebookId, userId);
+    if (!notebook) return res.status(404).json({ error: "Notebook not found" });
+    const { turnId, question, answer, sourceIds = [], citationMap = [] } = req.body || {};
+    if (typeof turnId !== "string" || !/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(turnId)) {
+      return res.status(400).json({ error: "A valid turnId is required for safe retries" });
+    }
+    if (typeof question !== "string" || !question.trim() || question.length > 12_000 || typeof answer !== "string" || !answer.trim() || answer.length > 50_000) {
+      return res.status(400).json({ error: "question and answer are required and must fit the supported limits" });
+    }
+    if (!Array.isArray(sourceIds) || sourceIds.length > 50 || sourceIds.some((id) => typeof id !== "string") || new Set(sourceIds).size !== sourceIds.length || !Array.isArray(citationMap) || citationMap.length > 50) {
+      return res.status(400).json({ error: "Invalid source or citation scope" });
+    }
+    const sources = await dbHelpers.getSourcesByNotebookId(notebookId, userId);
+    const allowed = new Set(sources.filter((source) => sourceIds.includes(source.id)).map((source) => source.id));
+    if (allowed.size !== new Set(sourceIds).size) return res.status(400).json({ error: "One or more sources are unavailable in this notebook" });
+    const answerCitationIds = new Set([...answer.matchAll(/\[(\d+)\]/g)].map((match) => Number(match[1])));
+    if (/[Ss]ource:\s*\w+/.test(answer) || answerCitationIds.size !== citationMap.length) {
+      return res.status(400).json({ error: "Citation mappings must match the answer's numbered citations" });
+    }
+    const citations = [];
+    const seenCitationIds = new Set();
+    for (const item of citationMap) {
+      if (!item || !Number.isInteger(item.citationId) || item.citationId < 1 || typeof item.sourceId !== "string" || !allowed.has(item.sourceId) || seenCitationIds.has(item.citationId) || !answerCitationIds.has(item.citationId) || sourceIds[item.citationId - 1] !== item.sourceId) {
+        return res.status(400).json({ error: "Invalid citation mapping" });
+      }
+      const source = sources.find((candidate) => candidate.id === item.sourceId);
+      seenCitationIds.add(item.citationId);
+      const sourceText = typeof source.content === "string" ? source.content : "";
+      if (item.excerpt !== undefined && (typeof item.excerpt !== "string" || !item.excerpt.trim() || item.excerpt.length > 1200 || !sourceText.includes(item.excerpt))) {
+        return res.status(400).json({ error: "Citation excerpt must be a bounded passage from its selected source" });
+      }
+      const excerpt = item.excerpt || sourceText.trim().slice(0, 1200);
+      const excerptStart = item.excerpt ? sourceText.indexOf(item.excerpt) : -1;
+      const startLine = excerptStart >= 0 ? sourceText.slice(0, excerptStart).split("\n").length : undefined;
+      const endLine = excerptStart >= 0 ? startLine + item.excerpt.split("\n").length - 1 : undefined;
+      citations.push({
+        citation_id: item.citationId,
+        source_id: source.id,
+        source_title: source.title,
+        source_type: source.type,
+        ...(excerpt ? { excerpt } : {}),
+        ...(startLine ? { chunk_lines_from: startLine, chunk_lines_to: endLine } : {}),
+      });
+    }
+    if ([...answerCitationIds].some((citationId) => !seenCitationIds.has(citationId))) {
+      return res.status(400).json({ error: "Every numbered citation must map to a selected source" });
+    }
+    const userMessageId = localTurnMessageId(notebookId, userId, turnId, "user");
+    const assistantMessageId = localTurnMessageId(notebookId, userId, turnId, "assistant");
+    const createdAt = new Date();
+    const userRow = { id: userMessageId, notebookId, userId, role: "user", content: question.trim(), createdAt };
+    // Store the canonical selected-source set with the existing versioned evidence
+    // envelope so a replay cannot silently change the context used for this turn.
+    const selectedSourceIds = [...sourceIds].sort();
+    const assistantRow = { id: assistantMessageId, notebookId, userId, role: "assistant", content: answer.trim(), groundedSources: JSON.stringify({ version: 1, sourceIds: selectedSourceIds, citations }), createdAt: new Date(createdAt.getTime() + 1) };
+    const matchesRequest = (rows) => {
+      const existingUser = rows.find((row) => row.id === userMessageId);
+      const existingAssistant = rows.find((row) => row.id === assistantMessageId);
+      if (!existingUser && !existingAssistant) return null;
+      if (!existingUser || !existingAssistant
+        || existingUser.notebookId !== notebookId || existingAssistant.notebookId !== notebookId
+        || existingUser.userId !== userId || existingAssistant.userId !== userId
+        || existingUser.role !== "user" || existingAssistant.role !== "assistant"
+        || existingUser.content !== userRow.content || existingAssistant.content !== assistantRow.content
+        || existingAssistant.groundedSources !== assistantRow.groundedSources) {
+        return false;
+      }
+      return [existingUser, existingAssistant];
+    };
+    // The client retains this generated turnId and payload after ambiguous failures. Exact
+    // deterministic row IDs make replay safe without guessing from matching message text.
+    const previousRows = await dbHelpers.getChatMessagesByNotebookId(notebookId, userId);
+    const prior = matchesRequest(previousRows || []);
+    if (prior === false) return res.status(409).json({ error: "This turnId was already used for a different local chat turn" });
+    if (prior) return res.status(200).json({ answer: prior[1].content, messages: prior });
+    const db = await getDatabase();
+    // A failure inserting either row rolls back the whole turn.
+    await db.transaction(async (tx) => {
+      await tx.insert(schema.chatMessages).values(userRow);
+      await tx.insert(schema.chatMessages).values(assistantRow);
+    });
+    res.status(201).json({ answer: answer.trim(), messages: [userRow, assistantRow] });
+  } catch (error) {
+    logger.error("Local chat persistence error:", error);
+    res.status(500).json({ error: "Failed to save local chat turn" });
+  }
+});
+
 /**
  * GET /api/notebooks/:id/context
  * Build an AI-optimized context payload for agents loading a notebook
@@ -1222,7 +1493,7 @@ router.post(
  * POST /api/notebooks/:id/chat
  * Human/Agent conversation endpoint powered by notebook context
  */
-router.post("/:id/chat", requireScope("chat:all"), async (req, res) => {
+router.post("/:id/chat", requireScope("chat:all"), withPersonalProvider, async (req, res) => {
   const hostedChat = process.env.VERCEL === "1";
   const hostedResponseDeadline = Date.now() + 60_000;
   // Leave 20 seconds of the hosted function window for persistence and delivery.
@@ -1570,6 +1841,7 @@ router.post("/:id/chat", requireScope("chat:all"), async (req, res) => {
         return res.status(504).json({ code: "CHAT_TIMEOUT",
           error: "The answer took too long to verify. Please try a more specific question." });
       }
+      if (sendPersonalProviderError(res, aiError)) return;
       logger.error("AI chat processing error:", aiError);
       if (aiError?.code === "NO_USABLE_SOURCES") {
         return res.status(422).json({

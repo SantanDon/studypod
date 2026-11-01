@@ -378,6 +378,7 @@ export const createNarrationSignature = ({
   pronunciations = [],
   voice = '',
   provider = '',
+  includeFraming = false,
 } = {}) => crypto
   .createHash('sha256')
   .update(JSON.stringify({
@@ -388,6 +389,7 @@ export const createNarrationSignature = ({
     pronunciations: normalizePronunciationEntries(pronunciations),
     voice,
     provider,
+    includeFraming: includeFraming === true,
     tokenBudgetVersion: provider === 'kokoro' ? KOKORO_TOKEN_BUDGET_VERSION : undefined,
   }))
   .digest('hex')

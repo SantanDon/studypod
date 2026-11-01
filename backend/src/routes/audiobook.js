@@ -38,6 +38,10 @@ import {
 import { prepareNarrationText } from "../services/audiobookNarrationTextService.js";
 import { generateKokoroAudio, prepareKokoroSegments } from "../services/kokoroGenerationService.js";
 import {
+  audiobookRenderAdmission,
+  awaitAudiobookSpeechWithCancellation,
+} from "../services/audiobookRenderAdmission.js";
+import {
   canonicalAudiobookWavArgs,
   chapterCacheKeyFor,
   createBookContentSignature,
@@ -47,6 +51,7 @@ import {
   isUsableAudioFile,
   probeAudioDurationSeconds,
 } from "../services/audiobookMediaService.js";
+import { resolveCompactChapterPlaybackAsset } from "../services/audiobookChapterPlaybackService.js";
 import {
   addAudiobookBookmark,
   buildPublicPlaybackManifest,
@@ -799,8 +804,8 @@ const resolveVoiceForProvider = (
   return resolveVoiceForChapter(requestedVoice, style, chapterIndex);
 };
 
-export const humanizeNarrationText = (text = "") =>
-  prepareNarrationText(text, { includeTitle: false });
+export const humanizeNarrationText = (text = "", framing = {}) =>
+  prepareNarrationText(text, { includeTitle: false, ...framing });
 
 const safeCachePart = (value = "part") =>
   String(value)
@@ -840,6 +845,46 @@ const mutateOwnedManifest = ({ fileName, ownerId, mutate }) =>
     ownerId,
     mutate,
   });
+
+// A persisted pointer can outlive its worker (for example, after a process
+// restart). Reconcile only terminal jobs whose full ownership tuple still
+// matches the manifest pointer; unknown or live work must remain protected.
+export const reconcileTerminalAudiobookActiveJob = async ({
+  fileName,
+  ownerId,
+  renderId,
+  jobId,
+}) => {
+  const isMatchingTerminalJob = (job) =>
+    job &&
+    job.ownerId === ownerId &&
+    job.bookFileName === fileName &&
+    job.renderId === renderId &&
+    ["completed", "failed", AUDIOBOOK_JOB_CANCELLED].includes(job.status) &&
+    !activeWorkerJobs.has(jobId);
+  if (!fileName || !ownerId || !renderId || !jobId ||
+      !isMatchingTerminalJob(readJob(jobId))) return false;
+
+  let cleared = false;
+  await mutateOwnedManifest({
+    fileName,
+    ownerId,
+    mutate: (manifest) => {
+      // Re-read and re-check inside the serialized owner-checked mutation.
+      if (manifest.renders?.[renderId]?.activeJobId !== jobId ||
+          !isMatchingTerminalJob(readJob(jobId))) return manifest;
+      cleared = true;
+      return {
+        ...manifest,
+        renders: {
+          ...manifest.renders,
+          [renderId]: { ...manifest.renders[renderId], activeJobId: null },
+        },
+      };
+    },
+  });
+  return cleared;
+};
 
 /**
  * Split long text into TTS-safe chunks. Kokoro can fail on very long strings,
@@ -1277,6 +1322,8 @@ const generateChunkedAudio = async ({
   style = DEFAULT_NARRATION_STYLE,
   analysis = null,
   pronunciations = [],
+  framingText = "",
+  outroText = "",
   onProgress,
   cancelJobId = null,
 }) => {
@@ -1284,7 +1331,7 @@ const generateChunkedAudio = async ({
   const profile = getNarrationProfile(resolvedStyle);
   const normalizedProvider = normalizeTtsProvider(provider, voice);
   await assertProviderAvailable(normalizedProvider);
-  const narrationText = humanizeNarrationText(text);
+  const narrationText = humanizeNarrationText(text, { framingText, outroText });
   let segments = buildNarrationSegments(narrationText, {
     requestedPreset: resolvedStyle,
     analysis,
@@ -1294,9 +1341,12 @@ const generateChunkedAudio = async ({
   if (segments.length === 0) throw new Error("No text available for TTS");
 
   if (normalizedProvider === "mock") {
-    await writeMockWav(
-      segments.map((segment) => segment.text).join(" "),
-      cachePath,
+    await awaitAudiobookSpeechWithCancellation(
+      () => cancelJobId && throwIfJobCancelled(cancelJobId),
+      () => writeMockWav(
+        segments.map((segment) => segment.text).join(" "),
+        cachePath,
+      ),
     );
     await onProgress?.({
       completedChunks: 1,
@@ -1337,7 +1387,11 @@ const generateChunkedAudio = async ({
     if (!fs.existsSync(cachePath) || fs.statSync(cachePath).size < 44) {
       const rawPath = cachePath.replace(".wav", "_raw.wav");
       try {
-        await generateSegment(segments[0], rawPath);
+        await awaitAudiobookSpeechWithCancellation(
+          () => cancelJobId && throwIfJobCancelled(cancelJobId),
+          () => generateSegment(segments[0], rawPath),
+        );
+        if (cancelJobId) throwIfJobCancelled(cancelJobId);
         await execFileCancellable(
           "ffmpeg",
           canonicalAudiobookWavArgs({
@@ -1373,7 +1427,10 @@ const generateChunkedAudio = async ({
     if (usableCachedChunk) {
       cachedChunks += 1;
     } else {
-      await generateSegment(segments[i], chunkPath);
+      await awaitAudiobookSpeechWithCancellation(
+        () => cancelJobId && throwIfJobCancelled(cancelJobId),
+        () => generateSegment(segments[i], chunkPath),
+      );
     }
     chunkPaths.push(chunkPath);
     await onProgress?.({
@@ -1671,14 +1728,26 @@ router.delete("/books/:fileName/audio", requireAudiobookWrite, requireRuntime, a
 router.get(
   "/books/:fileName/playback-manifest",
   requireRuntime,
-  (req, res) => {
+  async (req, res) => {
     const ownerId = requestUserId(req);
     const fileName = sanitizeFileName(req.params.fileName || "");
     const manifest = loadBookManifest(MANIFEST_DIR, fileName);
     if (!manifest || isForeignManifest(manifest, ownerId)) {
       return res.status(404).json({ error: "Book not found" });
     }
-    const renderId = String(req.query.renderId || "").trim() || undefined;
+    const renderId = String(req.query.renderId || "").trim() || manifest.activeRenderId || undefined;
+    const activeJobId = renderId && manifest.renders?.[renderId]?.activeJobId;
+    if (activeJobId && await reconcileTerminalAudiobookActiveJob({
+      fileName, ownerId, renderId, jobId: activeJobId,
+    })) {
+      // Read the serialized manifest again so the response reflects the
+      // reconciled pointer after reload as well as in this request.
+      const refreshed = loadBookManifest(MANIFEST_DIR, fileName);
+      if (refreshed && !isForeignManifest(refreshed, ownerId)) {
+        res.setHeader("Cache-Control", "no-store");
+        return res.json(createPublicPlaybackManifest(refreshed, renderId));
+      }
+    }
     res.setHeader("Cache-Control", "no-store");
     return res.json(createPublicPlaybackManifest(manifest, renderId));
   },
@@ -1699,7 +1768,8 @@ router.get("/chapter-audio", requireRuntime, (req, res) => {
   if (!manifest || isForeignManifest(manifest, ownerId)) {
     return res.status(404).json({ error: "Book not found" });
   }
-  const renderedChapter = manifest.renders?.[renderId]?.chapters?.[chapterId];
+  const render = manifest.renders?.[renderId];
+  const renderedChapter = render?.chapters?.[chapterId];
   const audioFileName = renderedChapter?.audioFileName;
   if (
     renderedChapter?.status !== "completed" ||
@@ -1712,10 +1782,17 @@ router.get("/chapter-audio", requireRuntime, (req, res) => {
   if (!isUsableAudioFile(audioPath)) {
     return res.status(404).json({ error: "Chapter audio is not ready" });
   }
-  res.setHeader("Content-Type", "audio/wav");
+  const compactAsset = resolveCompactChapterPlaybackAsset({
+    render,
+    chapterId,
+    cacheDir: AUDIO_CACHE_DIR,
+    isUsableAudioFile,
+  });
+  const playbackPath = compactAsset?.filePath || audioPath;
+  res.setHeader("Content-Type", compactAsset?.contentType || "audio/wav");
   res.setHeader("Accept-Ranges", "bytes");
   res.setHeader("Cache-Control", "private, max-age=31536000, immutable");
-  return res.sendFile(audioPath);
+  return res.sendFile(playbackPath);
 });
 
 router.get("/render-download", requireRuntime, (req, res) => {
@@ -2100,6 +2177,7 @@ export const runFullAudiobookJob = async ({
   narrationSignature: _narrationSignature,
   contentSignature,
   outputFormat,
+  includeFraming = false,
   ownerId,
 }) => {
   let activeChapterId = null;
@@ -2152,6 +2230,7 @@ export const runFullAudiobookJob = async ({
         pronunciations: chapterPronunciations,
         voice,
         provider: normalizedProvider,
+        includeFraming: includeFraming && (i === 0 || i === chapterIds.length - 1),
       });
       const cacheKey = chapterCacheKeyFor({
         fileName,
@@ -2223,6 +2302,12 @@ export const runFullAudiobookJob = async ({
             style,
             analysis,
             pronunciations: chapterPronunciations,
+            framingText: includeFraming && i === 0
+              ? "This recording presents the selected text."
+              : "",
+            outroText: includeFraming && i === chapterIds.length - 1
+              ? "End of the selected text."
+              : "",
             cancelJobId: jobId,
             onProgress: async ({
               completedChunks,
@@ -2537,6 +2622,7 @@ const launchFullAudiobookWorker = (payload) => {
   worker.on("message", (message) => {
     if (message?.status === "completed") {
       activeWorkerJobs.delete(payload.jobId);
+      audiobookRenderAdmission.release(payload.jobId);
       const current = readJob(payload.jobId);
       if (isCancelledAudiobookJob(current)) {
         logger.info(
@@ -2547,10 +2633,12 @@ const launchFullAudiobookWorker = (payload) => {
       logger.info(`  ✅ Audiobook worker completed job ${payload.jobId}`);
     } else if (message?.status === "cancelled") {
       activeWorkerJobs.delete(payload.jobId);
+      audiobookRenderAdmission.release(payload.jobId);
       logger.info(`Audiobook worker acknowledged cancellation ${payload.jobId}`);
       return;
     } else if (message?.status === "failed") {
       activeWorkerJobs.delete(payload.jobId);
+      audiobookRenderAdmission.release(payload.jobId);
       const current = readJob(payload.jobId);
       if (isCancelledAudiobookJob(current)) {
         logger.info(
@@ -2588,6 +2676,7 @@ const launchFullAudiobookWorker = (payload) => {
   });
   worker.on("exit", (code) => {
     activeWorkerJobs.delete(payload.jobId);
+    audiobookRenderAdmission.release(payload.jobId);
     if (code === 0) return;
     const current = readJob(payload.jobId);
     if (isCancelledAudiobookJob(current)) {
@@ -2620,6 +2709,8 @@ router.post(
   requireRuntime,
   audiobookAudioMutationAdmission,
   async (req, res) => {
+    let reservedGenerationJobId = null;
+    let workerOwnsReservation = false;
     try {
       const ownerId = requestUserId(req);
       const {
@@ -2629,6 +2720,7 @@ router.post(
         style: requestedStyle = DEFAULT_NARRATION_STYLE,
         pronunciations: requestedPronunciations = [],
         outputFormat: requestedOutputFormat = "mp3",
+        includeFraming = false,
       } = req.body;
       let { chapterIds } = req.body;
 
@@ -2692,6 +2784,7 @@ router.post(
         pronunciations,
         voice: renderVoiceSignature,
         provider: normalizedProvider,
+        includeFraming: includeFraming === true,
       });
 
       const contentSignature = createBookContentSignature(manifest, chapterIds);
@@ -2707,6 +2800,12 @@ router.post(
         contentSignature,
         outputFormat,
       });
+      const staleActiveJobId = manifest.renders?.[renderId]?.activeJobId;
+      if (staleActiveJobId && await reconcileTerminalAudiobookActiveJob({
+        fileName, ownerId, renderId, jobId: staleActiveJobId,
+      })) {
+        manifest = loadBookManifest(MANIFEST_DIR, fileName) || manifest;
+      }
       const playbackManifestUrl = playbackManifestUrlFor(fileName, renderId);
       const estimatedWords =
         manifest.chapters
@@ -2828,6 +2927,13 @@ router.post(
       }
 
       const jobId = `full_${randomUUID()}`;
+      if (!audiobookRenderAdmission.tryAcquire(jobId)) {
+        return res.status(429).json({
+          error: "Audiobook generation is busy. Wait for the current render to finish, then retry.",
+          code: "AUDIOBOOK_GENERATION_BUSY",
+        });
+      }
+      reservedGenerationJobId = jobId;
       manifest = await mutateOwnedManifest({
         fileName,
         ownerId,
@@ -2845,6 +2951,7 @@ router.post(
             narrationSignature,
             contentSignature,
             outputFormat,
+            includeFraming: includeFraming === true,
             chapterIds,
             activeJobId: jobId,
             activeChapterId: null,
@@ -2875,6 +2982,7 @@ router.post(
         narrationSignature,
         contentSignature,
         outputFormat,
+        includeFraming: includeFraming === true,
         estimatedWords,
         estimatedDurationMinutes,
         playbackManifestUrl,
@@ -2898,9 +3006,11 @@ router.post(
         narrationSignature,
         contentSignature,
         outputFormat,
+        includeFraming: includeFraming === true,
       };
 
       launchFullAudiobookWorker(workerPayload);
+      workerOwnsReservation = true;
 
       res.json({
         jobId,
@@ -2921,6 +3031,9 @@ router.post(
       logger.error("Could not start audiobook generation:", err);
       res.status(500).json({ error: "Could not start audiobook generation" });
     } finally {
+      if (reservedGenerationJobId && !workerOwnsReservation) {
+        audiobookRenderAdmission.release(reservedGenerationJobId);
+      }
       res.locals.releaseAudiobookAdmission?.();
     }
   },

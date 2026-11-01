@@ -44,7 +44,7 @@ const NoteEditor = ({
   }, [note]);
 
   const handleSave = () => {
-    if (title.trim() && content.trim()) {
+    if (!isLoading && title.trim() && content.trim()) {
       onSave(title.trim(), content.trim());
     }
   };
@@ -125,7 +125,7 @@ const NoteEditor = ({
                   Edit
                 </Button>
               )}
-              <Button variant="ghost" size="sm" onClick={onCancel}>
+              <Button variant="ghost" size="sm" onClick={onCancel} aria-label="Close note">
                 <i className="fi fi-rr-cross h-4 w-4"></i>
               </Button>
             </div>
@@ -179,14 +179,22 @@ const NoteEditor = ({
 
   // Edit mode (only for user notes or new notes)
   return (
-    <div className="flex flex-col h-full">
+    <div
+      className="flex flex-col h-full min-h-0"
+      onKeyDown={(event) => {
+        if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "s") {
+          event.preventDefault();
+          if (!event.nativeEvent.isComposing) handleSave();
+        }
+      }}
+    >
       {/* Header */}
       <div className="p-4 border-b border-gray-200 flex-shrink-0">
         <div className="flex items-center justify-between mb-4">
           <h3 className="font-medium text-gray-900">
             {note ? "Edit Note" : "New Note"}
           </h3>
-          <Button variant="ghost" size="sm" onClick={handleCancelEdit}>
+          <Button variant="ghost" size="sm" onClick={handleCancelEdit} aria-label="Close note">
             <i className="fi fi-rr-cross h-4 w-4"></i>
           </Button>
         </div>
@@ -194,6 +202,7 @@ const NoteEditor = ({
         <div className="flex space-x-2 mb-4">
           <Input
             placeholder="Note title"
+            aria-label="Note title"
             value={title}
             onChange={(e) => setTitle(e.target.value)}
             className="flex-1"
@@ -214,9 +223,10 @@ const NoteEditor = ({
       </div>
 
       {/* Content */}
-      <div className="flex-1 p-4 overflow-hidden">
+      <div className="flex-1 min-h-0 p-4 overflow-hidden">
         <Textarea
           placeholder="Write your note here..."
+          aria-label="Note content"
           value={content}
           onChange={(e) => setContent(e.target.value)}
           className="w-full h-full resize-none border-0 focus-visible:ring-0 p-0"
@@ -244,6 +254,7 @@ const NoteEditor = ({
             onClick={handleSave}
             disabled={!title.trim() || !content.trim() || isLoading}
             size="sm"
+            title="Save note (Ctrl+S or ⌘S)"
           >
             <i aria-hidden="true" className="fi fi-rr-disk h-4 w-4 mr-2"></i>
             {isLoading ? "Saving..." : "Save"}

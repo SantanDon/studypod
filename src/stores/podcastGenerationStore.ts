@@ -28,6 +28,8 @@ interface PodcastGenerationState {
   audioUrl: string | null;
   podcastId: string | null;
   partialAudioUrls: string[];
+  sourceIds: string[];
+  finalizingScript: PodcastScript | null;
   canPlayPartial: boolean;
 
   // Notebook context
@@ -42,8 +44,10 @@ interface PodcastGenerationState {
       host2Name?: string;
       type?: "brief" | "standard" | "deep-dive";
       format?: "dialogue" | "solo";
+      sourceIds?: string[];
     },
   ) => void;
+  claimFinalization: (script: PodcastScript) => boolean;
   updateProgress: (progress: StreamingProgress) => void;
   setAudioReady: (audioUrls: string[]) => void;
   setFinalAudio: (
@@ -103,6 +107,8 @@ export const usePodcastGenerationStore = create<PodcastGenerationState>(
     audioUrl: null,
     podcastId: null,
     partialAudioUrls: [],
+    sourceIds: [],
+    finalizingScript: null,
     canPlayPartial: false,
     notebookId: null,
 
@@ -120,6 +126,8 @@ export const usePodcastGenerationStore = create<PodcastGenerationState>(
         audioUrl: null,
         podcastId: null,
         partialAudioUrls: [],
+        sourceIds: options?.sourceIds ?? [],
+        finalizingScript: null,
         canPlayPartial: false,
         progress: {
           phase: "loading",
@@ -156,6 +164,14 @@ export const usePodcastGenerationStore = create<PodcastGenerationState>(
       });
     },
 
+    // Store the claim globally so a remounted view cannot start duplicate saves.
+    claimFinalization: (script) => {
+      const current = get();
+      if (!current.isGenerating || current.script !== script || current.finalizingScript === script) return false;
+      set({ finalizingScript: script });
+      return true;
+    },
+
     // Set final combined audio
     setFinalAudio: (audioUrl, notebookId, title, podcastId) => {
       set((state) => ({
@@ -163,6 +179,7 @@ export const usePodcastGenerationStore = create<PodcastGenerationState>(
         podcastId: podcastId || state.podcastId,
         notebookId: notebookId || state.notebookId,
         isGenerating: false,
+        finalizingScript: null,
         script: title ? { title, segments: [] } : state.script,
       }));
       // Final clear of intermediate state as it's now in history
@@ -263,6 +280,8 @@ export const usePodcastGenerationStore = create<PodcastGenerationState>(
         podcastType: data.podcastType === "brief" || data.podcastType === "deep-dive" ? data.podcastType : "standard",
         podcastFormat: data.podcastFormat === "solo" ? "solo" : "dialogue",
         partialAudioUrls: [],
+        sourceIds: [],
+        finalizingScript: null,
         canPlayPartial: false,
         progress: {
           phase: "error",
@@ -270,7 +289,7 @@ export const usePodcastGenerationStore = create<PodcastGenerationState>(
           totalSegments: script.segments.length,
           percentage: 0,
           message:
-            "This podcast was interrupted. Its audio was not saved, so start it again.",
+            "This podcast was interrupted. No playable audio was recovered in this browser. Check Saved audio overviews before generating again.",
           canPlay: false,
         },
       });
@@ -315,6 +334,8 @@ export const usePodcastGenerationStore = create<PodcastGenerationState>(
       set({
         isGenerating: false,
         partialAudioUrls: [],
+        sourceIds: [],
+        finalizingScript: null,
         canPlayPartial: false,
         progress: {
           phase: "cancelled",
@@ -341,6 +362,8 @@ export const usePodcastGenerationStore = create<PodcastGenerationState>(
         audioUrl: null,
         podcastId: null,
         partialAudioUrls: [],
+        sourceIds: [],
+        finalizingScript: null,
         canPlayPartial: false,
         notebookId: null,
       });

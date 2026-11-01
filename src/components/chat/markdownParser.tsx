@@ -3,51 +3,49 @@ import CitationButton from './CitationButton';
 import LiquidCitation from './LiquidCitation';
 import { Citation, MessageSegment } from '@/types/message';
 
-const CITATION_MARKER_PATTERN = /\[(\d+)\]/g;
+const INLINE_TOKEN = /(`+)([^`\n]*?)\1|\*\*(?=\S)(.+?)(?<=\S)\*\*|__(?=\S)(.+?)(?<=\S)__|(?<!\*)\*(?!\*)(?=\S)([^*\n]+?)(?<=\S)(?<!\*)\*|\[(\d+)\]/g;
 
-export const processInlineMarkdown = (text: string) => {
-  const parts = text.split(/(\*\*.*?\*\*|__.*?__)/g);
-  
-  return parts.map((part, partIndex) => {
-    if (part.match(/^\*\*(.*)\*\*$/)) {
-      const boldText = part.replace(/^\*\*(.*)\*\*$/, '$1');
-      return <strong key={partIndex}>{boldText}</strong>;
-    } else if (part.match(/^__(.*__)$/)) {
-      const boldText = part.replace(/^__(.*__)$/, '$1');
-      return <strong key={partIndex}>{boldText}</strong>;
-    } else {
-      // Replace line breaks with spaces for inline rendering
-      return part.replace(/\n/g, ' ');
+const findCitation = (citations: Citation[], number: number) => citations.find(
+  citation => citation.citation_id === number || citation.chunk_index === number - 1
+);
+
+const renderInline = (
+  text: string,
+  citations: Citation[] = [],
+  keyPrefix = 'inline',
+  onCitationClick?: (citation: Citation) => void
+): React.ReactNode[] => {
+  const output: React.ReactNode[] = [];
+  const tokenPattern = new RegExp(INLINE_TOKEN.source, 'g');
+  let offset = 0;
+  let match: RegExpExecArray | null;
+  let index = 0;
+
+  while ((match = tokenPattern.exec(text)) !== null) {
+    if (match.index > offset) output.push(text.slice(offset, match.index));
+    const key = `${keyPrefix}-${index++}`;
+    if (match[1]) output.push(<code key={key} className="rounded bg-slate-500/10 px-1">{match[2]}</code>);
+    else if (match[3] !== undefined) output.push(<strong key={key}>{renderInline(match[3], citations, key, onCitationClick)}</strong>);
+    else if (match[4] !== undefined) output.push(<strong key={key}>{renderInline(match[4], citations, key, onCitationClick)}</strong>);
+    else if (match[5] !== undefined) output.push(<em key={key}>{renderInline(match[5], citations, key, onCitationClick)}</em>);
+    else if (match[6]) {
+      const citationNumber = Number(match[6]);
+      const citation = findCitation(citations, citationNumber);
+      output.push(citation
+        ? <LiquidCitation key={key} index={citationNumber} citation={citation} triggerType="hover" onCitationClick={onCitationClick} />
+        : match[0]);
     }
-  });
+    offset = match.index + match[0].length;
+  }
+  if (offset < text.length) output.push(text.slice(offset));
+  return output;
 };
 
-export const processTextWithMarkdown = (text: string) => {
-  const lines = text.split('\n');
-  
-  return lines.map((line, lineIndex) => {
-    const parts = line.split(/(\*\*.*?\*\*|__.*?__)/g);
-    
-    const processedLine = parts.map((part, partIndex) => {
-      if (part.match(/^\*\*(.*)\*\*$/)) {
-        const boldText = part.replace(/^\*\*(.*)\*\*$/, '$1');
-        return <strong key={partIndex}>{boldText}</strong>;
-      } else if (part.match(/^__(.*__)$/)) {
-        const boldText = part.replace(/^__(.*__)$/, '$1');
-        return <strong key={partIndex}>{boldText}</strong>;
-      } else {
-        return part;
-      }
-    });
+export const processInlineMarkdown = (text: string) => renderInline(text).map((node, index) =>
+  typeof node === 'string' ? node.replace(/\n/g, ' ') : React.cloneElement(node as React.ReactElement, { key: index })
+);
 
-    return (
-      <span key={lineIndex}>
-        {processedLine}
-        {lineIndex < lines.length - 1 && <br />}
-      </span>
-    );
-  });
-};
+export const processTextWithMarkdown = (text: string) => renderInline(text);
 
 export const processTextWithMarkdownAndCitations = (
   text: string,
@@ -55,253 +53,113 @@ export const processTextWithMarkdownAndCitations = (
   _onCitationClick?: (citation: Citation) => void,
   _hoveredCitation?: number | null,
   _onHover?: (index: number | null) => void
-): (string | JSX.Element)[] => {
-  const lines = text.split('\n');
-  
-  return lines.map((line, lineIndex) => {
-    const parts = line.split(/(\*\*.*?\*\*|__.*?__|(?:\[\d+\]))/g);
-    
-    const processedLine = parts.map((part, partIndex) => {
-      if (part.match(/^\*\*(.*)\*\*$/)) {
-        const boldText = part.replace(/^\*\*(.*)\*\*$/, '$1');
-        return <strong key={`${lineIndex}-${partIndex}`}>{boldText}</strong>;
-      } else if (part.match(/^__(.*__)$/)) {
-        const boldText = part.replace(/^__(.*__)$/, '$1');
-        return <strong key={`${lineIndex}-${partIndex}`}>{boldText}</strong>;
-      } else if (part.match(/^\[\d+\]$/)) {
-        const citationIndex = parseInt(part.replace(/\[(\d+)\]/, '$1'), 10);
-        const citation = citations.find(
-          c => c.citation_id === citationIndex || c.chunk_index === citationIndex - 1
-        );
-        
-        return (
-          <LiquidCitation
-            key={`${lineIndex}-${partIndex}-citation`}
-            index={citationIndex}
-            citation={citation!}
-            triggerType="hover"
-          />
-        );
-      } else {
-        return part;
-      }
-    });
+): (string | JSX.Element)[] => renderInline(text, citations) as (string | JSX.Element)[];
 
-    return (
-      <span key={lineIndex}>
-        {processedLine}
-        {lineIndex < lines.length - 1 && <br />}
-      </span>
-    );
-  });
+const renderBlockQuote = (lines: string[], citations: Citation[], key: string, onCitationClick?: (citation: Citation) => void) => {
+  const quoteLines = lines.map(line => line.replace(/^\s*>\s?/, '').trim()).filter(Boolean);
+  return <blockquote key={key} className="my-3 border-l-2 border-slate-400/60 pl-3 text-slate-600 dark:text-slate-300">
+    {quoteLines.map((line, index) => <p key={index}>{renderInline(line, citations, `${key}-${index}`, onCitationClick)}</p>)}
+  </blockquote>;
 };
 
 export const processMarkdownWithCitations = (
-  segments: MessageSegment[], 
-  citations: Citation[], 
+  segments: MessageSegment[],
+  citations: Citation[],
   onCitationClick?: (citation: Citation) => void,
   isUserMessage: boolean = false,
-  hoveredCitation?: number | null,
-  onHover?: (index: number | null) => void
+  _hoveredCitation?: number | null,
+  _onHover?: (index: number | null) => void
 ) => {
-  if (isUserMessage) {
-    return (
-      <span>
-        {segments.map((segment, index) => (
-          <span key={index}>
-            {processInlineMarkdown(segment.text)}
-            {segment.citation_id && onCitationClick && (
-              <CitationButton
-                chunkIndex={(() => {
-                  const citation = citations.find(c => c.citation_id === segment.citation_id);
-                  return citation?.chunk_index || 0;
-                })()}
-                onClick={() => {
-                  const citation = citations.find(c => c.citation_id === segment.citation_id);
-                  if (citation) {
-                    onCitationClick(citation);
-                  }
-                }}
-              />
-            )}
-          </span>
-        ))}
-      </span>
-    );
-  }
+  if (isUserMessage) return <span>{segments.map((segment, index) => {
+    const citation = segment.citation_id ? citations.find(item => item.citation_id === segment.citation_id) : undefined;
+    return <span key={index}>{processInlineMarkdown(segment.text)}{citation && onCitationClick && <CitationButton chunkIndex={citation.chunk_index || 0} onClick={() => onCitationClick(citation)} />}</span>;
+  })}</span>;
 
   const elements: JSX.Element[] = [];
-  
   segments.forEach((segment, segmentIndex) => {
-    const citation = segment.citation_id ? citations.find(c => c.citation_id === segment.citation_id) : undefined;
-    
-    // Update: insert line breaks before heading markers OR list markers that appear mid-text
-    let preprocessed = segment.text;
-    // Insert \n before headers or lists that follow sentence-ending punctuation or text
-    preprocessed = preprocessed.replace(/([.!?:;])\s*(#{1,3}\s|[-*]\s)/g, '$1\n$2');
-    // Also handle markers that follow a closing bold/italic marker
-    preprocessed = preprocessed.replace(/([*_]{1,2})\s*(#{1,3}\s|[-*]\s)/g, '$1\n$2');
-    
-    // Split into blocks but keep single-newline lists/headers together as potential groups
-    const blocks = preprocessed.split(/\n\s*\n/).filter((text: string) => text.trim());
+    const lines = segment.text.replace(/\r\n?/g, '\n').split('\n');
+    const blocks: string[][] = [];
+    let current: string[] = [];
+    let inFence = false;
+    lines.forEach((line, index) => {
+      if (/^\s*(```+|~~~+)/.test(line)) inFence = !inFence;
+      if (!line.trim() && !inFence) {
+        const previous = current[current.length - 1]?.trim() || '';
+        const next = lines.slice(index + 1).find(candidate => candidate.trim())?.trim() || '';
+        const previousList = previous.match(/^(?:[-+*]|\d+[.)])\s+/)?.[0]?.replace(/\s+$/, '');
+        const nextList = next.match(/^(?:[-+*]|\d+[.)])\s+/)?.[0]?.replace(/\s+$/, '');
+        if (previousList && nextList && (previousList[0] === nextList[0] || /^\d/.test(previousList) && /^\d/.test(nextList))) return;
+        if (current.length) blocks.push(current);
+        current = [];
+      } else current.push(line);
+    });
+    if (current.length) blocks.push(current);
 
-    blocks.forEach((block: string, blockIndex: number) => {
-      const lines = block.split('\n');
-      let i = 0;
-      
-      while (i < lines.length) {
-        const line = lines[i].trim();
-        
-        // Skip empty lines
-        if (line === '') {
-          i++;
+    const segmentCitation = segment.citation_id
+      ? citations.find(item => item.citation_id === segment.citation_id)
+      : undefined;
+    const citationButton = (atSegmentEnd: boolean) => atSegmentEnd && segmentCitation && onCitationClick
+      ? <CitationButton chunkIndex={segmentCitation.chunk_index || 0} onClick={() => onCitationClick(segmentCitation)} />
+      : null;
+
+    blocks.forEach((block, blockIndex) => {
+      const blockKey = `${segmentIndex}-${blockIndex}`;
+      let lineIndex = 0;
+      while (lineIndex < block.length) {
+        const line = block[lineIndex].trim();
+        const heading = line.match(/^(#{1,6})\s+(.+)$/);
+        if (heading) {
+          const level = heading[1].length;
+          const Tag = `h${level}` as keyof JSX.IntrinsicElements;
+          elements.push(<Tag key={`${blockKey}-heading-${lineIndex}`} className={level <= 2 ? 'text-base font-semibold text-slate-800 dark:text-slate-100 my-3' : 'text-sm font-semibold text-slate-700 dark:text-slate-200 my-2'}>{renderInline(heading[2], citations, blockKey, onCitationClick)}{citationButton(blockIndex === blocks.length - 1 && lineIndex === block.length - 1)}</Tag>);
+          lineIndex++;
           continue;
         }
 
-        const isLastLine = blockIndex === blocks.length - 1 && i === lines.length - 1;
+        if (/^\s*>/.test(block[lineIndex])) {
+          const quote: string[] = [];
+          while (lineIndex < block.length && /^\s*>/.test(block[lineIndex])) quote.push(block[lineIndex++]);
+          elements.push(<React.Fragment key={`${blockKey}-quote-fragment-${lineIndex}`}>{renderBlockQuote(quote, citations, `${blockKey}-quote-${lineIndex}`, onCitationClick)}{citationButton(blockIndex === blocks.length - 1 && lineIndex === block.length)}</React.Fragment>);
+          continue;
+        }
 
-        // Check for headings
-        const headingMatch = line.match(/^(#{1,6})\s+(.*)$/);
-        if (headingMatch) {
-          const level = headingMatch[1].length;
-          const headingContentText = headingMatch[2];
-          const processedContent = processTextWithMarkdownAndCitations(
-            headingContentText,
-            citations,
-            onCitationClick,
-            hoveredCitation,
-            onHover
-          );
-          
-          if (level === 1) {
-            elements.push(
-              <div key={`${segmentIndex}-${blockIndex}-${i}`} className="w-full mt-6 mb-4 px-4 py-3 bg-blue-500/5 dark:bg-blue-500/10 border-l-4 border-blue-500 rounded-r-xl ring-1 ring-black/5 shadow-sm">
-                <h1 className="text-lg font-bold text-slate-800 dark:text-slate-100 flex items-center gap-2 tracking-wide uppercase text-[12px] text-blue-500 dark:text-blue-400">
-                  {processedContent}
-                  {isLastLine && citation && onCitationClick && (
-                    <CitationButton
-                      chunkIndex={citation.chunk_index || 0}
-                      onClick={() => onCitationClick(citation)}
-                    />
-                  )}
-                </h1>
-              </div>
-            );
-          } else if (level === 2) {
-            elements.push(
-              <div key={`${segmentIndex}-${blockIndex}-${i}`} className="w-full mt-5 mb-3">
-                <h2 className="text-base font-semibold text-slate-800 dark:text-slate-100 pl-3 border-l-2 border-indigo-500/50 py-0.5 tracking-wide">
-                  {processedContent}
-                  {isLastLine && citation && onCitationClick && (
-                    <CitationButton
-                      chunkIndex={citation.chunk_index || 0}
-                      onClick={() => onCitationClick(citation)}
-                    />
-                  )}
-                </h2>
-              </div>
-            );
-          } else {
-            const Tag = `h${level}` as keyof JSX.IntrinsicElements;
-            const hClass = level === 3 
-              ? "text-sm font-semibold text-slate-700 dark:text-slate-200 mt-4 mb-2 tracking-wide"
-              : "text-xs font-semibold text-slate-600 dark:text-slate-200 mt-3 mb-1.5 uppercase tracking-wider";
-            elements.push(
-              <Tag key={`${segmentIndex}-${blockIndex}-${i}`} className={hClass}>
-                {processedContent}
-                {isLastLine && citation && onCitationClick && (
-                  <CitationButton
-                    chunkIndex={citation.chunk_index || 0}
-                    onClick={() => onCitationClick(citation)}
-                  />
-                )}
-              </Tag>
-            );
+        if (/^\s*```/.test(line) || /^\s*~~~/.test(line)) {
+          const fence = line.match(/^\s*(```+|~~~+)/)![1];
+          const codeLines: string[] = [];
+          lineIndex++;
+          while (lineIndex < block.length && !new RegExp(`^\\s*${fence[0]}{${fence.length},}\\s*$`).test(block[lineIndex])) codeLines.push(block[lineIndex++]);
+          if (lineIndex < block.length) lineIndex++;
+          elements.push(<pre key={`${blockKey}-code-${lineIndex}`} className="my-3 overflow-x-auto rounded bg-slate-900/5 p-3 dark:bg-slate-100/5"><code>{codeLines.join('\n')}</code></pre>);
+          continue;
+        }
+
+        const listMatch = line.match(/^\s*([-+*])\s+(.+)$/) || line.match(/^\s*(\d+)[.)]\s+(.+)$/);
+        if (listMatch) {
+          const ordered = /^\d/.test(listMatch[1]);
+          const items: JSX.Element[] = [];
+          while (lineIndex < block.length) {
+            const currentLine = block[lineIndex].trim();
+            const item = currentLine.match(/^([-+*])\s+(.+)$/) || currentLine.match(/^(\d+)[.)]\s+(.+)$/);
+            if (!item || /^\d/.test(item[1]) !== ordered) break;
+            items.push(<li key={`${blockKey}-item-${lineIndex}`} className="mb-1 leading-relaxed text-sm">{renderInline(item[2], citations, `${blockKey}-${lineIndex}`, onCitationClick)}</li>);
+            lineIndex++;
           }
-          i++;
-          continue;
-        }
-
-        // Check for list items (bullet and numbered)
-        const bulletMatch = line.match(/^[-*]\s+(.*)$/);
-        const numberMatch = line.match(/^(\d+)\.\s+(.*)$/);
-        if (bulletMatch || numberMatch) {
-          const listItems: JSX.Element[] = [];
-          const isNumbered = !!numberMatch;
-          
-          while (i < lines.length) {
-            const currentLine = lines[i].trim();
-            const currBullet = currentLine.match(/^[-*]\s+(.*)$/);
-            const currNumber = currentLine.match(/^(\d+)\.\s+(.*)$/);
-            
-            if (!currBullet && !currNumber) {
-              break;
-            }
-            
-            const itemText = currBullet ? currBullet[1] : currNumber![2];
-            const processedItemContent = processTextWithMarkdownAndCitations(
-              itemText,
-              citations,
-              onCitationClick,
-              hoveredCitation,
-              onHover
-            );
-            
-            const isItemLastLine = blockIndex === blocks.length - 1 && i === lines.length - 1;
-            
-            listItems.push(
-              <li key={`li-${segmentIndex}-${blockIndex}-${i}`} className="mb-1.5 text-slate-700 dark:text-slate-100 leading-relaxed text-sm">
-                {processedItemContent}
-                {isItemLastLine && citation && onCitationClick && (
-                  <CitationButton
-                    chunkIndex={citation.chunk_index || 0}
-                    onClick={() => onCitationClick(citation)}
-                  />
-                )}
-              </li>
-            );
-            i++;
+          const List = ordered ? 'ol' : 'ul';
+          const listStart = ordered ? Number(listMatch[1]) : undefined;
+          if (blockIndex === blocks.length - 1 && lineIndex === block.length && citationButton(true)) {
+            items[items.length - 1] = React.cloneElement(items[items.length - 1], {}, items[items.length - 1].props.children, citationButton(true));
           }
-          
-          const ListTag = isNumbered ? 'ol' : 'ul';
-          const listClass = isNumbered ? 'list-decimal my-3 pl-6 space-y-1.5' : 'list-disc my-3 pl-6 space-y-1.5';
-          
-          elements.push(
-            <ListTag key={`list-${segmentIndex}-${blockIndex}-${i}`} className={listClass}>
-              {listItems}
-            </ListTag>
-          );
+          elements.push(<List key={`${blockKey}-list-${lineIndex}`} start={listStart} className={`${ordered ? 'list-decimal' : 'list-disc'} my-3 space-y-1.5 pl-6 text-slate-700 dark:text-slate-100`}>{items}</List>);
           continue;
         }
 
-        // Regular paragraph
-        if (line.length > 0) {
-          const processedContent = processTextWithMarkdownAndCitations(
-            line,
-            citations,
-            onCitationClick,
-            hoveredCitation,
-            onHover
-          );
-          
-          elements.push(
-            <p key={`${segmentIndex}-${blockIndex}-${i}`} className="mb-2.5 leading-relaxed text-slate-700 dark:text-slate-100 text-sm">
-              {processedContent}
-              {isLastLine && citation && onCitationClick && (
-                <CitationButton
-                  chunkIndex={citation.chunk_index || 0}
-                  onClick={() => onCitationClick(citation)}
-                />
-              )}
-            </p>
-          );
-        }
-        
-        i++;
+        const paragraph: string[] = [];
+        while (lineIndex < block.length && !/^(#{1,6})\s+/.test(block[lineIndex].trim()) && !/^\s*>/.test(block[lineIndex]) && !/^\s*```/.test(block[lineIndex]) && !/^\s*~~~/.test(block[lineIndex]) && !/^\s*([-+*])\s+/.test(block[lineIndex]) && !/^\s*\d+[.)]\s+/.test(block[lineIndex].trim())) paragraph.push(block[lineIndex++].trim());
+        if (paragraph.length === 0) paragraph.push(block[lineIndex++].trim());
+        elements.push(<p key={`${blockKey}-p-${lineIndex}`} className="mb-2.5 leading-relaxed text-slate-700 dark:text-slate-100 text-sm">{paragraph.map((part, index) => <React.Fragment key={index}>{index > 0 && ' '}{renderInline(part, citations, `${blockKey}-p`, onCitationClick)}</React.Fragment>)}{citationButton(blockIndex === blocks.length - 1 && lineIndex >= block.length)}</p>);
       }
     });
   });
-  
   return elements;
 };
 
@@ -311,38 +169,4 @@ export const renderTextWithCitationMarkers = (
   _onCitationClick?: (citation: Citation) => void,
   _hoveredCitation?: number | null,
   _onHover?: (index: number | null) => void
-): React.ReactNode => {
-  const parts: (string | React.ReactNode)[] = [];
-  let lastIndex = 0;
-  let match: RegExpExecArray | null;
-  
-  const regex = new RegExp(CITATION_MARKER_PATTERN.source, 'g');
-  
-  while ((match = regex.exec(text)) !== null) {
-    if (match.index > lastIndex) {
-      parts.push(text.substring(lastIndex, match.index));
-    }
-    
-    const citationIndex = parseInt(match[1], 10);
-    const citation = citations.find(
-      c => c.citation_id === citationIndex || c.chunk_index === citationIndex - 1
-    );
-    
-    parts.push(
-      <LiquidCitation
-        key={`citation-${match.index}`}
-        index={citationIndex}
-        citation={citation!}
-        triggerType="hover"
-      />
-    );
-    
-    lastIndex = match.index + match[0].length;
-  }
-  
-  if (lastIndex < text.length) {
-    parts.push(text.substring(lastIndex));
-  }
-  
-  return <>{parts}</>;
-};
+): React.ReactNode => <>{renderInline(text, citations)}</>;
