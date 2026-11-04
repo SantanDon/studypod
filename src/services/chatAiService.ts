@@ -4,7 +4,7 @@ import { search } from "@/lib/search/semanticSearch";
 import { getContextualPrompt, formatPrompt } from "@/config/prompts";
 import { buildChatHistoryMessages } from "@/utils/chatHistoryBuilder";
 import { isSourceUsableForGroundedChat } from "@/lib/sources/sourceProcessing";
-import { getAudiobookChapterScope, getVisibleChatQuestion } from "@/lib/audio/readingContext";
+import { getAudiobookChapterScope, getAudiobookSourceId, getVisibleChatQuestion } from "@/lib/audio/readingContext";
 
 const extractStructuralSection = (content: string, requestedSection: string): string | undefined => {
   const requested = requestedSection.match(/^(Book|Chapter)\s+(\d+|[IVXLCDM]+)$/i);
@@ -170,6 +170,7 @@ export async function generateAIResponse(
     // affect which source passages retrieval selects.
     const retrievalQuestion = getVisibleChatQuestion(userMessage);
     const readerChapterScope = getAudiobookChapterScope(userMessage);
+    const readerSourceId = getAudiobookSourceId(userMessage);
     let semanticQuery = retrievalQuestion;
     if (recentUserMessages) {
       semanticQuery = `${recentUserMessages}\n\nFollow-up question: ${retrievalQuestion}`.slice(0, 800);
@@ -178,7 +179,10 @@ export async function generateAIResponse(
     let relevantContext = "";
 
     if (readerChapterScope) {
-      const chapterSections = sources
+      const chapterSources = readerSourceId
+        ? sources.filter((source) => source.id === readerSourceId)
+        : sources;
+      const chapterSections = chapterSources
         .map((source) => ({ source, section: extractStructuralSection(source.content || "", readerChapterScope) }))
         .filter((entry): entry is { source: (typeof sources)[number]; section: string } => Boolean(entry.section));
       if (chapterSections.length === 0) {

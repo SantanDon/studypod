@@ -24,6 +24,11 @@ Example (format demonstration only, never a source of cards): for "The telescope
 Select cards from this JSON-encoded SOURCE_TEXT:
 {content}`;
 
+// JSON cards include the complete evidence sentence, so keep a modest minimum
+// while scaling the output budget with the candidate pool. Ollama otherwise
+// defaults every request to 1024 tokens, even when only one card is requested.
+const flashcardOutputBudget = (candidateCount: number) => Math.min(1024, Math.max(256, candidateCount * 192));
+
 interface GeneratedCard {
   type: CardType;
   front: string;
@@ -221,7 +226,9 @@ export async function generateFlashcards(
   if (!availableEvidence.size) {
     throw new Error('Source has no complete sentences for grounded source-completion flashcards');
   }
-  const candidateCount = Math.min(50, requestedCardCount * 2, availableEvidence.size);
+  // One spare candidate gives validation a little room without doubling output
+  // for every card; source sentence count remains the hard upper bound.
+  const candidateCount = Math.min(50, requestedCardCount + 1, availableEvidence.size);
   const prompt = FLASHCARD_PROMPT_TEMPLATE
     .replace('{content}', JSON.stringify(truncatedContent))
     .replace('{numCards}', String(candidateCount));
@@ -245,6 +252,7 @@ export async function generateFlashcards(
       ],
       model: FAST_MODELS.summarize,
       deadlineAt,
+      maxOutputTokens: flashcardOutputBudget(candidateCount),
       temperature: 0.4, // Lower temperature for more focused, accurate output
     });
 
@@ -266,7 +274,7 @@ export async function generateFlashcards(
       const missingCount = requestedCardCount - generatedCards.length;
       const approvedEvidence = generatedCards.map(card => card.front
         .slice('Complete the source statement: '.length).replace('____', card.back));
-      const repairCandidateCount = Math.min(50, missingCount * 2, availableEvidence.size - approvedEvidence.length);
+      const repairCandidateCount = Math.min(50, missingCount + 1, availableEvidence.size - approvedEvidence.length);
       onProgress?.('Refining source-completion selections...');
       const repairResponse = await chatCompletion({
         messages: [
@@ -281,6 +289,7 @@ export async function generateFlashcards(
         ],
         model: FAST_MODELS.summarize,
         deadlineAt,
+        maxOutputTokens: flashcardOutputBudget(repairCandidateCount),
         temperature: 0.4,
       });
       const repairDiagnostics = newFlashcardDiagnostics();

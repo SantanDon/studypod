@@ -36,7 +36,7 @@ export function createSharedFullPolicy(origin) {
   let approvedEpub;
   let audioAssetsEnabled = false;
   const globalPosts = new Set(['/api/ai/generate', '/api/proxy/extract-web', '/api/youtube/youtube-transcript', '/api/youtube-edge']);
-  const scoped = /^(?:sources(?:\/[a-zA-Z0-9-]+)?|messages|chat|notes(?:\/[a-zA-Z0-9-]+)?|research-goals(?:\/[a-zA-Z0-9-]+)?|studio\/(?:maps|decks|quizzes|podcasts)(?:\/[a-zA-Z0-9-]+)*(?:\/chunks\/\d+)?)$/;
+  const scoped = /^(?:sources(?:\/[a-zA-Z0-9-]+)?|messages|chat|local-chat\/(?:context|turn)|notes(?:\/[a-zA-Z0-9-]+)?|research-goals(?:\/[a-zA-Z0-9-]+)?|studio\/(?:maps|decks|quizzes|podcasts)(?:\/[a-zA-Z0-9-]+)*(?:\/chunks\/\d+)?)$/;
   return {
     ...base,
     registerPdfFixture(name, bytes) {
@@ -68,7 +68,10 @@ export function createSharedFullPolicy(origin) {
       }
       if (verb === 'POST' && globalPosts.has(url.pathname)) return { allowed: true };
       const match = url.pathname.match(/^\/api\/notebooks\/([a-zA-Z0-9-]+)\/(.+)$/);
-      if (match && base.ids().includes(match[1]) && scoped.test(match[2]) && ['POST', 'PUT', 'DELETE'].includes(verb)) return { allowed: true };
+      if (match && base.ids().includes(match[1]) && scoped.test(match[2]) && ['POST', 'PUT', 'DELETE'].includes(verb)) {
+        if (match[2].startsWith('local-chat/') && (url.search || verb !== 'POST')) return original;
+        return { allowed: true };
+      }
       return original;
     },
   };

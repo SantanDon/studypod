@@ -45,6 +45,19 @@ export const getAudiobookChapterScope = (content: string): string | undefined =>
   return scope ? getStructuralChapterIdentifier(`${scope[1]} ${scope[2]}`) : undefined;
 };
 
+/** Resolve the source bound to app-generated audiobook navigation metadata. */
+export const getAudiobookSourceId = (content: string): string | undefined => {
+  const suffix = content.match(/\n\n\[Reader position: ([\s\S]*?)\]$/)?.[1];
+  const encodedId = suffix?.match(/\nAudiobook source id \(encoded\): ([^\s]+)/)?.[1];
+  if (!encodedId) return undefined;
+  try {
+    const sourceId = decodeURIComponent(encodedId).trim();
+    return sourceId ? sourceId.slice(0, 200) : undefined;
+  } catch {
+    return undefined;
+  }
+};
+
 /**
  * Adds playback position as navigation context only. It is not source evidence
  * and does not imply that the model has the narrated passage available. Avoid
@@ -80,8 +93,11 @@ export const withAudiobookReadingContext = (
     .trim()
     .slice(0, 160);
   const titleScope = exactTitle ? `\nAudiobook section title (encoded): ${encodeURIComponent(exactTitle)}` : '';
+  const sourceScope = context.sourceId
+    ? `\nAudiobook source id (encoded): ${encodeURIComponent(context.sourceId.slice(0, 200))}`
+    : '';
 
-  return `${question}\n\n[Reader position: ${segment}${label}${title}${progress}; ${context.isPlaying ? 'playing' : 'paused'}.${scope}${titleScope}\nThis is navigation metadata, not source evidence. Use only source text available in the notebook; do not invent excerpts or assume access to the exact passage.]`;
+  return `${question}\n\n[Reader position: ${segment}${label}${title}${progress}; ${context.isPlaying ? 'playing' : 'paused'}.${scope}${titleScope}${sourceScope}\nThis is navigation metadata, not source evidence. Use only source text available in the notebook; do not invent excerpts or assume access to the exact passage.]`;
 };
 
 export const getReadingFollowUpPrompts = (context?: AudiobookReadingContext): string[] => {

@@ -27,6 +27,19 @@ it("discovers OpenAI-compatible model ids and sends chat through the selected en
   expect(JSON.parse(String(fetchMock.mock.calls[1][1]?.body))).not.toHaveProperty("reasoning_effort");
 });
 
+it("bounds a stalled compatible-provider connection check", async () => {
+  saveLocalModelSettings({ provider: "custom", baseUrl: "http://127.0.0.1:8080", enabled: true });
+  const fetchMock = vi.fn((_url: string, init?: RequestInit) => new Promise<Response>((_resolve, reject) => {
+    init?.signal?.addEventListener("abort", () => reject(init.signal?.reason), { once: true });
+  }));
+  vi.stubGlobal("fetch", fetchMock);
+  vi.useFakeTimers();
+  const pending = checkCompatibleLocalModel();
+  await vi.advanceTimersByTimeAsync(8_000);
+  await expect(pending).resolves.toMatchObject({ ok: false, message: "Local model connection check timed out" });
+  vi.useRealTimers();
+});
+
 it("disables reasoning only for a compatible endpoint on Ollama's default port", async () => {
   saveLocalModelSettings({ provider: "custom", baseUrl: "http://127.0.0.1:11434", model: "qwen3.5:9b", enabled: true });
   const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify({ choices: [{ message: { content: "READY" } }] }), { status: 200 }));

@@ -453,7 +453,7 @@ export default function AudiobookView({
 
   useEffect(() => {
     if (ebooks.length === 0) {
-      setCurrentBookId(null);
+      if (currentBookId !== null) setCurrentBookId(null);
       return;
     }
     if (!currentBookId || !ebooks.some((book) => book.id === currentBookId)) {

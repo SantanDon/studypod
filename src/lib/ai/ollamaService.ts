@@ -445,7 +445,11 @@ async function chatCompletionInternal(params: ChatCompletionParams): Promise<str
   const compatibleSettings = getLocalModelSettings();
   if (compatibleSettings.provider !== "ollama" && (isCompatibleLocalModelSelected() || params.localOnly)) {
     const promptMessages = params.messages.map((message) => ({ ...message, content: sanitizePromptText(message.content) }));
-    const selectedModel = params.model || compatibleSettings.model;
+    // The model configured for the active compatible provider is authoritative
+    // across Studio tasks. Generators may pass an Ollama task default (for
+    // example FAST_MODELS.summarize), but that must not override the model the
+    // user selected for LM Studio or a custom OpenAI-compatible endpoint.
+    const selectedModel = compatibleSettings.model || params.model;
     if (!selectedModel) throw new Error("Choose a local model in Local model connection settings before sending a chat request.");
     try {
       return await completeCompatibleLocalChat({

@@ -128,7 +128,9 @@ export const useAudiobookStore = create<AudiobookState>()(
       setSelectedProvider: (provider) => set({ selectedProvider: provider }),
       setGenerating: (isGenerating) => set({ isGenerating }),
       setCurrentChapterId: (id) => set({ currentChapterId: id }),
-      setCurrentBookId: (id) => set({ currentBookId: id }),
+      setCurrentBookId: (id) => set((state) =>
+        state.currentBookId === id ? state : { currentBookId: id },
+      ),
       setAudioUrl: (url) => set({ audioUrl: url }),
       setNotebookId: (id) => set({ notebookId: id }),
       setPronunciations: (bookId, entries) => set((state) => ({

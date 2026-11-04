@@ -66,6 +66,7 @@ export const buildAudioListeningQuestionMessage = (
   ].join("\n\n");
 
   return withAudiobookReadingContext(message, {
+    sourceId: request.sourceId,
     bookTitle: request.sourceTitle,
     chapterTitle: request.chapterTitle,
     chapterIndex: request.chapterIndex,

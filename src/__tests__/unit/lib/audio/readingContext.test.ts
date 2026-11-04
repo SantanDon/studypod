@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { getAudiobookChapterScope, getPlayableChapterPosition, getReadingFollowUpPrompts, getVisibleChatQuestion, withAudiobookReadingContext } from '@/lib/audio/readingContext';
+import { getAudiobookChapterScope, getAudiobookSourceId, getPlayableChapterPosition, getReadingFollowUpPrompts, getVisibleChatQuestion, withAudiobookReadingContext } from '@/lib/audio/readingContext';
 import type { AudiobookPlaybackManifest } from '@/lib/audio/audiobookPlayback';
 import type { AudiobookReadingContext } from '@/stores/audiobookStore';
 import { resolveChatSourceIds, resolveUsableAudiobookReadingContext } from '@/components/notebook/ChatArea';
@@ -135,6 +135,17 @@ describe('audiobook reading context for chat', () => {
       ...context,
       chapterTitle: 'Book I: Introduction',
     }))).toBeUndefined();
+  });
+
+  it('round-trips the audiobook source id through private navigation metadata', () => {
+    const submitted = withAudiobookReadingContext('Explain this passage', {
+      ...context,
+      sourceId: 'book/source 1',
+    });
+
+    expect(submitted).toContain(`Audiobook source id (encoded): ${encodeURIComponent('book/source 1')}`);
+    expect(getAudiobookSourceId(submitted)).toBe('book/source 1');
+    expect(getAudiobookSourceId('Explain this passage')).toBeUndefined();
   });
 
   it('recognizes a structural manifest title with a display-only trailing period', () => {

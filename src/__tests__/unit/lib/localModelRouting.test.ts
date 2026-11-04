@@ -10,12 +10,12 @@ beforeEach(() => {
 });
 afterEach(() => { vi.unstubAllEnvs(); localStorage.clear(); vi.resetModules(); });
 
-it("routes selected compatible provider chat locally and does not fall back on its error", async () => {
+it("routes compatible provider chat with its selected model, overriding task defaults, and does not fall back on error", async () => {
   const settings = await import("@/config/localModelConfig");
-  settings.saveLocalModelSettings({ provider: "lm-studio", model: "qwen-local", enabled: true });
+  settings.saveLocalModelSettings({ provider: "lm-studio", model: "qwen3.5:9b", enabled: true });
   local.mockRejectedValue(new Error("Local model generation failed (503)"));
   const { chatCompletion } = await import("@/lib/ai/ollamaService");
-  await expect(chatCompletion({ messages: [{ role: "user", content: "Hello" }] })).rejects.toThrow("Local model generation failed (503)");
-  expect(local).toHaveBeenCalledWith(expect.objectContaining({ model: "qwen-local" }));
+  await expect(chatCompletion({ messages: [{ role: "user", content: "Hello" }], model: "llama3.2:1b" })).rejects.toThrow("Local model generation failed (503)");
+  expect(local).toHaveBeenCalledWith(expect.objectContaining({ model: "qwen3.5:9b" }));
   expect(cloud).not.toHaveBeenCalled();
 });

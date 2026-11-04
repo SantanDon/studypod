@@ -124,6 +124,46 @@ describe('authenticated browser-local chat contract', () => {
     expect(result.body.sources[0].content.length).toBeLessThanOrEqual(18_000);
   });
 
+  it('uses the audiobook source id to disambiguate identical chapter headings across books', async () => {
+    state.helpers.getSourcesByNotebookId.mockResolvedValue([
+      { id: 'source-1', title: 'Other book', type: 'epub', content: 'BOOK I\nUnrelated argument from another book.' },
+      { id: 'source-2', title: 'The Republic', type: 'epub', content: 'BOOK I\nSocrates discusses justice with Cephalus.' },
+    ]);
+    const message = withAudiobookReadingContext('What is discussed here?', {
+      audiobookId: 'audio-1', sourceId: 'source-2', bookTitle: 'The Republic',
+      chapterId: 'book-1', chapterIndex: 0, chapterCount: 1, chapterTitle: 'Book I',
+      progressPercent: 40, isPlaying: false,
+    });
+    const result = await dispatch({
+      url: '/book/local-chat/context', token: session(),
+      body: { sourceIds: ['source-1', 'source-2'], message },
+    });
+    expect(result.status).toBe(200);
+    expect(result.body.sectionScope).toEqual({ requestedSection: { kind: 'audio-chapter', title: 'Book I' }, matched: true });
+    expect(result.body.sources.map(source => source.id)).toEqual(['source-2']);
+    expect(result.body.sources[0].content).toContain('Socrates discusses justice with Cephalus.');
+    expect(result.body.sources[0].content).not.toContain('Unrelated argument');
+  });
+
+  it('fails closed when the audiobook source conflicts with the explicitly selected sources', async () => {
+    state.helpers.getSourcesByNotebookId.mockResolvedValue([
+      { id: 'source-1', title: 'Other book', type: 'epub', content: 'BOOK I\nUnrelated argument.' },
+      { id: 'source-2', title: 'The Republic', type: 'epub', content: 'BOOK I\nSocrates discusses justice.' },
+    ]);
+    const message = withAudiobookReadingContext('What is discussed here?', {
+      audiobookId: 'audio-1', sourceId: 'source-2', bookTitle: 'The Republic',
+      chapterId: 'book-1', chapterIndex: 0, chapterCount: 1, chapterTitle: 'Book I',
+      progressPercent: 40, isPlaying: false,
+    });
+    const result = await dispatch({
+      url: '/book/local-chat/context', token: session(),
+      body: { sourceIds: ['source-1'], message },
+    });
+    expect(result.status).toBe(200);
+    expect(result.body.sectionScope.matched).toBe(false);
+    expect(result.body.sources).toEqual([]);
+  });
+
   it('selects late chapter evidence across sources within a shared budget and preserves citation order', async () => {
     const early = 'Opening material discusses unrelated themes and background.\n\n';
     const lateA = 'The rare moonstone principle explains why the evidence changes the judgment.';

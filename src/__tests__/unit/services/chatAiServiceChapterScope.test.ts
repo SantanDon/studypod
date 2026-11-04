@@ -117,15 +117,33 @@ describe('chat audiobook structural chapter scope', () => {
       source(`BOOK I\n\n${'Justice and fairness are discussed in this passage. '.repeat(80)}`, 'source-two', 'Second source'),
     ]);
 
-    await generateAIResponse(readerQuestion(), { id: 'user', email: 'test@example.com', created_at: '' }, 'notebook');
+    const question = withAudiobookReadingContext('What does Book I say?', {
+      audiobookId: 'audio', sourceId: 'source-one', bookTitle: 'First source',
+      chapterId: 'book-1', chapterIndex: 0, chapterCount: 1, chapterTitle: 'Book I',
+      progressPercent: 40, isPlaying: false,
+    });
+    await generateAIResponse(question, { id: 'user', email: 'test@example.com', created_at: '' }, 'notebook');
 
     const submitted = chatCompletion.mock.calls[0][0].messages.at(-1).content;
     const evidence = submitted.split('Notebook evidence:\n')[1].split('\n\nUser question:')[0];
     const sourceContents = [...evidence.matchAll(/Content: ([\s\S]*?)(?=\n\n\[\d+\] Source:|$)/g)].map((match) => match[1]);
-    expect(sourceContents).toHaveLength(2);
+    expect(sourceContents).toHaveLength(1);
     expect(sourceContents.reduce((total, content) => total + content.length, 0)).toBeLessThanOrEqual(6000);
     expect(evidence).toContain('[1] Source: "First source"');
-    expect(evidence).toContain('[2] Source: "Second source"');
+    expect(evidence).not.toContain('Second source');
+  });
+
+  it('uses only the audiobook source when another source has the same chapter heading', async () => {
+    getSources.mockReturnValue([
+      source('BOOK I\n\nA different book discusses an unrelated argument.', 'other-book', 'Other book'),
+      source('BOOK I\n\nSocrates discusses justice with Cephalus.', 'book-source', 'The Republic'),
+    ]);
+
+    await generateAIResponse(readerQuestion(), { id: 'user', email: 'test@example.com', created_at: '' }, 'notebook');
+
+    const submitted = chatCompletion.mock.calls[0][0].messages.at(-1).content;
+    expect(submitted).toContain('Socrates discusses justice with Cephalus.');
+    expect(submitted).not.toContain('unrelated argument');
   });
 
   it('fails closed with an honest message when the selected structural section is absent', async () => {

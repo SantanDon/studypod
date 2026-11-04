@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { getAudiobookChapterScope, getVisibleChatQuestion, withAudiobookReadingContext } from "@/lib/audio/readingContext";
+import { getAudiobookChapterScope, getAudiobookSourceId, getVisibleChatQuestion, withAudiobookReadingContext } from "@/lib/audio/readingContext";
 import {
   buildAudioListeningQuestionMessage,
   formatListeningTimestamp,
@@ -50,6 +50,12 @@ describe("audio listening question context", () => {
     expect(getVisibleChatQuestion(bookOneMessage)).not.toContain("Reader position:");
     expect(getVisibleChatQuestion(bookOneMessage)).not.toContain("Audio listening context:");
     expect(bookOneMessage).toContain("navigation metadata, not source evidence");
+  });
+
+  it("binds the captured audio question to its source in private reader metadata", () => {
+    const message = buildAudioListeningQuestionMessage(request);
+
+    expect(getAudiobookSourceId(message)).toBe(request.sourceId);
   });
 
   it("hides both generated context blocks from the visible pending question", () => {

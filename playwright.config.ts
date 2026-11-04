@@ -11,7 +11,7 @@ export default defineConfig({
   fullyParallel: true,
   forbidOnly: Boolean(process.env.CI),
   retries: process.env.CI ? 1 : 0,
-  workers: 2,
+  workers: process.env.CI ? 1 : 2,
   outputDir: `${artifacts}/results`,
   reporter: [['list'], ['json', { outputFile: `${artifacts}/report.json` }], ['html', { outputFolder: `${artifacts}/html`, open: 'never' }]],
   use: {

@@ -3,6 +3,7 @@ import { randomUUID } from 'node:crypto';
 
 test('real account: failed login, notebook/source persistence, logout, fresh login', async ({ browser, baseURL }, testInfo) => {
   expect(process.env.STUDYPOD_AUTH_MUTATIONS_ALLOWED, 'Explicit dedicated-test-data opt-in required').toBe('dedicated-test-data');
+  expect(process.env.STUDYPOD_AUTH_SIGNUP, 'Isolated acceptance uses pre-seeded fixtures; UI signup is disabled').toBe('0');
   expect(Boolean(baseURL), 'Explicit target required').toBe(true);
   const target = new URL(baseURL!);
   expect(target.protocol === 'https:' || ['127.0.0.1', 'localhost'].includes(target.hostname)).toBe(true);
@@ -13,8 +14,11 @@ test('real account: failed login, notebook/source persistence, logout, fresh log
   const title = `Synthetic QA ${randomUUID().slice(0, 8)}`;
   const content = `${marker}. This is synthetic study material, created only for acceptance testing. Plants convert light into chemical energy during photosynthesis. Chlorophyll absorbs light, while carbon dioxide and water provide the inputs. The process releases oxygen. These sentences contain no personal data and no copyrighted course material.`;
   const contexts: BrowserContext[] = [];
+  let generationRequests = 0;
   let blockedGeneration = 0;
+  let generationResponses = 0;
   let browserErrors = 0;
+  const sourceNetworkEvents: string[] = [];
   const receipt: Record<string, unknown> = { phase: 'configuration', target: target.origin, viewport: testInfo.project.use.viewport, isMobile: testInfo.project.use.isMobile, hasTouch: testInfo.project.use.hasTouch, mockedAuthOrData: false, providerGeneration: 'same-origin /api/ai/generate blocked; separate audio/provider gate required' };
   const fresh = async () => {
     const context = await browser.newContext({ baseURL, viewport: testInfo.project.use.viewport, isMobile: testInfo.project.use.isMobile, hasTouch: testInfo.project.use.hasTouch, serviceWorkers: 'block' });
@@ -23,12 +27,27 @@ test('real account: failed login, notebook/source persistence, logout, fresh log
     await context.route('**/*', async route => {
       const url = new URL(route.request().url());
       if (url.origin === target.origin && url.pathname === '/api/ai/generate') {
-        blockedGeneration++; await route.abort('blockedbyclient'); return;
+        generationRequests++;
+        await route.abort('blockedbyclient');
+        blockedGeneration++;
+        return;
       }
       await route.continue();
     });
     const page = await context.newPage();
     page.on('pageerror', () => { browserErrors++; });
+    page.on('request', request => {
+      const url = new URL(request.url());
+      if (/source/i.test(url.pathname) && request.method() !== 'GET') sourceNetworkEvents.push(`${request.method()} ${url.origin}${url.pathname}`);
+    });
+    page.on('response', response => {
+      const url = new URL(response.url());
+      if (url.origin === target.origin && url.pathname === '/api/ai/generate') generationResponses++;
+      if (/source/i.test(url.pathname) && response.request().method() !== 'GET') sourceNetworkEvents.push(`${response.status()} ${url.origin}${url.pathname}`);
+    });
+    page.on('console', message => {
+      if (message.type() === 'error' || /Text: isFirstSource|validation/i.test(message.text())) sourceNetworkEvents.push(`console ${message.type()} ${message.text().slice(0, 240)}`);
+    });
     return { context, page };
   };
   const login = async (page: Page, wrong = false, identity = { email: email!, password: password! }) => {
@@ -45,25 +64,13 @@ test('real account: failed login, notebook/source persistence, logout, fresh log
       await expect(page.getByRole('button', { name: 'Create notebook', exact: true })).toHaveCount(0);
     } else {
       await page.waitForURL(url => url.pathname === '/');
-      await expect(page.getByRole('heading', { name: 'Your study space', exact: true })).toBeVisible();
+      await expect(page.getByRole('heading', { name: 'Your research workspace', exact: true })).toBeVisible();
     }
   };
   try {
     receipt.phase = 'signup-or-login';
     const first = await fresh();
-    if (process.env.STUDYPOD_AUTH_SIGNUP === '1') {
-      expect(process.env.STUDYPOD_AUTH_TERMS_ACCEPTED, 'Terms acceptance must be explicitly authorized for this test identity').toBe('1');
-      await first.page.goto('/auth?mode=cloud-signup');
-      await first.page.getByLabel('Display Name').fill('StudyPod acceptance account');
-      await first.page.getByLabel('Email Address').fill(email!);
-      await first.page.getByLabel('Password', { exact: true }).fill(password!);
-      await first.page.locator('#tosAccepted').click();
-      const signup = first.page.waitForResponse(r => new URL(r.url()).pathname === '/api/auth/signup' && r.request().method() === 'POST');
-      await first.page.getByRole('button', { name: 'Create Account', exact: true }).click();
-      expect((await signup).status()).toBe(201);
-      await expect(first.page.getByRole('button', { name: 'Create notebook', exact: true })).toBeVisible();
-      receipt.signup = 'passed';
-    } else await login(first.page);
+    await login(first.page);
     receipt.phase = 'profile-and-create-notebook';
     const profile = await first.context.request.get('/api/user/profile');
     expect(profile.status()).toBe(200);
@@ -82,13 +89,38 @@ test('real account: failed login, notebook/source persistence, logout, fresh log
     await first.page.getByRole('button', { name: /Pasted Content/ }).click();
     await first.page.getByLabel('Title', { exact: true }).fill(title);
     await first.page.getByLabel('Content', { exact: true }).fill(content);
-    const add = first.page.waitForResponse(r => new URL(r.url()).pathname === `/api/notebooks/${notebookId}/sources` && r.request().method() === 'POST');
-    await first.page.getByRole('button', { name: 'Add Copied Text', exact: true }).click();
-    expect((await add).status()).toBe(201);
+    const copiedTextDialog = first.page.getByRole('dialog').filter({
+      has: first.page.getByLabel('Content', { exact: true }),
+    });
+    const addButton = copiedTextDialog.getByRole('button', { name: 'Add Copied Text', exact: true });
+    await expect(addButton).toHaveCount(1);
+    await expect(addButton).toBeEnabled();
+    receipt.sourceSubmit = { buttonEnabled: true, responseObserved: false };
+    const add = first.page.waitForResponse(r => {
+      const url = new URL(r.url());
+      return url.origin === target.origin && url.pathname === `/api/notebooks/${notebookId}/sources` && r.request().method() === 'POST';
+    }, { timeout: 15_000 });
+    await addButton.click();
+    let addResponse;
+    try { addResponse = await add; }
+    catch (error) {
+      receipt.sourceSubmit = {
+        buttonEnabled: true,
+        responseObserved: false,
+        diagnostics: sourceNetworkEvents.slice(-12),
+        dialogText: (await copiedTextDialog.innerText().catch(() => '')).slice(0, 800),
+        visibleAlerts: await first.page.getByRole('alert').allInnerTexts().catch(() => []),
+      };
+      throw error;
+    }
+    receipt.sourceSubmit = { buttonEnabled: true, responseObserved: true, responseStatus: addResponse.status() };
+    expect(addResponse.status()).toBe(201);
     await expect(first.page.getByText(title, { exact: true }).first()).toBeVisible();
     receipt.phase = 'logout';
     await first.page.goto('/');
-    await first.page.locator('header button[aria-haspopup="menu"]').first().click();
+    const profileMenuTrigger = first.page.locator('header').getByRole('button');
+    await expect(profileMenuTrigger).toHaveCount(1);
+    await profileMenuTrigger.click();
     const signout = first.page.waitForResponse(r => new URL(r.url()).pathname === '/api/auth/signout' && r.request().method() === 'POST');
     await first.page.getByRole('menuitem', { name: /(?:^|\s)Sign out$/ }).click();
     expect((await signout).status()).toBe(200);
@@ -137,17 +169,7 @@ test('real account: failed login, notebook/source persistence, logout, fresh log
     expect(Boolean(otherEmail && otherPassword), 'Second dedicated identity required for ownership gate').toBe(true);
     expect(otherEmail === email, 'Identities must differ').toBe(false);
     const other = await fresh();
-    if (process.env.STUDYPOD_AUTH_SIGNUP === '1') {
-      await other.page.goto('/auth?mode=cloud-signup');
-      await other.page.getByLabel('Display Name').fill('StudyPod ownership acceptance');
-      await other.page.getByLabel('Email Address').fill(otherEmail!);
-      await other.page.getByLabel('Password', { exact: true }).fill(otherPassword!);
-      await other.page.locator('#tosAccepted').click();
-      const signup = other.page.waitForResponse(r => new URL(r.url()).pathname === '/api/auth/signup' && r.request().method() === 'POST');
-      await other.page.getByRole('button', { name: 'Create Account', exact: true }).click();
-      expect((await signup).status()).toBe(201);
-      await expect(other.page.getByRole('button', { name: 'Create notebook', exact: true })).toBeVisible();
-    } else await login(other.page, false, { email: otherEmail!, password: otherPassword! });
+    await login(other.page, false, { email: otherEmail!, password: otherPassword! });
     const otherProfile = await other.context.request.get('/api/user/profile');
     expect(otherProfile.status()).toBe(200);
     expect((await otherProfile.json()).user.email).toBe(otherEmail);
@@ -181,9 +203,21 @@ test('real account: failed login, notebook/source persistence, logout, fresh log
     receipt.ownerDataAfterDeniedWrites = 'unchanged';
     receipt.phase = 'complete';
     expect(browserErrors, 'Uncaught browser errors').toBe(0);
-    expect(blockedGeneration, 'CRUD gate must not request provider generation').toBe(0);
+    expect(blockedGeneration, 'Every same-origin provider generation request must be intercepted').toBe(generationRequests);
+    expect(generationResponses, 'No provider generation request may receive a response in the CRUD gate').toBe(0);
+  } catch (error) {
+    const failedPage = contexts.length ? contexts[0].pages()[0] : undefined;
+    receipt.failureUrl = failedPage?.url();
+    receipt.failureViewportText = (await failedPage?.locator('body').innerText().catch(() => '') || '').slice(0, 600);
+    if (failedPage) {
+      try { await testInfo.attach('authenticated-failure-screen', { body: await failedPage.screenshot(), contentType: 'image/png' }); }
+      catch { /* Preserve the original failure if the page has already closed. */ }
+    }
+    throw error;
   } finally {
     receipt.blockedGenerationRequests = blockedGeneration;
+    receipt.generationRequests = generationRequests;
+    receipt.generationResponses = generationResponses;
     receipt.uncaughtBrowserErrors = browserErrors;
     await testInfo.attach('sanitized-acceptance-receipt', { body: JSON.stringify(receipt, null, 2), contentType: 'application/json' });
     await Promise.allSettled(contexts.map(c => c.close()));

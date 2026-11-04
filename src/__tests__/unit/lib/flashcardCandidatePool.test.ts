@@ -9,23 +9,23 @@ beforeEach(()=>model.mockReset());afterEach(()=>vi.restoreAllMocks());
 it('over-selects a bounded pool, rejects invalid choices, and returns only requested grounded cards',async()=>{
  model.mockResolvedValue([record(0,'17 blue trays'),record(1,'three bean seedlings'),record(2,'every morning'),record(3,'six hours'),record(4,'carbon dioxide and water'),record(5,'fourteen days')].join('\n'));
  const cards=await generateFlashcards(sentences.join(' '),3,'source','Cedar');
- expect(model.mock.calls[0][0].messages[1].content).toContain('Select 6 distinct');expect(model).toHaveBeenCalledTimes(1);expect(cards.map(c=>c.back)).toEqual(['17 blue trays','every morning','six hours']);
+ expect(model.mock.calls[0][0].messages[1].content).toContain('Select 4 distinct');expect(model.mock.calls[0][0].maxOutputTokens).toBe(768);expect(model).toHaveBeenCalledTimes(1);expect(cards.map(c=>c.back)).toEqual(['17 blue trays','every morning','six hours']);
  for(const c of cards)expect(sentences).toContain(c.front.slice('Complete the source statement: '.length).replace('____',c.back));
 });
 it('does not request extra unique sentences from a short source',async()=>{
  model.mockResolvedValue([record(0,'17 blue trays'),record(2,'every morning')].join('\n'));
  expect(await generateFlashcards([sentences[0],sentences[2]].join(' '),2,'source','Cedar')).toHaveLength(2);
- expect(model.mock.calls[0][0].messages[1].content).toContain('Select 2 distinct');
+ expect(model.mock.calls[0][0].messages[1].content).toContain('Select 2 distinct');expect(model.mock.calls[0][0].maxOutputTokens).toBe(384);
 });
 it('caps pools at fifty even for maximum requested output',async()=>{
  const source=Array.from({length:60},(_,i)=>`The instrument number ${i} measures light during every clear afternoon.`).join(' ');
  model.mockResolvedValue('{}');await expect(generateFlashcards(source,50,'source','Cedar')).rejects.toThrow('Only 0 of 50');
- expect(model.mock.calls[0][0].messages[1].content).toContain('Select 50 distinct');expect(model).toHaveBeenCalledTimes(1);
+ expect(model.mock.calls[0][0].messages[1].content).toContain('Select 50 distinct');expect(model.mock.calls[0][0].maxOutputTokens).toBe(1024);expect(model).toHaveBeenCalledTimes(1);
 });
 it('bounds correction by remaining distinct sentences and retains the shared deadline',async()=>{
  model.mockResolvedValueOnce([record(0,'17 blue trays'),record(1,'three bean seedlings'),record(2,'every morning')].join('\n')).mockResolvedValueOnce(record(1,'bean seedlings'));
  expect(await generateFlashcards(sentences.slice(0,3).join(' '),3,'source','Cedar')).toHaveLength(3);
- expect(model.mock.calls[1][0].messages[1].content).toContain('Select 1 distinct');expect(model.mock.calls[1][0].deadlineAt).toBe(model.mock.calls[0][0].deadlineAt);
+ expect(model.mock.calls[1][0].messages[1].content).toContain('Select 1 distinct');expect(model.mock.calls[1][0].maxOutputTokens).toBe(256);expect(model.mock.calls[1][0].deadlineAt).toBe(model.mock.calls[0][0].deadlineAt);
 });
 
 it('fails without a provider call when no complete source sentence exists',async()=>{

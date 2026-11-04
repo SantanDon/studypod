@@ -76,6 +76,19 @@ function getReaderChapterTitle(message) {
   }
 }
 
+function getReaderSourceId(message) {
+  const readerContext = String(message).match(/\n\n\[Reader position: ([\s\S]*?)\]$/)?.[1];
+  if (!readerContext?.includes("This is navigation metadata, not source evidence.")) return null;
+  const encodedId = readerContext.match(/^Audiobook source id \(encoded\): ([^\r\n]{1,600})$/mi)?.[1];
+  if (!encodedId) return null;
+  try {
+    const sourceId = decodeURIComponent(encodedId).trim();
+    return sourceId && sourceId.length <= 200 ? sourceId : null;
+  } catch {
+    return null;
+  }
+}
+
 function stripGeneratedAudioMetadata(message) {
   return String(message)
     .replace(/\n\n\[Reader position: ([\s\S]*?)\]$/, (block, metadata) =>
@@ -1188,11 +1201,19 @@ router.post("/:id/local-chat/context", requireScope("chat:all"), async (req, res
       return res.status(400).json({ error: "sourceIds must be an array of at most 30 IDs" });
     }
     const sources = await dbHelpers.getSourcesByNotebookId(req.params.id, req.user.userId);
-    const selected = requested === undefined ? sources.slice(0, 30) : sources.filter((source) => requested.includes(source.id));
-    if (requested !== undefined && new Set(selected.map((source) => source.id)).size !== new Set(requested).size) {
+    const message = typeof req.body?.message === "string" ? req.body.message : "";
+    const readerSourceId = getReaderSourceId(message);
+    if (requested !== undefined && requested.some((id) => !sources.some((source) => source.id === id))) {
       return res.status(400).json({ error: "One or more sources are unavailable in this notebook" });
     }
-    const message = typeof req.body?.message === "string" ? req.body.message : "";
+    const selected = readerSourceId
+      ? requested !== undefined && !requested.includes(readerSourceId)
+        ? []
+        : sources.filter((source) => source.id === readerSourceId)
+      : requested === undefined ? sources.slice(0, 30) : sources.filter((source) => requested.includes(source.id));
+    if (readerSourceId && requested !== undefined && !requested.includes(readerSourceId)) {
+      return res.json({ notebookId: notebook.id, sources: [], sectionScope: { requestedSection: { kind: "audio-source", sourceId: readerSourceId }, matched: false } });
+    }
     // Generated player metadata can itself contain words such as "Chapter IV".
     // Parse learner-authored scope only after removing those app-owned suffixes.
     const learnerMessage = stripGeneratedAudioMetadata(message);

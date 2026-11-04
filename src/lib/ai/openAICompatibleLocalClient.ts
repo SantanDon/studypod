@@ -2,6 +2,7 @@ import { getLocalModelApiKey, getLocalModelSettings } from "@/config/localModelC
 
 const COMPATIBLE_CHAT_MAX_CHARS = 20_000;
 const COMPATIBLE_CHAT_TIMEOUT_MS = 120_000;
+const COMPATIBLE_CHECK_TIMEOUT_MS = 8_000;
 const COMPATIBLE_CHAT_MAX_TOKENS = 1024;
 const COMPATIBLE_CHAT_EMPTY_RETRY_MAX_TOKENS = 4096;
 const TRUNCATION_MARKER = "\n[Earlier context shortened to fit the local model prompt.]\n";
@@ -70,12 +71,22 @@ function isOllamaCompatibleEndpoint(baseUrl: string): boolean {
 export async function discoverCompatibleModels(signal?: AbortSignal): Promise<string[]> {
   const settings = getLocalModelSettings();
   if (settings.provider === "ollama") throw new Error("Use Ollama model discovery for the Ollama provider");
-  const response = await fetch(`${settings.baseUrl}/models`, { headers: headers(), signal });
-  if (!response.ok) throw new Error(`Model discovery failed (${response.status}): ${(await response.text()).slice(0, 300)}`);
-  const body = await response.json() as { data?: Array<{ id?: unknown }> };
-  const models = Array.isArray(body.data) ? body.data.flatMap((item) => typeof item.id === "string" ? [item.id] : []) : [];
-  if (!models.length) throw new Error("Endpoint responded, but returned no OpenAI-compatible models");
-  return models;
+  const controller = new AbortController();
+  const abortFromCaller = () => controller.abort(signal?.reason);
+  signal?.addEventListener("abort", abortFromCaller, { once: true });
+  if (signal?.aborted) abortFromCaller();
+  const timeout = setTimeout(() => controller.abort(new DOMException("Local model connection check timed out", "TimeoutError")), COMPATIBLE_CHECK_TIMEOUT_MS);
+  try {
+    const response = await fetch(`${settings.baseUrl}/models`, { headers: headers(), signal: controller.signal });
+    if (!response.ok) throw new Error(`Model discovery failed (${response.status}): ${(await response.text()).slice(0, 300)}`);
+    const body = await response.json() as { data?: Array<{ id?: unknown }> };
+    const models = Array.isArray(body.data) ? body.data.flatMap((item) => typeof item.id === "string" ? [item.id] : []) : [];
+    if (!models.length) throw new Error("Endpoint responded, but returned no OpenAI-compatible models");
+    return models;
+  } finally {
+    clearTimeout(timeout);
+    signal?.removeEventListener("abort", abortFromCaller);
+  }
 }
 
 export async function checkCompatibleLocalModel(signal?: AbortSignal): Promise<LocalModelCheck> {
@@ -83,7 +94,10 @@ export async function checkCompatibleLocalModel(signal?: AbortSignal): Promise<L
     const models = await discoverCompatibleModels(signal);
     return { ok: true, models, message: `Connected; found ${models.length} model${models.length === 1 ? "" : "s"}.` };
   } catch (error) {
-    return { ok: false, models: [], message: error instanceof Error ? error.message : String(error) };
+    const message = error && typeof error === "object" && "message" in error
+      ? String(error.message)
+      : String(error);
+    return { ok: false, models: [], message };
   }
 }
 

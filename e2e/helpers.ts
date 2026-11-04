@@ -57,6 +57,9 @@ export async function observeBrowser(page: Page, testInfo: TestInfo, fixtureMode
     } else if (url.pathname.startsWith('/_vercel/') && fixtureMode) {
       requests.push(`FIXTURE analytics ${url.pathname}`);
       await route.fulfill({ status: 200, body: '', contentType: 'application/javascript' });
+    } else if (fixtureMode && url.hostname === 'localhost' && url.port === '11434' && url.pathname === '/api/tags' && ['GET', 'HEAD'].includes(request.method())) {
+      requests.push('FIXTURE GET ollama/api/tags (synthetic model discovery; no generation)');
+      await route.fulfill({ json: { models: [{ name: 'llama3.2:1b', model: 'llama3.2:1b', modified_at: '2026-11-04T00:00:00Z', size: 1024, digest: 'fixture-only', details: { format: 'gguf', family: 'llama', parameter_size: '1B', quantization_level: 'Q4_0' } }] } });
     } else if (url.pathname.endsWith('/audiobook/voices') && fixtureMode) {
       requests.push('FIXTURE GET audiobook/voices (unavailable runtime)');
       await route.fulfill({ json: unavailableAudiobook });

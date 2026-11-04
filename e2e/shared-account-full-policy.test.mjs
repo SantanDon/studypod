@@ -28,6 +28,31 @@ test('source upload state updates stay inside the newly captured notebook', () =
   assert.equal(p.decide(own, 'PATCH').allowed, false);
 });
 
+test('local chat context and turns are writable only for the newly captured notebook', () => {
+  const p = createSharedFullPolicy(origin);
+  const context = origin + '/api/notebooks/new-notebook/local-chat/context';
+  const turn = origin + '/api/notebooks/new-notebook/local-chat/turn';
+  assert.equal(p.decide(context, 'POST').allowed, false);
+  p.verifyIdentity();
+  assert.equal(p.decide(context, 'POST').allowed, false);
+  assert.equal(p.decide(origin + '/api/notebooks', 'POST').captureCreated, true);
+  p.registerCreated('new-notebook');
+  assert.equal(p.decide(context, 'POST').allowed, true);
+  assert.equal(p.decide(turn, 'POST').allowed, true);
+  for (const [path, method] of [
+    ['/api/notebooks/existing/local-chat/context', 'POST'],
+    ['/api/notebooks/existing/local-chat/turn', 'POST'],
+    ['/api/notebooks/new-notebook/local-chat', 'POST'],
+    ['/api/notebooks/new-notebook/local-chat/context/extra', 'POST'],
+    ['/api/notebooks/new-notebook/local-chat/turn/extra', 'POST'],
+    ['/api/notebooks/new-notebook/local-chat/context?notebookId=existing', 'POST'],
+    ['/api/notebooks/new-notebook/local-chat/turn?notebookId=existing', 'POST'],
+    ['/api/notebooks/new-notebook/local-chat/context', 'PUT'],
+    ['/api/notebooks/new-notebook/local-chat/turn', 'DELETE'],
+  ]) assert.equal(p.decide(origin + path, method).allowed, false);
+  assert.equal(p.decide('https://elsewhere.test/api/notebooks/new-notebook/local-chat/context', 'POST').allowed, false);
+});
+
 const pdfPath = origin + '/api/pdf/process-pdf';
 const pdfBytes = Buffer.from('%PDF-1.7\nSynthetic Cedar QA fixture\n%%EOF');
 function capturedPolicy() {

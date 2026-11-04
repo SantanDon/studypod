@@ -25,8 +25,8 @@ Object.assign(env, {
   TOKENLLM7_ENABLED: 'false', OVHCLOUD_ENABLED: 'false', OLLAMA_BASE_URL: '',
   VITE_API_URL: '/api', STUDYPOD_AUTH_BASE_URL: 'http://127.0.0.1:4178',
   STUDYPOD_AUTH_BUILD_DIR: resolve(directory, 'dist'),
-  STUDYPOD_AUTH_MUTATIONS_ALLOWED: 'dedicated-test-data', STUDYPOD_AUTH_SIGNUP: '1',
-  STUDYPOD_AUTH_TERMS_ACCEPTED: '1', STUDYPOD_AUTH_EMAIL: credentials.email,
+  STUDYPOD_AUTH_MUTATIONS_ALLOWED: 'dedicated-test-data', STUDYPOD_AUTH_SIGNUP: '0',
+  STUDYPOD_AUTH_EMAIL: credentials.email,
   STUDYPOD_AUTH_PASSWORD: credentials.password,
   STUDYPOD_AUTH_SECOND_EMAIL: `qa-${randomBytes(8).toString('hex')}@studypod.invalid`,
   STUDYPOD_AUTH_SECOND_PASSWORD: `QA-${randomBytes(24).toString('hex')}`,
@@ -58,6 +58,10 @@ async function ready(url, child) {
 }
 try {
   await free(4018); await free(4178);
+  // Prepare the throwaway local database with normal bcrypt credentials. The
+  // browser gate exercises sign-in and ownership; it must never accept terms.
+  if (!env.TURSO_DATABASE_URL.startsWith('file:') || env.TURSO_AUTH_TOKEN !== '') throw new Error('Refusing fixture seed without isolated file database');
+  if (await finished(await launch(['e2e/seed-auth-fixtures.mjs'], 'seed')) !== 0) throw new Error('Fixture seed failed');
   // Never replace assets being served to an already-open development notebook.
   if (await finished(await launch(['node_modules/vite/bin/vite.js', 'build', '--outDir', env.STUDYPOD_AUTH_BUILD_DIR], 'build')) !== 0) throw new Error('Build failed');
   const backend = await launch(['backend/src/server.js'], 'backend');
@@ -66,7 +70,7 @@ try {
   await ready('http://127.0.0.1:4178', preview);
   for (const mobile of [false, true]) {
     env.STUDYPOD_AUTH_MOBILE = mobile ? '1' : '0';
-    env.STUDYPOD_AUTH_SIGNUP = mobile ? '0' : '1';
+    env.STUDYPOD_AUTH_SIGNUP = '0';
     env.STUDYPOD_AUTH_ARTIFACTS = resolve(directory, mobile ? 'mobile' : 'desktop');
     const code = await finished(await launch(['node_modules/@playwright/test/cli.js', 'test', '--config', 'e2e/auth.config.ts'], mobile ? 'mobile' : 'desktop'));
     if (code !== 0) throw new Error(`${mobile ? 'Mobile' : 'Desktop'} authenticated gate failed`);
