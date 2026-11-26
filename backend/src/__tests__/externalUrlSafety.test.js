@@ -31,6 +31,13 @@ describe("external URL safety", () => {
       "198.51.100.4",
       "203.0.113.9",
       "224.0.0.1",
+      "192.88.99.1",
+      "64:ff9b::1",
+      "100::1",
+      "2001::1",
+      "2001:0db8:0:0:0:0:0:1",
+      "2002::1",
+      "3fff::1",
       "::1",
       "fc00::1",
       "fe80::1",
@@ -41,6 +48,7 @@ describe("external URL safety", () => {
     }
 
     expect(isPublicIpAddress("8.8.8.8")).toBe(true);
+    expect(isPublicIpAddress("192.0.3.1")).toBe(true);
     expect(isPublicIpAddress("1.1.1.1")).toBe(true);
     expect(isPublicIpAddress("2606:4700:4700::1111")).toBe(true);
   });

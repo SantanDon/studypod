@@ -334,7 +334,7 @@ export async function generateFlashcards(
     }
   }
 
-  const flashcards: Flashcard[] = generatedCards.map((card) => ({
+  const flashcards = generatedCards.map((card): Flashcard => ({
     id: generateId(),
     front: card.front,
     back: card.back,
