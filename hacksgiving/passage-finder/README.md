@@ -9,3 +9,7 @@ Built for Hacksgiving 2026 as a new agent in the existing StudyPod project. Its 
 Grant the Sprite access to a GitHub connector named `github` in the Fly dashboard. From this directory run `node server.mjs` with Node 22 or newer. Open the Sprite URL on port 8080. For persistent hosting, create a Sprite service using the absolute path to server.mjs as the argument to node.
 
 The agent reads one fixed public file. Its default requests go through the Sprites gateway. For a local preview using the public GitHub API, run `node server.mjs --public-preview` and open http://localhost:8080. That preview tests passage retrieval separately from the hosted connector.
+
+## Check the answers locally
+
+From this folder, run `node --test match.test.mjs server.test.mjs` with Node 22 or newer. The tests use the included guide and a simulated connector response. They check weekday questions, unrelated questions, and whether the HTTP answer quotes the exact line and revision in its link. To check the real connector, open the hosted Sprite, ask the Friday question, and compare the displayed quote with the highlighted line on GitHub.

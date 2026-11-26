@@ -1,5 +1,6 @@
 import { createServer } from 'node:http';
 import { readFile } from 'node:fs/promises';
+import { pathToFileURL } from 'node:url';
 
 import { matchPassage } from './match.mjs';
 
@@ -42,7 +43,7 @@ async function answer(question) {
   return matchPassage(question, cached.passages);
 }
 
-createServer(async (req, res) => {
+export const server = createServer(async (req, res) => {
   res.setHeader('X-Content-Type-Options', 'nosniff');
   res.setHeader('Referrer-Policy', 'no-referrer');
   res.setHeader('Content-Security-Policy', "default-src 'none'; style-src 'unsafe-inline'; script-src 'sha256-Xa1cX0zLhXBUr86GiK30Wsa1CsUcU5kZSupaFi1WMHc='; connect-src 'self'; base-uri 'none'; frame-ancestors 'none'; form-action 'self'");
@@ -58,4 +59,8 @@ createServer(async (req, res) => {
     const passage = await answer(question);
     res.writeHead(200, { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' }).end(JSON.stringify({ passage }));
   } catch { res.writeHead(503).end(); }
-}).listen(Number(process.env.PORT || 8080), process.env.HOST || '0.0.0.0');
+});
+
+if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
+  server.listen(Number(process.env.PORT || 8080), process.env.HOST || '0.0.0.0');
+}
