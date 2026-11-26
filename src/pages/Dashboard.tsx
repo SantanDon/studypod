@@ -152,7 +152,7 @@ const Dashboard = () => {
                   </div>
                 )}
               </section>
-              <GoalsPulse />
+              <GoalsPulse notebooks={notebooks} />
               {FEATURE_FLAGS.SIGNAL_QUEUE_VISIBLE && <WhatsHappening />}
             </div>
             </div>

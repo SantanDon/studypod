@@ -11,7 +11,7 @@ For a connector that needs to reconnect after a restart, **Generate New API Key*
 ## Connecting an Agent via Pairing
 
 1. Open **Profile Menu** -> **Agent Pairing**.
-2. Click **Generate Pairing Code**.
+2. Click **Generate Pairing Code**. Use the code within five minutes. Pairing consumes the code and starts a session lasting up to one hour.
 3. From the StudyPod repository, run the command below. It connects to the local server by default. For a hosted workspace, first set `STUDYPOD_API` to that workspace's HTTPS URL followed by `/api`.
    ```bash
    node agent_demo_kit/pair_and_test.js <6-DIGIT-PIN>

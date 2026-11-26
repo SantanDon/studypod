@@ -31,7 +31,7 @@ import { DeveloperSettings } from '@/components/settings/DeveloperSettings';
 const DIALOG_DESCRIPTIONS = {
   settings: "Manage your local model connection, account preferences, and storage usage",
   dataManagement: "Export, import, or clear your local data including notebooks, sources, and chat history",
-  about: "View information about the application including version and credits"
+  about: "StudyPod turns your sources into answers you can check and audio you can revisit."
 };
 
 export function ProfileMenu() {
@@ -418,24 +418,17 @@ export function ProfileMenu() {
       <Dialog open={showAbout} onOpenChange={setShowAbout}>
         <DialogContent>
           <DialogHeader>
-            <DialogTitle>About StudyPodLM</DialogTitle>
+            <DialogTitle>About StudyPod</DialogTitle>
             <DialogDescription>
               {DIALOG_DESCRIPTIONS.about}
             </DialogDescription>
           </DialogHeader>
           <div className="space-y-4 py-4">
             <div>
-              <h4 className="font-semibold mb-2">Version</h4>
-              <p className="text-sm text-muted-foreground">1.0.0 (Local Mode)</p>
-            </div>
-            <div>
-              <h4 className="font-semibold mb-2">Features</h4>
-              <ul className="text-sm text-muted-foreground space-y-1">
-                <li>AI-powered study assistant</li>
-                <li>Podcast-style audio generation</li>
-                <li>Document processing and analysis</li>
-                <li>Smart note-taking with AI assistance</li>
-                <li>Local, encrypted sync, and agent collaboration modes</li>
+              <ul className="list-disc space-y-2 pl-5 text-sm text-foreground">
+                <li>Ask a question in your notebook, then open a citation to read the passage.</li>
+                <li>Open Studio to turn source material into a podcast or listen to a chapter.</li>
+                <li>Save useful answers to Notes and revisit them in the same notebook.</li>
               </ul>
               <div className="mt-3 flex gap-3 text-xs">
                 <a href="/privacy" className="text-primary underline">Privacy</a>

@@ -336,6 +336,7 @@ const StudioSidebar = ({
               <StudioActionCard
                 icon={AudiobookGlyph}
                 title="Audiobook"
+                actionLabel="Read chapters"
                 description="Listen to a source by chapter, or import a full book locally."
                 onClick={() => setActiveWorkspace('audiobook')}
                 testId="audiobook-studio-card"

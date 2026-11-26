@@ -293,6 +293,11 @@
   color: hsl(var(--primary-foreground));
 }
 
+.dark .studypod-audio-studio .studypod-create .podcast-generate-btn {
+  background: #245cc4;
+  color: #fff;
+}
+
 .studypod-audio-studio .studypod-create .player-footer {
   margin-top: 0;
 }

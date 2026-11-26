@@ -975,7 +975,7 @@ export const ApiService = {
   async fetchResearchGoals(
     notebookId: string,
     token: string,
-    opts: { includeArchived?: boolean; parentGoalId?: string | null } = {},
+    opts: { includeArchived?: boolean; parentGoalId?: string | null; signal?: AbortSignal } = {},
   ) {
     const params = new URLSearchParams();
     if (opts.includeArchived) params.set("includeArchived", "true");
@@ -985,6 +985,7 @@ export const ApiService = {
     const response = await fetch(url, {
       headers: { Authorization: `Bearer ${token}` },
       credentials: "include",
+      signal: opts.signal,
     });
     return handleResponse(response);
   },

@@ -102,6 +102,7 @@ export function useSavedAudiobookRender({
 }
 
 const pendingFullBookStarts = new Set<string>();
+const fullBookGuideUrl = "https://github.com/SantanDon/studypod/blob/HEAD/docs/audiobook-studio-local.md";
 
 interface AudiobookViewProps {
   notebookId: string;
@@ -1289,14 +1290,18 @@ export default function AudiobookView({
             </div>
           )}
 
-          {user?.id && runtimeCapabilities?.localBeta && !audiobookRuntimeAvailable && (
-            <HostedChapterReader key={user.id + notebookId} notebookId={notebookId} sources={sources} token={session?.access_token} />
-          )}
-
           {runtimeCapabilities === null ? (
             <Card className="p-6 text-center shadow-none" role="status">
               Checking audiobook availability…
             </Card>
+          ) : !audiobookRuntimeAvailable && runtimeCapabilities.localBeta && user?.id ? (
+            <>
+              <a href={fullBookGuideUrl} target="_blank" rel="noopener noreferrer"
+                className="inline-flex min-h-11 items-center rounded-md px-1 text-sm font-semibold text-primary underline underline-offset-4 focus-visible:outline focus-visible:outline-2 focus-visible:outline-ring">
+                How to import a whole book on your computer
+              </a>
+              <HostedChapterReader key={user.id + notebookId} notebookId={notebookId} sources={sources} token={session?.access_token} />
+            </>
           ) : !audiobookRuntimeAvailable ? (
             <Card
               className="border-border bg-card p-5 text-center shadow-none sm:p-6"
@@ -1305,14 +1310,13 @@ export default function AudiobookView({
               <StudyGlyph kind="audiobook" className="mx-auto h-20 w-20" />
               <h3 className="mt-4 text-base font-semibold">
                 {runtimeCapabilities.localBeta
-                  ? user?.id ? "Import a whole book" : "Listen to a notebook source"
+                  ? "Listen to a notebook source"
                   : "Audiobook connection unavailable"}
               </h3>
               {runtimeCapabilities.localBeta ? (
                 <div className="mx-auto mt-2 max-w-md space-y-3 text-sm leading-6">
                   <p className="text-muted-foreground">
-                    {user?.id ? "Use StudyPod on your computer to import a full book and download its narration."
-                      : "Sign in to create and save chapter recordings from a notebook source."}
+                    Sign in to create and save chapter recordings from a notebook source.
                   </p>
                   {!user?.id && (
                     <Button asChild>
@@ -1321,7 +1325,7 @@ export default function AudiobookView({
                   )}
                   <div><a
                     className="inline-flex min-h-11 items-center rounded-md px-2 font-semibold text-primary underline underline-offset-4 focus-visible:outline focus-visible:outline-2 focus-visible:outline-ring"
-                    href="https://github.com/SantanDon/studypod/blob/HEAD/docs/audiobook-studio-local.md"
+                    href={fullBookGuideUrl}
                     target="_blank"
                     rel="noopener noreferrer"
                   >

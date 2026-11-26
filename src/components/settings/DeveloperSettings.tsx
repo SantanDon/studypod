@@ -74,19 +74,19 @@ export function DeveloperSettings() {
   const [generatedKey, setGeneratedKey] = useState<string | null>(null);
   const [genKeyLoading, setGenKeyLoading] = useState(false);
 
-  const [copied, setCopied] = useState(false);
+  const [copied, setCopied] = useState<string | null>(null);
 
   const copyText = async (text: string, label: string) => {
     try {
       await navigator.clipboard.writeText(text);
-      setCopied(true);
+      setCopied(label);
       toast({
         title: `${label} copied`,
         description: label === 'Pairing Code'
           ? 'Ask your connected agent to pair with StudyPod using this code.'
           : 'Save the key in your private connector settings.',
       });
-      setTimeout(() => setCopied(false), 2000);
+      setTimeout(() => setCopied(current => current === label ? null : current), 2000);
     } catch {
       toast({ title: 'Copy unavailable', description: 'Select the value and copy it manually.' });
     }
@@ -259,7 +259,7 @@ export function DeveloperSettings() {
             Agent Pairing
           </CardTitle>
           <CardDescription>
-            Generate a 6-digit code for your AI agent to connect to your account.
+            Your agent has five minutes to use this code. Once paired, it can connect for up to one hour.
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-4">
@@ -282,18 +282,18 @@ export function DeveloperSettings() {
           )}
           {pairingCode && (
             <div className="p-4 bg-muted rounded-lg text-center space-y-2">
-              <Label className="text-sm font-medium">Agent PIN Code</Label>
-              <div className="text-3xl font-bold tracking-[0.3em] font-mono text-primary">
+              <Label htmlFor="agent-pairing-code" className="text-sm font-medium">Agent pairing code</Label>
+              <output id="agent-pairing-code" className="block text-3xl font-bold tracking-[0.3em] font-mono text-primary">
                 {pairingCode}
-              </div>
+              </output>
               <div className="flex justify-center gap-2">
                 <Button
                   variant="outline"
                   size="sm"
                   onClick={() => copyText(pairingCode, 'Pairing Code')}
                 >
-                  {copied ? <CheckCircle2 className="w-4 h-4 mr-1 text-green-500" /> : <Copy className="w-4 h-4 mr-1" />}
-                  Copy
+                  {copied === 'Pairing Code' ? <CheckCircle2 className="w-4 h-4 mr-1 text-green-500" /> : <Copy className="w-4 h-4 mr-1" />}
+                  {copied === 'Pairing Code' ? 'Code copied' : 'Copy pairing code'}
                 </Button>
               </div>
               <p className="text-sm text-muted-foreground">
@@ -347,7 +347,7 @@ export function DeveloperSettings() {
                   onClick={() => copyText(generatedKey, 'API Key')}
                   title="Copy API key"
                 >
-                  {copied
+                  {copied === 'API Key'
                     ? <CheckCircle2 className="w-4 h-4 text-green-500" />
                     : <Copy className="w-4 h-4" />
                   }

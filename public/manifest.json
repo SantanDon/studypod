@@ -1,19 +1,19 @@
 {
-  "name": "StudyPod LM",
+  "name": "StudyPod",
   "short_name": "StudyPod",
-  "description": "AI-Powered Personal Study Assistant",
+  "description": "Ask questions about your sources and listen to chapters and podcasts.",
   "start_url": "/",
   "display": "standalone",
   "background_color": "#ffffff",
   "theme_color": "#000000",
   "icons": [
     {
-      "src": "/logo.png",
+      "src": "/study-glyphs/app-192.png",
       "sizes": "192x192",
       "type": "image/png"
     },
     {
-      "src": "/logo.png",
+      "src": "/study-glyphs/app-512.png",
       "sizes": "512x512",
       "type": "image/png"
     }
