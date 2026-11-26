@@ -114,6 +114,17 @@ beforeEach(() => {
   });
 });
 
+describe("POST /api/auth/signup", () => {
+  it.each(["a@@example.com", "user@example.", "a".repeat(255) + "@example.com", {}])(
+    "rejects an invalid email before querying user records",
+    async (email) => {
+      const { status } = await request("/api/auth/signup", { body: { email, password: "test-passphrase" } });
+      expect(status).toBe(400);
+      expect(mockDb.getUserByEmail).not.toHaveBeenCalled();
+    },
+  );
+});
+
 describe("POST /api/auth/pair/complete", () => {
   it("returns 400 when no pairing code is supplied", async () => {
     const { status, body } = await request("/api/auth/pair/complete", {

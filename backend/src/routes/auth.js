@@ -269,7 +269,7 @@ router.post("/signup", authLimiter, async (req, res, next) => {
 
     // Support display name + passphrase registration without email (Local mode / Agent mode)
     const isLocalMode = !!(displayName && passphrase && !email);
-    let isVerified = isLocalMode ? 1 : 0; // Local/Agent modes bypass email verification
+    const isVerified = 1; // Preserve instant registration for local and email accounts.
 
     if (isLocalMode) {
       if (passphrase.length < 8) {
@@ -298,6 +298,14 @@ router.post("/signup", authLimiter, async (req, res, next) => {
         );
       }
     }
+    if (!isLocalMode) {
+      const parts = typeof email === "string" && email.length <= 254 ? email.split("@") : [];
+      const [local, domain] = parts;
+      if (parts.length !== 2 || !local || !domain || /\s/.test(email) ||
+          !domain.includes(".") || domain.startsWith(".") || domain.endsWith(".")) {
+        throw new AppError(400, "INVALID_EMAIL", "Email address is invalid");
+      }
+    }
     // Check display-name and email uniqueness concurrently. These are remote
     // Turso reads in cloud mode, so serialising them doubles signup latency.
     const [existingName, existingUser] = await Promise.all([
@@ -316,15 +324,6 @@ router.post("/signup", authLimiter, async (req, res, next) => {
     }
     if (existingUser) {
       throw new AppError(400, "USER_EXISTS", "User already exists");
-    }
-
-    // Simple regex validation to replace problematic deep-email-validator
-    if (!isVerified && !isLocalMode) {
-      const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-      if (!emailRegex.test(finalEmail)) {
-        throw new AppError(400, "INVALID_EMAIL", "Email address is invalid");
-      }
-      isVerified = 1; // Instant automated verification
     }
 
     // Hash password

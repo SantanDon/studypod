@@ -129,10 +129,11 @@ describe("external URL safety", () => {
     await expect(
       fetchPublicUrl("https://example.com/start", {}, fetchImpl),
     ).resolves.toBe(finalResponse);
+    expect(fetchImpl.mock.calls[0][1].signal).toBe(fetchImpl.mock.calls[1][1].signal);
     expect(fetchImpl).toHaveBeenNthCalledWith(
       2,
       "https://example.com/next",
-      expect.objectContaining({ redirect: "manual" }),
+      expect.objectContaining({ redirect: "manual", signal: expect.any(AbortSignal), size: 8 * 1024 * 1024 }),
     );
   });
 });

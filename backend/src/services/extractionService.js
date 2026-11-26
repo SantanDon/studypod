@@ -15,10 +15,13 @@ const USER_AGENTS = [
 
 const REDIRECT_STATUSES = new Set([301, 302, 303, 307, 308]);
 const MAX_SAFE_REDIRECTS = 4;
+const MAX_SOURCE_BYTES = 8 * 1024 * 1024;
 
 class ExternalDestinationError extends Error {}
 
-export async function fetchPublicUrl(url, options, fetchImpl = fetch) {
+export async function fetchPublicUrl(url, { headers, timeout = 15000 } = {}, fetchImpl = fetch) {
+  // One deadline covers the full redirect chain and reading the decoded body.
+  const signal = AbortSignal.timeout(timeout);
   let currentUrl = url;
 
   for (let redirectCount = 0; redirectCount <= MAX_SAFE_REDIRECTS; redirectCount += 1) {
@@ -47,7 +50,7 @@ export async function fetchPublicUrl(url, options, fetchImpl = fetch) {
     } catch (cause) {
       throw new ExternalDestinationError(cause.message, { cause });
     }
-    const response = await fetchImpl(target.toString(), { ...options, agent, redirect: "manual" });
+    const response = await fetchImpl(target.toString(), { headers, agent, redirect: "manual", signal, size: MAX_SOURCE_BYTES });
     if (!REDIRECT_STATUSES.has(response.status)) return response;
 
     const location = response.headers.get("location");
