@@ -1,4 +1,4 @@
-import { studioFailureDiagnostic, syntheticQuizDiagnostics } from './shared-account-studio-diagnostics.mjs';
+import { studioFailureDiagnostic, studioListResponseDiagnostic, syntheticQuizDiagnostics } from './shared-account-studio-diagnostics.mjs';
 import { sanitizeSharedErrors } from './shared-account-diagnostics.mjs';
 import { test, expect, type Page, type BrowserContext } from '@playwright/test';
 import { randomUUID } from 'node:crypto';
@@ -26,14 +26,30 @@ interface StudioReceipt {
 }
 
 // eslint-disable-next-line no-empty-pattern
-test.afterEach(async ({}, testInfo) => { sanitizeSharedErrors(testInfo.errors); });
+test.afterEach(async ({}, testInfo) => {
+  const diagnostics = testInfo.errors.map(error => studioFailureDiagnostic(error, 'stage-action'));
+  const root = process.env.STUDYPOD_SHARED_ARTIFACTS;
+  if (root) writeFileSync(resolve(root, 'runner-error-categories.json'), JSON.stringify(diagnostics, null, 2));
+  sanitizeSharedErrors(testInfo.errors);
+});
 
 // Existing approved account only. Every mutation is restricted to this run's new notebook.
 // Real generation and saved state; no provider, auth, or persistence responses are mocked.
+async function captureMarketing(page: Page, root: string, name: string) {
+  if (process.env.STUDYPOD_MARKETING_SCREENSHOTS === '1') {
+    await page.screenshot({ path: resolve(root, name + '.png'), fullPage: false });
+  }
+}
+
 async function read(page: Page, path: string) {
   return page.evaluate(async path => {
     const response = await fetch(path);
-    return { status: response.status, body: response.ok ? await response.json() : null };
+    let body = null;
+    let jsonParsed = false;
+    if (response.ok) {
+      try { body = await response.json(); jsonParsed = true; } catch { /* Record shape, never parse error text. */ }
+    }
+    return { status: response.status, body, jsonParsed, contentType: response.headers.get('content-type'), finalPathname: new URL(response.url).pathname };
   }, path);
 }
 async function openTool(page: Page, name: RegExp) {
@@ -107,6 +123,10 @@ test('shared Studio: grounded quiz retake, flashcard review, concept map and fre
   const studio = () => '/api/notebooks/' + notebookId + '/studio';
   async function list<T>(page: Page, path: string, key: string): Promise<T[]> {
     const result = await read(page, path);
+    if (result.status !== 200 || !Array.isArray(result.body?.[key])) {
+      receipt.studioListMismatch = studioListResponseDiagnostic(result, key);
+      persist();
+    }
     expect(result.status).toBe(200);
     expect(Array.isArray(result.body?.[key])).toBe(true);
     return result.body[key];
@@ -169,7 +189,7 @@ test('shared Studio: grounded quiz retake, flashcard review, concept map and fre
     await page.getByLabel('Email Address').fill(process.env.STUDYPOD_SHARED_EMAIL!);
     await page.getByLabel('Password', { exact: true }).fill(process.env.STUDYPOD_SHARED_PASSWORD!);
     const signedIn = page.waitForResponse(response => new URL(response.url()).pathname === '/api/auth/signin' && response.request().method() === 'POST');
-    await page.getByRole('button', { name: 'Sign in', exact: true }).click();
+    await page.getByRole('button', { name: /^(Sign in|Login to Cloud)$/ }).click();
     expect((await signedIn).status()).toBe(200);
     await page.waitForURL(url => url.pathname === '/');
     const profile = await read(page, '/api/user/profile');
@@ -187,9 +207,14 @@ test('shared Studio: grounded quiz retake, flashcard review, concept map and fre
   try {
     const page = await fresh(); cleanupPage = page;
     await stage('owned-notebook-and-real-pasted-source', async () => {
-      const created = page.waitForResponse(response => new URL(response.url()).pathname === '/api/notebooks' && response.request().method() === 'POST');
-      await page.getByRole('button', { name: /^(Create notebook|\+ Create new)$/ }).first().click();
-      expect((await created).status()).toBe(201);
+      substep('notebook-create-click');
+      const [created] = await Promise.all([
+        page.waitForResponse(response => new URL(response.url()).pathname === '/api/notebooks' && response.request().method() === 'POST'),
+        page.getByRole('button', { name: /^(Create notebook|\+ Create new)$/ }).first().click(),
+      ]);
+      substep('notebook-create-response');
+      expect(created.status()).toBe(201);
+      substep('notebook-create-navigation');
       await page.waitForURL(/\/notebook\/[a-zA-Z0-9-]+/);
       notebookId = new URL(page.url()).pathname.split('/').pop()!;
       expect(policy.ids()).toEqual([notebookId]); receipt.notebookId = notebookId;
@@ -258,6 +283,13 @@ test('shared Studio: grounded quiz retake, flashcard review, concept map and fre
       await page.reload();
       receipt.checks.sourcePersisted = true;
     });
+    await stage('studio-list-contract-preflight', async () => {
+      for (const key of ['quizzes', 'attempts', 'decks', 'maps']) {
+        substep('studio-preflight-' + key);
+        expect(await list<unknown>(page, studio() + '/' + key, key)).toHaveLength(0);
+      }
+      receipt.checks.studioListContractPreflight = true;
+    });
     await stage('real-quiz-generation-and-independent-answer-audit', async () => {
       await openQuiz(page, substep);
       const settings = page.getByRole('heading', { name: 'Quiz Settings', exact: true }).locator('..').locator('..');
@@ -296,6 +328,7 @@ test('shared Studio: grounded quiz retake, flashcard review, concept map and fre
     await stage('quiz-answer-feedback-score-and-saved-attempt', async () => {
       await completeQuiz(page, quiz, firstAnswers);
       await verifyResults(page, quiz, firstAnswers, 67);
+      await captureMarketing(page, artifactRoot, 'quiz-feedback');
       attempts = await list<QuizHistory>(page, studio() + '/attempts', 'attempts');
       expect(attempts).toHaveLength(1); expect(attempts[0].score).toBe(67);
       expect(attempts[0].results?.map(result => result.selectedAnswer)).toEqual(firstAnswers);
@@ -308,6 +341,7 @@ test('shared Studio: grounded quiz retake, flashcard review, concept map and fre
       await page.locator('[aria-label="Saved quizzes"]').getByRole('button', { name: 'Retake ' + quiz.title, exact: true }).click();
       expect(await list<QuizHistory>(page, studio() + '/attempts', 'attempts')).toHaveLength(1);
       await completeQuiz(page, quiz, correctAnswers); await verifyResults(page, quiz, correctAnswers, 100);
+      await captureMarketing(page, artifactRoot, 'quiz-retake');
       attempts = await list<QuizHistory>(page, studio() + '/attempts', 'attempts');
       expect(attempts).toHaveLength(2); expect(new Set(attempts.map(attempt => attempt.id)).size).toBe(2);
       expect(attempts.map(attempt => attempt.score).sort((a, b) => a - b)).toEqual([67, 100]);
@@ -352,6 +386,7 @@ test('shared Studio: grounded quiz retake, flashcard review, concept map and fre
         await expect(rotation).toHaveCount(1);
         await expect.poll(() => rotation.evaluate(element => new DOMMatrix(getComputedStyle(element).transform).m11 < -0.98)).toBe(true);
         await expect(rotation.getByText(original.back, { exact: true })).toBeVisible();
+        if (index === 0) await captureMarketing(page, artifactRoot, 'flashcard-reveal');
         const acknowledged = page.waitForResponse(response => response.request().method() === 'PUT' && new URL(response.url()).pathname === studio() + '/decks/' + deck.id);
         await page.getByRole('button', { name: new RegExp('(?:^|\\s)' + label + '$') }).click();
         const response = await acknowledged; expect(response.status()).toBe(200);
@@ -376,6 +411,7 @@ test('shared Studio: grounded quiz retake, flashcard review, concept map and fre
       await openTool(page, /Concept Map/);
       await page.getByRole('button', { name: 'Generate map', exact: true }).click();
       mapSnapshot = await visibleMap(page);
+      await captureMarketing(page, artifactRoot, 'concept-map');
       const maps = await list<ConceptMap>(page, studio() + '/maps', 'maps'); expect(maps).toHaveLength(1);
       const result = await read(page, studio() + '/maps/' + maps[0].id); expect(result.status).toBe(200); savedMap = result.body.map;
       receipt.map = { id: maps[0].id, nodes: mapSnapshot.labels.length, independentlyAuditedRelationships: mapSnapshot.connections.length };

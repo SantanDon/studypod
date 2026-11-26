@@ -350,9 +350,11 @@ export async function generateTextToString(
       "Ollama generation ended before completion (token limit reached). Retry with a shorter request.",
     );
   }
-  return (
-    r.text || (typeof r.raw === "string" ? r.raw : JSON.stringify(r.raw || ""))
-  );
+  const text = r.text || (typeof r.raw === "string" ? r.raw : "");
+  if (!text.trim()) {
+    throw new Error("Ollama returned no answer text. Retry with a shorter request or a larger generation budget.");
+  }
+  return text;
 }
 
 /**

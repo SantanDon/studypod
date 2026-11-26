@@ -9,7 +9,34 @@ export interface DiscussionTurn {
 }
 export interface DiscussionSection { title: string; turns: DiscussionTurn[] }
 
-/** Only enum drift permits a bounded regeneration; evidence failures never do. */
+/** Native structured output prevents format drift; the parser still validates provenance. */
+export function discussionSectionSchema(solo: boolean, passages?: EvidencePassage[]): Record<string, unknown> {
+  // The model selects IDs; the parser supplies a canonical anchor. Copying quote
+  // metadata adds work but does not establish support, which is reviewed separately.
+  const evidenceShape = passages?.length ? {
+    type: 'string', enum: passages.map(passage => passage.id),
+  } : {
+    type: 'object', additionalProperties: false, required: ['passageId', 'quote'],
+    properties: {passageId: {type: 'string'}, quote: {type: 'string', minLength: 12, maxLength: 1200}},
+  };
+  return {
+    type: 'object', additionalProperties: false, required: ['title', 'turns'],
+    properties: {
+      title: {type: 'string', minLength: 1, maxLength: 120},
+      turns: {type: 'array', minItems: 3, maxItems: 10, items: {
+        type: 'object', additionalProperties: false, required: ['speaker', 'kind', 'text', 'evidence'],
+        properties: {
+          speaker: {type: 'string', enum: solo ? ['host1'] : ['host1', 'host2']},
+          kind: {type: 'string', enum: ['explanation', 'inference', 'question']},
+          text: {type: 'string', minLength: 1, maxLength: 4500},
+          evidence: {type: 'array', minItems: 1, maxItems: 4, items: evidenceShape},
+        },
+      }},
+    },
+  };
+}
+
+/** Invalid or missing required turn kinds permit one regeneration; evidence failures do not. */
 export class DiscussionKindError extends Error {}
 
 const normalize = (value: string) => value.normalize('NFC').replace(/\s+/g, ' ').trim();
@@ -80,7 +107,11 @@ export function parseDiscussionSection(response: string, passages: EvidencePassa
     if (seenText.has(normalizedText)) throw new Error('Deep discussion repeats a turn. No audio was produced.');
     seenText.add(normalizedText);
     const seenSpans = new Set<string>();
-    const evidence: DiscussionEvidence[] = turn.evidence.map(ref => {
+    const evidence: DiscussionEvidence[] = turn.evidence.flatMap(rawRef => {
+      // Keep existing saved quote-based plans readable, but validate both formats.
+      const ref = typeof rawRef === 'string' && byId.has(rawRef)
+        ? {passageId: rawRef, quote: normalize(byId.get(rawRef)!.text).slice(0, 120)}
+        : rawRef;
       if (!record(ref) || !exactKeys(ref, ['passageId', 'quote']) || typeof ref.passageId !== 'string' ||
           typeof ref.quote !== 'string' || normalize(ref.quote).length < 12 || ref.quote.length > 1200 ||
           !byId.has(ref.passageId)) {
@@ -90,16 +121,21 @@ export function parseDiscussionSection(response: string, passages: EvidencePassa
       const quote = normalizeQuoteTypography(normalize(ref.quote));
       const start = normalizeQuoteTypography(source).indexOf(quote);
       const spanKey = `${ref.passageId}\u0000${quote}`;
-      if (start < 0 || seenSpans.has(spanKey)) {
+      if (start < 0) {
         throw new Error('Deep discussion cites an unknown passage or a quote absent from its source. No audio was produced.');
       }
+      // Repeating valid provenance adds no support. Canonicalize metadata only;
+      // every spoken claim still goes through the independent semantic review.
+      if (seenSpans.has(spanKey)) return [];
       seenSpans.add(spanKey);
-      return {passageId: ref.passageId, quote: source.slice(start, start + quote.length)};
+      return [{passageId: ref.passageId, quote: source.slice(start, start + quote.length)}];
     });
     return {speaker: turn.speaker as DiscussionTurn['speaker'], kind: turn.kind as DiscussionTurn['kind'], text: turn.text.trim(), evidence};
   });
-  if (turns.filter(turn => turn.kind === 'explanation').length < 2 || !turns.some(turn => turn.kind === 'question') ||
-      (!solo && !turns.some(turn => turn.speaker === 'host2')) || turns.reduce((sum, turn) => sum + words(turn.text), 0) > 1100) {
+  if (turns.filter(turn => turn.kind === 'explanation').length < 2 || !turns.some(turn => turn.kind === 'question')) {
+    throw new DiscussionKindError('Deep discussion needs at least two turns labelled explanation and one turn labelled question. Label a retrieval question as question, not explanation. No audio was produced.');
+  }
+  if ((!solo && !turns.some(turn => turn.speaker === 'host2')) || turns.reduce((sum, turn) => sum + words(turn.text), 0) > 1100) {
     throw new Error('Deep discussion must explain evidence and include a grounded learning question within its word budget.');
   }
   // Leave at least 2k characters for verifier instructions within its 20k prompt
@@ -117,30 +153,58 @@ export class IncompleteDiscussionVerdictError extends Error {
 }
 
 export class DiscussionSupportError extends Error {
-  constructor(public readonly rejectedTurnIndexes: number[]) {
+  constructor(public readonly rejectedTurnIndexes: number[], public readonly missingPoints: string[] = [], public readonly supportFeedback: string[] = []) {
     super('Deep discussion includes unsupported or unverified claims. No audio was produced.');
   }
 }
 
+export class DiscussionCoverageError extends Error {
+  constructor(public readonly missingPoints: string[]) {
+    super('Deep discussion omits substantive source points. No audio was produced.');
+  }
+}
+
 /** Validate the complete verdict before exposing semantic rejections for repair. */
-export function verifyDiscussionSection(response: string, turnCount: number): void {
+export function verifyDiscussionSection(response: string, turnCount: number, passageIds?: string[]): void {
   const value = parseJson(response);
-  if (!record(value) || !exactKeys(value, ['verdicts']) || !Array.isArray(value.verdicts) || value.verdicts.length > turnCount) {
+  if (!record(value) || !exactKeys(value, passageIds ? ['verdicts', 'coverage'] : ['verdicts']) || !Array.isArray(value.verdicts) || value.verdicts.length > turnCount) {
     throw new Error('Deep discussion could not be verified. No audio was produced.');
   }
   const seen = new Set<number>();
   const rejected: number[] = [];
+  const supportFeedback: string[] = [];
   for (const verdict of value.verdicts) {
-    if (!record(verdict) || !exactKeys(verdict, ['turnIndex', 'supported']) ||
+    if (!record(verdict) || !(exactKeys(verdict, ['turnIndex', 'supported']) || exactKeys(verdict, ['turnIndex', 'supported', 'reason'])) ||
+        ('reason' in verdict && (typeof verdict.reason !== 'string' || !verdict.reason.trim() || verdict.reason.length > 1000)) ||
         !Number.isInteger(verdict.turnIndex) || Number(verdict.turnIndex) < 0 || Number(verdict.turnIndex) >= turnCount ||
         seen.has(Number(verdict.turnIndex)) || typeof verdict.supported !== 'boolean') {
       throw new Error('Deep discussion includes unsupported or unverified claims. No audio was produced.');
     }
     seen.add(Number(verdict.turnIndex));
-    if (!verdict.supported) rejected.push(Number(verdict.turnIndex));
+    if (!verdict.supported) {
+      rejected.push(Number(verdict.turnIndex));
+      if (typeof verdict.reason === 'string') supportFeedback.push(`Turn ${verdict.turnIndex}: ${verdict.reason}`);
+    }
   }
   if (value.verdicts.length < turnCount) throw new IncompleteDiscussionVerdictError();
-  if (rejected.length) throw new DiscussionSupportError(rejected);
+  const missing: string[] = [];
+  if (passageIds) {
+    if (!Array.isArray(value.coverage) || value.coverage.length !== passageIds.length) throw new IncompleteDiscussionVerdictError();
+    const reviewed = new Set<string>();
+    for (const item of value.coverage) {
+      if (!record(item) || !exactKeys(item, ['passageId', 'missingPoints']) || typeof item.passageId !== 'string' ||
+          !passageIds.includes(item.passageId) || reviewed.has(item.passageId) || !Array.isArray(item.missingPoints) ||
+          // Keep bounded, actionable rejections even when the reviewer exceeds the
+          // prompt's 500-character brevity target. They must reach repair, not pass.
+          item.missingPoints.length > 8 || item.missingPoints.some(point => typeof point !== 'string' || !point.trim() || point.length > 1000)) {
+        throw new IncompleteDiscussionVerdictError();
+      }
+      reviewed.add(item.passageId);
+      missing.push(...item.missingPoints.map(point => `${item.passageId}: ${point}`));
+    }
+  }
+  if (rejected.length) throw new DiscussionSupportError(rejected, missing, supportFeedback);
+  if (missing.length) throw new DiscussionCoverageError(missing);
 }
 
 /** Keep complete passages and source order; every request fits the local prompt budget. */
@@ -152,10 +216,9 @@ export function batchDiscussionEvidence(passages: EvidencePassage[]): EvidencePa
     const length = JSON.stringify(passage).length;
     if (length > 7600) throw new Error('A source passage exceeds the Deep discussion request budget. Select a shorter section.');
     if (batch.length && size + length > 7600) { batches.push(batch); batch = []; size = 0; }
-    if (batches.length >= 4) break;
     batch.push(passage); size += length;
   }
-  if (batch.length && batches.length < 4) batches.push(batch);
+  if (batch.length) batches.push(batch);
   if (!batches.length) throw new Error('No usable passages are available for a Deep discussion.');
   return batches;
 }
@@ -175,7 +238,10 @@ export function compileDiscussionSections(sections: DiscussionSection[], passage
   }
   const used = passages.filter(passage => ids.has(passage.id));
   const count = segments.reduce((sum, segment) => sum + words(segment.text), 0);
-  if (!segments.length || count > 4500) throw new Error('Deep discussion exceeds its episode budget. No audio was produced.');
+  // A ceiling, not a word target: substantial chapters need room for their arguments.
+  const sourceWords = passages.reduce((sum, passage) => sum + words(passage.text), 0);
+  const episodeBudget = Math.max(4500, Math.min(9000, Math.ceil(sourceWords * 0.6)));
+  if (!segments.length || count > episodeBudget) throw new Error('Deep discussion exceeds its episode budget. No audio was produced.');
   return {
     title: sections[0].title, segments, words: count,
     evidencePassageIds: used.map(passage => passage.id),

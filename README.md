@@ -10,7 +10,7 @@ StudyPodLM is a next-generation collaborative study environment where humans and
 [![GitHub Stars](https://img.shields.io/github/stars/SantanDon/studypod?style=for-the-badge&logo=github&color=gold)](https://github.com/SantanDon/studypod)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg?style=for-the-badge)](LICENSE)
 
-[Explore Deployed App](https://studypod-lm.vercel.app/) • [Read Developer Onboarding](AGENTS.md) • [Report Issue](https://github.com/SantanDon/studypod/issues)
+[Explore Deployed App](https://studypod-lm.vercel.app/) • [Set Up Local Development](#1-initialize-the-workspace) • [Report Issue](https://github.com/SantanDon/studypod/issues)
 
 </div>
 
@@ -74,27 +74,59 @@ studylm/
 
 ### 1. Initialize the Workspace
 
+Install Node.js 22 and npm, then clone the repository.
+
 ```bash
-# Clone the repository
 git clone https://github.com/SantanDon/studypod.git
 cd studypod
-
-# Install dependencies and bootstrap the local environment
 npm install
+```
 
-# Run the concurrent development server (Vite + Express Backend)
+The install hook installs the Express backend dependencies. If CI mode is enabled, run `npm --prefix backend ci` explicitly.
+
+Create an untracked `.env` in the repository root with the following local database and proxy settings.
+
+```dotenv
+TURSO_DATABASE_URL=file:studypod-local.db
+VITE_API_PORT=4000
+PORT=4000
+```
+
+Generate a local signing secret using the command below and add its output as `JWT_SECRET` in `.env`. Keep that file local. The file-backed database can run without a Turso account.
+
+```bash
+node -e "console.log(require('node:crypto').randomBytes(32).toString('hex'))"
+```
+
+After saving the secret in `.env`, start the frontend and backend.
+
+```bash
 npm run dev
 ```
+
+Open [the local app](http://127.0.0.1:5173). Sign in with a local account before pairing an agent.
+
+### Verify a change
+
+```bash
+npm run typecheck
+npm run lint
+npm test -- --run
+npm run test:gate:unit
+npm run build
+```
+
+For browser changes, install Chromium with `npx playwright install chromium`, then run `npm run test:e2e` and `npm run test:auth:local` as applicable. The [quality workflow](.github/workflows/quality.yml) lists the full CI checks. Include reproduction steps and verification results when opening an issue or pull request.
 
 ### 2. Connect Your First CLI Agent
 
 To plug in a custom command-line assistant (e.g., Qwen, Gemini, Llama):
 1. Navigate to **Profile** ➔ **Agent Pairing** inside the web app and click **Generate Pairing Code**.
-2. Exchange the 6-digit code for a persistent agent API key:
+2. Use the 6-digit code to verify pairing:
    ```bash
    node agent_demo_kit/pair_and_test.js <YOUR-6-DIGIT-PIN>
    ```
-3. The script will pair with the local host, list notebooks, and post a sample agent note to confirm connection.
+3. The script creates a demo key that expires after one hour, verifies identity, and reports the number of accessible notebooks. It keeps the key in memory and makes no notebook changes by default. To create a sample note in a specific test notebook, add `--write-note <NOTEBOOK-ID>`.
 
 ---
 

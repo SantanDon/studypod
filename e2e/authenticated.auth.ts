@@ -24,15 +24,10 @@ test('real account: failed login, notebook/source persistence, logout, fresh log
     const context = await browser.newContext({ baseURL, viewport: testInfo.project.use.viewport, isMobile: testInfo.project.use.isMobile, hasTouch: testInfo.project.use.hasTouch, serviceWorkers: 'block' });
     contexts.push(context);
     // Only paid/provider work is blocked. Auth, notebooks and sources use the real backend.
-    await context.route('**/*', async route => {
-      const url = new URL(route.request().url());
-      if (url.origin === target.origin && url.pathname === '/api/ai/generate') {
-        generationRequests++;
-        await route.abort('blockedbyclient');
-        blockedGeneration++;
-        return;
-      }
-      await route.continue();
+    await context.route(url => url.origin === target.origin && url.pathname === '/api/ai/generate', async route => {
+      generationRequests++;
+      await route.abort('blockedbyclient');
+      blockedGeneration++;
     });
     const page = await context.newPage();
     page.on('pageerror', () => { browserErrors++; });
@@ -64,7 +59,7 @@ test('real account: failed login, notebook/source persistence, logout, fresh log
       await expect(page.getByRole('button', { name: 'Create notebook', exact: true })).toHaveCount(0);
     } else {
       await page.waitForURL(url => url.pathname === '/');
-      await expect(page.getByRole('heading', { name: 'Your research workspace', exact: true })).toBeVisible();
+      await expect(page.getByRole('heading', { level: 1, name: /^(Your research workspace|Start your first notebook)$/ })).toBeVisible();
     }
   };
   try {

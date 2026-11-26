@@ -1,5 +1,6 @@
 import { useState, useCallback, useEffect } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import { getModelForTask } from "@/config/ollamaModels";
 import { getOllamaBaseUrl, isOllamaEnabled, setRuntimeOllamaEnabled } from "@/config/ollamaConfig";
 import {
   checkOllamaHealth,
@@ -211,9 +212,9 @@ export function useOllamaModels() {
       // Ignore errors when loading stored defaults
     }
     return {
-      chat: "llama3.2:1b",
-      embedding: "nomic-embed-text",
-      code: "phi:2.7b",
+      chat: getModelForTask("chat"),
+      embedding: getModelForTask("embeddings"),
+      code: getModelForTask("code"),
     };
   });
 

@@ -31,6 +31,14 @@ describe("generateTextToString completion integrity", () => {
   });
 
   it.each([
+    { response: "", thinking: "private reasoning", done: true },
+    { response: "   ", done: true },
+  ])("rejects an empty final answer without exposing raw metadata", async (body) => {
+    mockGeneration(body);
+    await expect(generateTextToString(options)).rejects.toThrow("no answer text");
+  });
+
+  it.each([
     { done: true, done_reason: "length" },
     { done: false, done_reason: "stop" },
   ])("rejects explicitly incomplete response metadata: %o", async (completion) => {

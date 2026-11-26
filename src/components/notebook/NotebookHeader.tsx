@@ -145,6 +145,7 @@ const NotebookHeader = ({ title, notebookId }: NotebookHeaderProps) => {
             <Button
               variant="outline"
               size="sm"
+              aria-label="Export notebook"
               onClick={() => setIsExportOpen(true)}
             >
               <Download className="h-4 w-4 sm:mr-2" />

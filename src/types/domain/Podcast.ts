@@ -13,7 +13,7 @@ export const PodcastSchema = z.object({
   audio_blob_id: z.string().describe('IndexedDB key for audio blob'),
   script: z.string().optional().describe('Podcast script'),
   speakers: z.array(z.string()).optional().describe('Speaker names'),
-  metadata: z.record(z.unknown()).optional().describe('Additional metadata'),
+  metadata: z.record(z.string(), z.unknown()).optional().describe('Additional metadata'),
 });
 
 export type Podcast = z.infer<typeof PodcastSchema>;

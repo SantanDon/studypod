@@ -62,7 +62,7 @@ const NotebookCard = ({
       className="rounded-lg border border-border bg-card p-4 hover:border-muted-foreground/30 hover:shadow-sm transition-all cursor-pointer relative h-40 flex flex-col"
     >
       {!isSelectionMode && (
-        <div className="absolute top-3 right-3 flex items-center space-x-1" data-delete-action="true">
+        <div className="absolute z-20 top-3 right-3 flex items-center space-x-1" data-delete-action="true">
           {notebook.joinCode && (
             <button onClick={handleShareClick} className="p-1 hover:bg-black/5 dark:hover:bg-white/10 rounded text-gray-400 hover:text-foreground transition-colors" title="Copy share join code" data-delete-action="true">
               <Share2 className="h-4 w-4" />

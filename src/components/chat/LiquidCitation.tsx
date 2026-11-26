@@ -68,13 +68,13 @@ const LiquidCitation = ({ citation, index, triggerType: _triggerType = 'click', 
 
   const handleToggle = (e: React.MouseEvent) => {
     e.stopPropagation();
-    onCitationClick?.(citation);
+    if (!isOpen) onCitationClick?.(citation);
     setIsOpen((open) => !open);
   };
 
   const content = (citation.prefetched_content || citation.excerpt || "").trim();
   const lines = content ? content.split('\n') : ["No content available."];
-  const startLine = typeof citation.chunk_lines_from === 'number' ? citation.chunk_lines_from : 1;
+  const startLine = typeof citation.chunk_lines_from === 'number' ? citation.chunk_lines_from : undefined;
 
   return (
     <span className="inline select-none">
@@ -86,10 +86,10 @@ const LiquidCitation = ({ citation, index, triggerType: _triggerType = 'click', 
         whileHover={{ scale: 1.05 }}
         whileTap={{ scale: 0.95 }}
         onClick={handleToggle}
-        className={`cursor-pointer inline-flex items-center rounded px-1.5 py-0.5 text-[10px] font-semibold border transition-all duration-300 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-400 focus-visible:ring-offset-2 ${
+        className={`cursor-pointer inline-flex items-center min-h-6 rounded px-2 py-0.5 text-xs font-semibold border transition-all duration-300 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-400 focus-visible:ring-offset-2 ${
           isOpen
-            ? "bg-blue-500/20 text-white border-blue-500/40 shadow-sm"
-            : "bg-blue-500/5 text-blue-400/80 border-blue-500/10 hover:bg-blue-500/15 hover:text-blue-300"
+            ? "bg-blue-800 text-white border-blue-800 shadow-sm dark:bg-blue-200 dark:text-blue-950"
+            : "bg-blue-50 text-blue-900 border-blue-300 hover:bg-blue-100 dark:bg-slate-900 dark:text-blue-200 dark:border-blue-500"
         }`}
       >
         [{index}]
@@ -103,7 +103,7 @@ const LiquidCitation = ({ citation, index, triggerType: _triggerType = 'click', 
             animate={{ opacity: 1, height: "auto", marginTop: 8 }}
             exit={{ opacity: 0, height: 0, marginTop: 0 }}
             transition={{ duration: 0.2, ease: "easeOut" }}
-            className="block w-full border-l-[3px] border-blue-500/80 bg-slate-900/40 dark:bg-black/35 backdrop-blur-sm pl-4 py-2.5 pr-3 my-2 text-xs rounded-r-lg shadow-md border border-slate-800/80 select-text"
+            className="block w-full border-l-[3px] border-blue-500/80 bg-slate-900 pl-4 py-2.5 pr-3 my-2 text-xs rounded-r-lg shadow-md border border-slate-800/80 select-text"
           >
             {/* Header */}
             <span className="flex items-center justify-between mb-2 pb-1.5 border-b border-slate-800/40">
@@ -111,30 +111,30 @@ const LiquidCitation = ({ citation, index, triggerType: _triggerType = 'click', 
                 <span className="text-slate-400 flex items-center justify-center">
                   {getSourceIcon(citation.source_type)}
                 </span>
-                <span className="font-semibold text-slate-200 truncate max-w-[240px]" title={citation.source_title}>
+                <span className="font-semibold text-slate-100 break-words" title={citation.source_title}>
                   {citation.source_title || "Source"}
                 </span>
                 {typeof citation.chunk_lines_from === 'number' && typeof citation.chunk_lines_to === 'number' && (
-                  <span className="text-slate-500">
-                    : L{citation.chunk_lines_from}-{citation.chunk_lines_to}
+                  <span className="shrink-0 text-slate-300">
+                    {citation.chunk_lines_from === citation.chunk_lines_to ? `Line ${citation.chunk_lines_from}` : `Lines ${citation.chunk_lines_from}–${citation.chunk_lines_to}`}
                   </span>
                 )}
               </span>
-              <span className="text-[9px] uppercase tracking-wider bg-blue-500/10 text-blue-400 px-1.5 py-0.5 rounded font-semibold">
+              <span className="text-[10px] uppercase tracking-wider bg-blue-950 text-blue-200 px-1.5 py-0.5 rounded font-semibold">
                 {citation.source_type || "DOCUMENT"}
               </span>
             </span>
 
             {/* Exact Lines Section */}
-            <span className="block space-y-1 font-mono text-[11px] leading-relaxed max-h-64 overflow-y-auto pr-1">
+            <span className="block space-y-1 text-sm leading-relaxed max-h-64 overflow-y-auto pr-1">
               {lines.map((lineText, lineIdx) => {
-                const currentLineNum = startLine + lineIdx;
+                const currentLineNum = startLine === undefined ? undefined : startLine + lineIdx;
                 return (
                   <span key={lineIdx} className="flex items-start gap-3 hover:bg-slate-800/20 py-0.5 px-1 rounded transition-colors duration-100">
-                    <span className="text-slate-600 dark:text-slate-500 font-mono text-[10px] select-none text-right min-w-[28px] border-r border-slate-800/50 pr-2">
+                    <span className="text-slate-300 font-mono text-xs select-none text-right min-w-[28px] border-r border-slate-800/50 pr-2">
                       {currentLineNum}
                     </span>
-                    <span className="flex-1 whitespace-pre-wrap break-all text-slate-200 dark:text-slate-100">
+                    <span className="flex-1 whitespace-pre-wrap break-words text-slate-100 dark:text-slate-100">
                       {lineText}
                     </span>
                   </span>

@@ -29,6 +29,7 @@ test('guest notebook persists and exposes sources, chat, studio, and honest audi
   await page.waitForURL(/\/notebook\/[a-zA-Z0-9-]+/);
   const notebookUrl = page.url();
   await expect(page.getByRole('heading', { name: 'Add a source to get started' })).toBeVisible();
+  await page.screenshot({ path: testInfo.outputPath('notebook-workspace.png'), fullPage: true });
   if (testInfo.project.name === 'mobile-390') {
     await page.getByRole('tab', { name: 'Sources', exact: true }).click();
     await expect(page.getByRole('heading', { name: 'Sources', exact: true })).toBeVisible();
@@ -48,9 +49,58 @@ test('guest notebook persists and exposes sources, chat, studio, and honest audi
   await checkLayout(page);
   await page.screenshot({ path: testInfo.outputPath('audio-unavailable.png'), fullPage: true });
   await page.getByTestId('nav-home').click();
+  await expect(page).toHaveURL(new URL('/', notebookUrl).href);
   await page.reload();
   await expect(page.getByText(/New Notebook [—-] /).first()).toBeVisible();
-  await page.goto(notebookUrl);
+  const savedNotebook = page.getByRole('button', { name: /Open New Notebook [—-] / }).first();
+  await page.screenshot({ path: testInfo.outputPath('notebook-library.png'), fullPage: true });
+  await savedNotebook.focus();
+  await page.keyboard.press('Enter');
+  await expect(page).toHaveURL(notebookUrl);
   await expect(page.getByRole('heading', { name: 'Add a source to get started' })).toBeVisible();
+  await verify();
+});
+
+test('a first-time visitor can preview and edit a sample source', async ({ page }, testInfo) => {
+  const verify = await observeBrowser(page, testInfo, true);
+  await page.goto('/');
+  await page.getByRole('button', { name: 'Create notebook', exact: true }).click();
+  await page.getByRole('button', { name: 'Add a source', exact: true }).last().click();
+  await page.getByRole('button', { name: /Pasted Content/ }).click();
+  const dialog = page.getByRole('dialog').last();
+  await dialog.getByRole('button', { name: 'Try a sample' }).click();
+  await expect(dialog.getByLabel('Title', { exact: true })).toHaveValue('School garden experiment');
+  await expect(dialog.getByLabel('Content', { exact: true })).toHaveValue(/twelve bean seedlings/);
+  await dialog.getByLabel('Title', { exact: true }).fill('My garden study');
+  await expect(dialog.getByRole('button', { name: 'Add Copied Text', exact: true })).toBeEnabled();
+  await testInfo.attach('sample-accessibility-tree', { body: await dialog.ariaSnapshot(), contentType: 'text/plain' });
+  await verify();
+});
+
+test('revision planner answers and opens the exact saved passage after reload', async ({ page }, testInfo) => {
+  const verify = await observeBrowser(page, testInfo, true);
+  await page.goto('/');
+  await page.getByRole('button', { name: 'Try the revision planner' }).click();
+  const chat = page.getByRole('textbox', { name: 'Chat message' });
+  await chat.fill('What should I do on Friday?');
+  await chat.press('Enter');
+  const citation = page.getByRole('button', { name: 'Citation 1', exact: true });
+  await expect(citation).toBeVisible();
+  await page.reload();
+  if (testInfo.project.name === 'desktop') {
+    await citation.focus();
+    await page.keyboard.press('Enter');
+  } else {
+    await citation.tap();
+  }
+  const line = page.locator('[data-cited-line="9"]:visible');
+  await expect(line).toContainText('Friday — Close your notes and take a three-question practice quiz.');
+  await expect(page.locator('[data-cited-line]:visible')).toHaveCount(1);
+  await expect(line).toBeInViewport({ ratio: 0.98 });
+  await page.screenshot({ path: testInfo.outputPath('revision-passage.png') });
+  if (testInfo.project.name === 'mobile-390') await page.getByRole('tab', { name: 'Chat', exact: true }).click();
+  await chat.fill('Orbital velocity of Saturn?');
+  await chat.press('Enter');
+  await expect(page.getByText(/couldn't find a matching passage/).first()).toBeVisible();
   await verify();
 });

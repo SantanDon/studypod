@@ -15,7 +15,7 @@ Found in the "Manual Integration" section of Developer Tools.
 ### 2. Persistent Agent Keys
 Generated via the **Agent Pairing Wizard**.
 - **Prefix:** `spm_`
-- **Duration:** Infinite (unless revoked)
+- **Duration:** Can be time-limited when issued and revoked in Developer Settings.
 - **Use Case:** Long-running agents, IDE extensions, or scheduled tasks.
 
 ## Connecting an Agent via Pairing
@@ -26,9 +26,39 @@ Generated via the **Agent Pairing Wizard**.
    ```bash
    node agent_demo_kit/pair_and_test.js <6-DIGIT-PIN>
    ```
-4. The agent will exchange the PIN for a persistent API key and store it locally.
+4. The demo uses a one-hour key in memory, verifies identity, and reports the number of accessible notebooks. To create a sample note in a specific test notebook, pass `--write-note <NOTEBOOK-ID>`. The default demo makes no notebook changes.
+
+For an integration that needs to retain a key across runs, generate a new PIN and run `node backend/scripts/kilo_pair.js <6-DIGIT-PIN>`. The pairing utility saves the key to the local `.env.agent` file.
+
+To pair directly, send `POST /api/auth/pair/complete` with `Content-Type: application/json` and a fresh code. This example requests read access for one hour.
+
+```json
+{"code":"123456","scopes":["notebooks:read"],"expiresInHours":1}
+```
+
+A successful response returns HTTP `201`. Selected fields are shown below. Use the returned `key` as the bearer credential and keep it private.
+
+```json
+{"key":"spm_<redacted>","scopes":["notebooks:read"],"expiresAt":"2026-11-26T12:00:00.000Z"}
+```
+
+An unknown or consumed code returns HTTP `401` with `{"error":"Invalid or expired pairing code"}`. Generate a fresh code from the web app before retrying.
 
 ## API Endpoints for Agents
+
+### Listing Notebooks
+
+Send `GET /api/notebooks` with `Authorization: Bearer spm_your_agent_key`. A key with `notebooks:read` receives HTTP `200` and an array of accessible notebooks. Use each notebook's `id` in later requests. An empty array means the key has no accessible notebooks.
+
+```json
+[{"id":"notebook-id","title":"Study notes"}]
+```
+
+The example shows selected fields. A key missing the read scope receives HTTP `403` with an error and its current scopes.
+
+```json
+{"error":"API key lacks required scope: notebooks:read","keyScopes":["notes:create"]}
+```
 
 ### Uploading to Dropbox
 Agents can push files to a specific "Dropbox" route without needing your encryption passphrase. These files are queued and will be encrypted locally the next time you open the corresponding notebook.

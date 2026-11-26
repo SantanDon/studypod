@@ -133,6 +133,7 @@ const Notebook = () => {
           <ResizablePanelGroup direction="horizontal">
             <ResizablePanel 
               defaultSize={isSourceDocumentOpen ? 35 : 25} 
+              id="notebook-sources"
               minSize={15}
               className="flex flex-col"
             >
@@ -158,6 +159,7 @@ const Notebook = () => {
             
             <ResizablePanel 
               defaultSize={isSourceDocumentOpen ? 35 : 45} 
+              id="notebook-chat"
               minSize={25}
               className="flex flex-col"
             >
@@ -181,6 +183,7 @@ const Notebook = () => {
             
             <ResizablePanel 
               defaultSize={30} 
+              id="notebook-studio"
               minSize={20}
               className="flex flex-col"
             >

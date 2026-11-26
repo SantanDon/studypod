@@ -81,4 +81,16 @@ export function isOllamaEnabled(localOnly = false): boolean {
 }
 
 export const OLLAMA_ENABLED = isOllamaEnabled();
+
+/** Optional machine-specific settings; other installations keep their defaults. */
+export function getOllamaGenerationConfig() {
+  const think = ["true", "1"].includes(envValue("VITE_OLLAMA_THINK") || "");
+  const context = Number(envValue("VITE_OLLAMA_CONTEXT"));
+  return {
+    think,
+    context: Number.isInteger(context) && context >= 16384 && context <= 131072 ? context : undefined,
+    // Ollama counts thinking and answer tokens against the same limit.
+    reasoningTokens: think ? 8192 : 0,
+  };
+}
 export default OLLAMA_ENABLED;

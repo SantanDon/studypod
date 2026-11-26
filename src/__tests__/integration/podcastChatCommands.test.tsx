@@ -55,6 +55,19 @@ beforeEach(() => {
 });
 afterEach(() => { cleanup(); vi.unstubAllGlobals(); usePodcastGenerationStore.setState({ isGenerating: false, script: null, notebookId: null }); });
 describe('chat -> existing Podcast Studio handler (mocked providers, real components)', () => {
+    it('restarts an interrupted recording without drafting again or losing source attribution', async () => {
+        localStorage.setItem('active_podcast_notebook-a', JSON.stringify({
+            notebookId: 'notebook-a', script: script(), sourceIds: ['selected'],
+            timestamp: Date.now() - 60 * 60 * 1000, host1Name: 'Alex', host2Name: 'Sarah', podcastType: 'deep-dive', podcastFormat: 'dialogue',
+        }));
+        render(<PodcastView notebookId="notebook-a"/>);
+        fireEvent.click(await screen.findByRole('button', { name: 'Restart recording from prepared script' }));
+        await waitFor(() => expect(mock.start).toHaveBeenCalledTimes(1));
+        expect(mock.script).not.toHaveBeenCalled();
+        expect(mock.start.mock.calls[0][0]).toEqual(script());
+        expect(usePodcastGenerationStore.getState().sourceIds).toEqual(['selected']);
+    });
+
     it('generates once in StrictMode from exactly the confirmed sources and focus', async () => {
         render(<StrictMode><PodcastView notebookId="notebook-a"/></StrictMode>);
         act(() => { command('Make a podcast about planetary orbits'); });

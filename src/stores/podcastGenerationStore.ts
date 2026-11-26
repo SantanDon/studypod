@@ -13,6 +13,7 @@ import {
 } from "@/lib/tts/streamingTTSGenerator";
 
 interface PodcastGenerationState {
+  preparation: { notebookId: string; message: string; section?: number; totalSections?: number } | null;
   // Generation state
   isGenerating: boolean;
   progress: StreamingProgress | null;
@@ -97,6 +98,7 @@ function isRestorableScript(value: unknown): value is PodcastScript {
 
 export const usePodcastGenerationStore = create<PodcastGenerationState>(
   (set, get) => ({
+    preparation: null,
     isGenerating: false,
     progress: null,
     script: null,
@@ -116,6 +118,7 @@ export const usePodcastGenerationStore = create<PodcastGenerationState>(
     startGeneration: (notebookId, script, options) => {
       revokeAudioUrls(get().partialAudioUrls);
       set({
+        preparation: null,
         isGenerating: true,
         notebookId,
         script,
@@ -220,8 +223,8 @@ export const usePodcastGenerationStore = create<PodcastGenerationState>(
         localStorage.removeItem(`active_podcast_${notebookId}`);
         return false;
       }
-      // Only rehydrate if it was recent (within 30 mins)
-      if (timestamp > Date.now() + 60_000 || Date.now() - timestamp > 30 * 60 * 1000) {
+      // Keep an interrupted long-form recording recoverable for one day.
+      if (timestamp > Date.now() + 60_000 || Date.now() - timestamp > 24 * 60 * 60 * 1000) {
         localStorage.removeItem(`active_podcast_${notebookId}`);
         return false;
       }
@@ -267,7 +270,7 @@ export const usePodcastGenerationStore = create<PodcastGenerationState>(
 
       // Interrupted draft. Keep the script and settings, drop the unusable audio.
       console.info(
-        "🎙️ Restoring an interrupted podcast draft; cross-reload durable resume is not implemented.",
+        "🎙️ Restoring an interrupted podcast draft; recording can restart from the prepared script.",
       );
       set({
         isGenerating: false,
@@ -280,7 +283,7 @@ export const usePodcastGenerationStore = create<PodcastGenerationState>(
         podcastType: data.podcastType === "brief" || data.podcastType === "deep-dive" ? data.podcastType : "standard",
         podcastFormat: data.podcastFormat === "solo" ? "solo" : "dialogue",
         partialAudioUrls: [],
-        sourceIds: [],
+        sourceIds: Array.isArray(data.sourceIds) && data.sourceIds.every((id: unknown) => typeof id === "string" && id.length > 0 && id.length <= 256) ? [...new Set(data.sourceIds as string[])] : [],
         finalizingScript: null,
         canPlayPartial: false,
         progress: {
@@ -289,7 +292,7 @@ export const usePodcastGenerationStore = create<PodcastGenerationState>(
           totalSegments: script.segments.length,
           percentage: 0,
           message:
-            "This podcast was interrupted. No playable audio was recovered in this browser. Check Saved audio overviews before generating again.",
+            "Recording was interrupted; unfinished audio could not be restored. Check Saved audio overviews before restarting.",
           canPlay: false,
         },
       });
@@ -308,6 +311,7 @@ export const usePodcastGenerationStore = create<PodcastGenerationState>(
         host2Name: state.host2Name,
         podcastType: state.podcastType,
         podcastFormat: state.podcastFormat,
+        sourceIds: state.sourceIds,
         // `partialAudioUrls` are deliberately NOT persisted: `blob:` handles do not
         // survive a reload, so writing them would only produce dead audio on return.
         // Only a live in-memory run can supply working audio.
@@ -332,6 +336,7 @@ export const usePodcastGenerationStore = create<PodcastGenerationState>(
       // session's audio offered for playback.
       revokeAudioUrls(get().partialAudioUrls);
       set({
+        preparation: null,
         isGenerating: false,
         partialAudioUrls: [],
         sourceIds: [],
@@ -356,6 +361,7 @@ export const usePodcastGenerationStore = create<PodcastGenerationState>(
       }
       revokeAudioUrls(get().partialAudioUrls);
       set({
+        preparation: null,
         isGenerating: false,
         progress: null,
         script: null,

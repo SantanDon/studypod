@@ -73,7 +73,7 @@ const ChatMessages = React.forwardRef<HTMLDivElement, ChatMessagesProps>(
           {/* Pending user message */}
           {pendingUserMessage && (
             <div className="flex justify-end">
-              <div className="max-w-xs lg:max-w-md px-4 py-2 bg-blue-500 text-white rounded-lg">
+              <div className="max-w-xs lg:max-w-md px-4 py-2 bg-blue-600 text-white rounded-lg">
                 <p>{pendingUserMessage}</p>
               </div>
             </div>

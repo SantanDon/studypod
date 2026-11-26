@@ -4,7 +4,9 @@ import { compilePodcastEvidence, indexPodcastEvidence } from '@/lib/audio/podcas
 import { chatCompletion } from '@/lib/ai/ollamaService';
 vi.mock('@/lib/ai/ollamaService', () => ({ chatCompletion: vi.fn() }));
 vi.mock('@/config/ollamaModels', () => ({ getModelForTask: () => 'mock-model' }));
-beforeEach(() => vi.mocked(chatCompletion).mockResolvedValue('{"passageIds":["p1"]}'));
+beforeEach(() => {
+  vi.mocked(chatCompletion).mockResolvedValue('{"passageIds":["p1"]}');
+});
 
 describe('production source context to evidence generation', () => {
   it('generates from a 13k original upload using only whole paragraphs', async () => {
@@ -76,7 +78,18 @@ describe('production source context to evidence generation', () => {
     vi.mocked(chatCompletion).mockImplementation(async request => {
       const payload = JSON.parse(request.messages[1].content);
       if (Array.isArray(payload.requiredTurnIndexes)) {
-        return JSON.stringify({verdicts: payload.requiredTurnIndexes.map((turnIndex: number) => ({turnIndex, supported: true}))});
+        const verdicts = payload.requiredTurnIndexes.map((turnIndex: number) => ({turnIndex, supported: true}));
+        const coverage = request.messages.some(message => message.content.includes('Add a coverage array'))
+          ? payload.passages.map((passage: {id: string}) => ({passageId: passage.id, missingPoints: []}))
+          : undefined;
+        return JSON.stringify({verdicts, coverage});
+      }
+      if (Array.isArray(payload.sentences)) {
+        return JSON.stringify({checks: payload.sentences.map((sentence: {id: string; passageIds: string[]}) => {
+          const source = payload.passages.find((p: {id: string}) => p.id === sentence.passageIds[0]);
+          return {id: sentence.id, supported: true, reason: 'Fixture source records the observation.',
+            evidence: [{passageId: source.id, quote: source.text.slice(0, 96)}]};
+        })});
       }
 
       const [passage] = payload.passages;
@@ -147,4 +160,20 @@ describe('production source context to evidence generation', () => {
   it('fails closed when a source has no complete paragraph that fits', () => {
     expect(() => buildPodcastEvidenceContext([{content:'word '.repeat(1000)}])).toThrow(/No complete source passages/);
   });
+  it('rejoins PDF paragraph breaks within a sentence without losing its qualification', () => {
+    const context = buildPodcastEvidenceContext([{id: 'book', content:
+      'The prison-house is the world of sight, the light of the fire is the\n\nsun. This comparison is an analogy, not a measured result.'}]);
+    expect(indexPodcastEvidence(context).passages[0].text).toBe(
+      'The prison-house is the world of sight, the light of the fire is the sun. This comparison is an analogy, not a measured result.');
+  });
+  it('does not join continuations across sources or structural headings', () => {
+    const context = buildPodcastEvidenceContext([
+      {id: 'first', content: 'An unfinished claim'},
+      {id: 'second', content: 'continues elsewhere.\n\nBOOK II\n\nseparate chapter text.'},
+    ]);
+    const passages = indexPodcastEvidence(context).passages;
+    expect(passages.some(p => p.text.includes('claim continues'))).toBe(false);
+    expect(passages.some(p => p.text.includes('elsewhere. separate'))).toBe(false);
+  });
+
 });

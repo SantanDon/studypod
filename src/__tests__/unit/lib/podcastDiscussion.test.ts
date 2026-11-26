@@ -1,9 +1,12 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { chatCompletion } from '@/lib/ai/ollamaService';
 import { generatePodcastScript } from '@/lib/podcastGenerator';
-import { DiscussionSupportError, batchDiscussionEvidence, compileDiscussionSections, parseDiscussionSection, verifyDiscussionSection } from '@/lib/audio/podcastDiscussionPlan';
+import { DiscussionSupportError, DiscussionCoverageError, IncompleteDiscussionVerdictError, batchDiscussionEvidence, compileDiscussionSections, discussionSectionSchema, parseDiscussionSection, verifyDiscussionSection } from '@/lib/audio/podcastDiscussionPlan';
 
 vi.mock('@/lib/ai/ollamaService', () => ({chatCompletion: vi.fn()}));
+// This suite isolates drafting/coverage/repair. The real sentence gate and its
+// integration are exercised in podcastSentenceAudit.test.ts.
+vi.mock('@/lib/audio/podcastSentenceAudit', () => ({auditDiscussionSentences: vi.fn().mockResolvedValue(undefined)}));
 vi.mock('@/config/ollamaModels', () => ({getModelForTask: () => 'connected-local-model'}));
 
 const passages = [
@@ -20,6 +23,32 @@ const source = `SOURCE: Pilot\nSOURCE_ID: "used-book"\n\n${passages[0].text}\n\n
 beforeEach(() => {vi.resetAllMocks();});
 
 describe('grounded Deep discussion', () => {
+  it('deduplicates valid citation metadata without changing spoken text or accepting invalid citations', () => {
+    const candidate = plan();
+    candidate.turns[0].evidence.push({...candidate.turns[0].evidence[0]});
+    const section = parseDiscussionSection(JSON.stringify(candidate), passages, false);
+    expect(section.turns).toEqual(plan().turns);
+    candidate.turns[0].evidence.push({passageId: 'p1', quote: 'Invented source quotation.'});
+    expect(() => parseDiscussionSection(JSON.stringify(candidate), passages, false)).toThrow('quote absent');
+  });
+  it('accepts compact known IDs, hydrates canonical evidence and rejects unknown IDs', () => {
+    const candidate = {...plan(), turns: plan().turns.map(turn => ({...turn, evidence: ['p1']}))};
+    const section = parseDiscussionSection(JSON.stringify(candidate), passages, false);
+    expect(section.turns[0].evidence).toEqual([{passageId: 'p1', quote: passages[0].text}]);
+    candidate.turns[0].evidence = ['missing'];
+    expect(() => parseDiscussionSection(JSON.stringify(candidate), passages, false)).toThrow('unknown passage');
+  });
+  it('constrains native evidence to canonical IDs without bypassing semantic review', () => {
+    const schema = discussionSectionSchema(false, passages) as {properties: {turns: {items: {properties: {evidence: {items: unknown}}}}}};
+    expect(schema.properties.turns.items.properties.evidence.items).toEqual({type: 'string', enum: ['p1', 'p2']});
+    const candidate = plan();
+    candidate.turns.forEach(turn => { turn.evidence = [{passageId: 'p1', quote: passages[0].text}]; });
+    candidate.turns[0].text = 'The pilot proved that all ten clinics improved outcomes.';
+    const section = parseDiscussionSection(JSON.stringify(candidate), passages, false);
+    expect(() => verifyDiscussionSection(JSON.stringify({verdicts: [
+      {turnIndex: 0, supported: false}, {turnIndex: 1, supported: true}, {turnIndex: 2, supported: true},
+    ]}), section.turns.length)).toThrow(DiscussionSupportError);
+  });
   it('requires each turn to cite every supporting passage and independently reviews corrected evidence', async () => {
     const incomplete = plan();
     incomplete.turns[0].text = 'The pilot is planned for ten clinics; a separate topic concerns the archive catalogue.';
@@ -44,8 +73,8 @@ describe('grounded Deep discussion', () => {
     expect(payloads[1].passages).toHaveLength(2);
     expect(payloads[1].turns[0].evidence).toHaveLength(1);
     expect(payloads[2].rejectedTurnIndexes).toEqual([0]);
-    expect(payloads[2].previousSection.turns[0]).toEqual(incomplete.turns[0]);
-    expect(calls[2][0].messages[1].content).toContain('correct its evidence using that known passageId and an exact quote');
+    expect(payloads[2].previousSection.turns[0]).toEqual({...incomplete.turns[0], evidence: ['p1']});
+    expect(calls[2][0].messages[1].content).toContain('correct its evidence using that known passage ID');
     expect(payloads[3].turns[0].text).toBe(incomplete.turns[0].text);
     expect(payloads[3].turns[0].evidence).toEqual(corrected.turns[0].evidence);
     expect(calls[3][0].messages[0]).toEqual(calls[1][0].messages[0]);
@@ -55,9 +84,9 @@ describe('grounded Deep discussion', () => {
   it('fails closed before an oversized complete repair reaches a truncating transport', async () => {
     const large = plan();
     large.turns = Array.from({length: 4}, (_, index) => ({...large.turns[index % 3], text: large.turns[index % 3].text + ' ' + String(index) + 'grounded'.repeat(500)}));
-    const rejected = JSON.stringify({verdicts: large.turns.map((_, turnIndex) => ({turnIndex, supported: false}))});
+    const rejected = JSON.stringify({verdicts: large.turns.map((_, turnIndex) => ({turnIndex, supported: false, reason: 'Unsupported claim. '.repeat(20)}))});
     vi.mocked(chatCompletion).mockResolvedValueOnce(JSON.stringify(large)).mockResolvedValueOnce(rejected);
-    await expect(generatePodcastScript(source, {type: 'deep-dive'})).rejects.toThrow('complete-context request budget');
+    await expect(generatePodcastScript(source, {type: 'deep-dive', userNotes: 'Study notes. '.repeat(80)})).rejects.toThrow('complete-context request budget');
     // Synthesis and the unchanged independent review ran; oversized repair never dispatched.
     expect(chatCompletion).toHaveBeenCalledTimes(2);
     const review = JSON.parse(vi.mocked(chatCompletion).mock.calls[1][0].messages[1].content);
@@ -83,13 +112,13 @@ describe('grounded Deep discussion', () => {
     expect(payloads[0].passages).toEqual(payloads[1].passages);
     expect(payloads[2].passages).toEqual(payloads[3].passages);
     expect(payloads[1].turns[0].text).toBe(mistaken.turns[0].text);
-    expect(payloads[2].previousSection.turns).toEqual(mistaken.turns);
+    expect(payloads[2].previousSection.turns).toEqual(mistaken.turns.map(turn => ({...turn, evidence: turn.evidence.map(reference => reference.passageId)})));
     expect(payloads[2].rejectedTurnIndexes).toEqual([0]);
     expect(payloads[2]).not.toHaveProperty('rejectedTurns');
     calls.forEach(([request]) => expect(request.messages.reduce((sum, message) => sum + message.content.normalize('NFC').length + message.role.length + 4, 0) + 12).toBeLessThanOrEqual(20_000));
     expect(payloads[3].turns).toEqual(plan().turns);
-    expect(calls[0][0].messages[0].content).toContain('Read the FULL canonical passages');
-    expect(calls[0][0].messages[0].content).toContain('A name mentioned or addressed in a dialogue does not establish who is speaking');
+    expect(calls[0][0].messages[0].content).toContain('Read the full canonical passages');
+    expect(calls[0][0].messages[0].content).toContain('For dialogues with unlabelled speakers, explain the argument without assigning names to individual statements');
     expect(calls[0][0].messages[0].content).not.toContain('Aim for 500-900 words');
     expect(calls[3][0].messages[0]).toEqual(calls[1][0].messages[0]);
   });
@@ -152,15 +181,15 @@ describe('grounded Deep discussion', () => {
     const initial = JSON.parse(calls[0][0].messages[1].content);
     const repair = JSON.parse(calls[2][0].messages[1].content);
     expect(repair.passages).toEqual(initial.passages);
-    expect(repair.previousSection.turns).toEqual(original.turns);
+    expect(repair.previousSection.turns).toEqual(original.turns.map(turn => ({...turn, evidence: turn.evidence.map(reference => reference.passageId)})));
     expect(repair.rejectedTurnIndexes).toEqual([0]);
     const repairSystem = calls[2][0].messages[0].content;
     expect(repairSystem).not.toBe(calls[0][0].messages[0].content);
-    expect(repairSystem.length).toBeLessThan(calls[0][0].messages[0].content.length / 2);
-    expect(repairSystem).toContain('previousSection is a rejected draft to diagnose, never a template to copy');
-    expect(repairSystem).toContain('If speaker identity is not explicit in the cited passage, use neutral attribution');
+    expect(repairSystem.length).toBeLessThan(calls[0][0].messages[0].content.length);
+    expect(repairSystem).toContain('Retain sound explanations and their evidence');
+    expect(repairSystem).toContain('For dialogues with unlabelled speakers, explain the argument without assigning names to individual statements');
     expect(repairSystem).toContain('Questions must retrieve answers explicitly stated in their own cited passages');
-    expect(repairSystem).toContain('Return the entire fresh section, never a patch or filtered subset');
+    expect(repairSystem).toContain('Return the entire corrected section, never a patch or filtered subset');
     expect(repair).not.toHaveProperty('rejectedTurns');
     expect(repair.repairInstruction).toContain('Do not invent a converse');
     expect(JSON.parse(calls[3][0].messages[1].content).turns).toEqual(plan().turns);
@@ -188,22 +217,22 @@ describe('grounded Deep discussion', () => {
     expect(chatCompletion).toHaveBeenCalledTimes(3);
   });
 
-  it('shares one semantic repair across the entire episode rather than each evidence batch', async () => {
+  it('allows one semantic repair per section but stops if that section still fails', async () => {
     const multiSource = Array.from({length: 10}, (_, index) => 'SOURCE: Pilot '+index+'\nSOURCE_ID: "book-'+index+'"\n\n'+passages[0].text+' '+'Qualified evidence remains limited. '.repeat(50)).join('\n\n');
     let reviews = 0;
     vi.mocked(chatCompletion).mockImplementation(async request => {
       const payload = JSON.parse(request.messages[1].content);
       if (payload.turns) {
         reviews++;
-        return JSON.stringify({verdicts: payload.turns.map((_: unknown, turnIndex: number) => ({turnIndex, supported: reviews === 2 || turnIndex !== 0}))});
+        return JSON.stringify({verdicts: payload.turns.map((_: unknown, turnIndex: number) => ({turnIndex, supported: reviews === 2 || turnIndex !== 0})), coverage: payload.passages.map((passage: {id: string}) => ({passageId: passage.id, missingPoints: []}))});
       }
       const section = plan();
       section.turns.forEach(turn => {turn.evidence[0].passageId = payload.passages[0].id;});
       return JSON.stringify(section);
     });
     await expect(generatePodcastScript(multiSource, {type: 'deep-dive'})).rejects.toThrow('unsupported');
-    expect(reviews).toBe(3);
-    expect(chatCompletion).toHaveBeenCalledTimes(6);
+    expect(reviews).toBe(4);
+    expect(chatCompletion).toHaveBeenCalledTimes(8);
   });
 
   it('invokes the connected model and verifier, saves actual segment evidence, and permits an honest short episode', async () => {
@@ -214,24 +243,21 @@ describe('grounded Deep discussion', () => {
     expect(chatCompletion).toHaveBeenCalledTimes(2);
     expect(vi.mocked(chatCompletion).mock.calls[0][0]).toMatchObject({maxOutputTokens: 4096, jsonMode: true});
     const synthesisPolicy = vi.mocked(chatCompletion).mock.calls[0][0].messages[0].content;
-    expect(synthesisPolicy).toContain('ONE concrete point explicitly established by its cited passages');
-    expect(synthesisPolicy).toContain('named-speaker attribution and question premise');
-    expect(synthesisPolicy).toContain('passages cited in THAT turn');
-    expect(synthesisPolicy).toContain('Do not identify a dialogue speaker from outside knowledge');
-    expect(synthesisPolicy).toContain('source-answerable retrieval question');
-    expect(synthesisPolicy).toContain('remove unsupported clauses instead of softening them');
-    expect(synthesisPolicy).toContain('Copy each passageId and quote together from the SAME source passage object');
-    expect(synthesisPolicy).toContain('every quote occurs verbatim in the text of its own passageId');
-    expect(vi.mocked(chatCompletion).mock.calls[1][0]).toMatchObject({maxOutputTokens: 1024, jsonMode: true});
+    expect(synthesisPolicy).toContain("Every factual clause, attribution and question premise must be supported by that turn's own cited full passages");
+    expect(synthesisPolicy).toContain('For dialogues with unlabelled speakers, explain the argument without assigning names to individual statements');
+    expect(synthesisPolicy).toContain('choose an explicit source-stated answer first');
+    expect(synthesisPolicy).toContain('Omit unsupported clauses rather than hedge them');
+    expect(synthesisPolicy).toContain('Select each evidence ID from the SAME passage');
+    expect(vi.mocked(chatCompletion).mock.calls[1][0]).toMatchObject({maxOutputTokens: 2048, jsonMode: true});
     for (const [call] of vi.mocked(chatCompletion).mock.calls) {
       expect(call).toMatchObject({model: 'connected-local-model', signal: controller.signal, deadlineAt});
       expect(call.messages.map(message => message.content).join('').length).toBeLessThan(20_000);
     }
     expect(vi.mocked(chatCompletion).mock.calls[1][0].messages[0].content).toContain('Evidence quotes alone do not establish entailment');
-    expect(script.metadata).toMatchObject({narrationMode: 'grounded-discussion', evidencePassageIds: ['p1'], evidenceSourceIds: ['used-book'], durationTarget: {status: 'insufficient-evidence'}});
+    expect(script.metadata).toMatchObject({narrationMode: 'grounded-discussion', evidencePassageIds: ['p1'], evidenceSourceIds: ['used-book'], durationTarget: {status: 'below-target'}});
     expect(script.metadata?.segmentEvidence).toEqual(plan().turns.map((turn, segmentIndex) => ({segmentIndex, kind: turn.kind, evidence: turn.evidence})));
     expect(script.segments[0].text).not.toBe(passages[0].text);
-    expect(script.metadata?.durationTarget?.explanation).toContain('intentionally shorter');
+    expect(script.metadata?.durationTarget?.explanation).toContain('without padding');
     expect(script.estimatedDuration).toBeLessThan(1200);
   });
 
@@ -278,7 +304,7 @@ describe('grounded Deep discussion', () => {
   it('verifies a formatted nine-turn discussion above the old raw cap within the actual prompt budget', async () => {
     vi.mocked(chatCompletion).mockImplementation(async request => {
       const payload = JSON.parse(request.messages[1].content);
-      if (payload.turns) return verified(payload.turns.length);
+      if (payload.turns) return JSON.stringify({...JSON.parse(verified(payload.turns.length)), ...(request.messages.length > 2 ? {coverage: payload.passages.map((passage: {id: string}) => ({passageId: passage.id, missingPoints: []}))} : {})});
       const section = {title: 'Interpreting a planned pilot', turns: Array.from({length: 9}, (_, index) => ({
         speaker: index % 2 ? 'host2' : 'host1', kind: index === 8 ? 'question' : 'explanation',
         text: `Point ${index + 1}. The scope of this pilot is planned, so the number of clinics describes an intended activity rather than a measured outcome. That wording does not tell us that any patient improved. The absence of clinical outcomes is an explicit limitation on what we can conclude from the passage. ${index === 8 ? 'Which wording distinguishes a plan from a measured result?' : 'We should preserve that limitation when interpreting the claim.'}`,
@@ -377,9 +403,10 @@ describe('grounded Deep discussion', () => {
     expect(chatCompletion).toHaveBeenCalledTimes(4);
   });
 
-  it('regenerates once for observed Qwen kind drift, then strictly verifies the fresh attributed section', async () => {
+  it.each(['unknown kinds', 'question labelled explanation'])('regenerates once for %s, then strictly verifies the fresh attributed section', async fault => {
     const drift = plan();
-    drift.turns.forEach((turn, index) => { turn.kind = ['qualification', 'clarification', 'retrieval_question'][index]; });
+    if (fault === 'unknown kinds') drift.turns.forEach((turn, index) => { turn.kind = ['qualification', 'clarification', 'retrieval_question'][index]; });
+    else drift.turns[2].kind = 'explanation';
     vi.mocked(chatCompletion).mockResolvedValueOnce(JSON.stringify(drift))
       .mockResolvedValueOnce(JSON.stringify(plan())).mockResolvedValueOnce(verified());
     const controller = new AbortController();
@@ -387,7 +414,7 @@ describe('grounded Deep discussion', () => {
     const script = await generatePodcastScript(source, {type: 'deep-dive', signal: controller.signal, deadlineAt});
     const calls = vi.mocked(chatCompletion).mock.calls;
     expect(calls).toHaveLength(3);
-    expect(calls[0][0].messages[0].content).toContain('kind is ONLY "explanation", "inference", or "question"');
+    expect(calls[0][0].jsonSchema).toBeDefined();
     expect(calls[1][0].messages[1].content).toContain('Generate a fresh complete section');
     expect(calls[1][0].messages[0].content).toBe(calls[0][0].messages[0].content);
     calls.forEach(([request]) => expect(request).toMatchObject({signal: controller.signal, deadlineAt, jsonMode: true}));
@@ -470,19 +497,52 @@ describe('grounded Deep discussion', () => {
     expect(chatCompletion).not.toHaveBeenCalled();
   });
 
-  it('bounds complete-passage batches to four requests of evidence', () => {
+  it('keeps all complete passages in bounded requests instead of stopping after four batches', () => {
     const long = Array.from({length: 20}, (_, index) => ({id: `p${index + 1}`, sourceId: `book-${index}`, text: `The study ${index} has not measured clinical outcomes. ` + 'Qualified evidence remains limited. '.repeat(60)}));
     const batches = batchDiscussionEvidence(long);
-    expect(batches.length).toBeLessThanOrEqual(4);
-    expect(batches.flat().length).toBeLessThan(long.length);
+    expect(batches.length).toBeGreaterThan(4);
+    expect(batches.flat()).toEqual(long);
     batches.forEach(batch => expect(batch.reduce((sum, passage) => sum + JSON.stringify(passage).length, 0)).toBeLessThanOrEqual(7600));
   });
 
-  it('shares one deadline across actual model and verifier batches and explicitly discloses omitted evidence', async () => {
+  it('splits a token-exhausted draft without losing source order or skipping verification', async () => {
+    const drafts: string[][] = [];
+    const reviews: string[][] = [];
+    vi.mocked(chatCompletion).mockImplementation(async request => {
+      const payload = JSON.parse(request.messages[1].content);
+      const ids = payload.passages.map((passage: {id: string}) => passage.id);
+      if (payload.turns) {
+        reviews.push(ids);
+        return verified(payload.turns.length);
+      }
+      drafts.push(ids);
+      if (drafts.length === 1) throw new Error('Ollama generation ended before completion (token limit reached).');
+      const passage = payload.passages[0];
+      return JSON.stringify({title: `Section ${passage.id}`, turns: [
+        {speaker: 'host1', kind: 'explanation', text: passage.text, evidence: [passage.id]},
+        {speaker: 'host2', kind: 'explanation', text: `This section states: ${passage.text}`, evidence: [passage.id]},
+        {speaker: 'host1', kind: 'question', text: `What does section ${passage.id} establish?`, evidence: [passage.id]},
+      ]});
+    });
+    const script = await generatePodcastScript(source, {type: 'deep-dive'});
+    expect(drafts).toEqual([['p1', 'p2'], ['p1'], ['p2']]);
+    expect(reviews).toEqual([['p1'], ['p2']]);
+    expect(script.metadata?.evidencePassageIds).toEqual(['p1', 'p2']);
+    expect(script.segments[0].text).toBe(passages[0].text);
+    expect(script.segments[3].text).toBe(passages[1].text);
+  });
+
+  it('does not retry token exhaustion for a single complete passage', async () => {
+    vi.mocked(chatCompletion).mockRejectedValue(new Error('Ollama generation ended before completion (token limit reached).'));
+    await expect(generatePodcastScript(`SOURCE: Pilot\nSOURCE_ID: "used-book"\n\n${passages[0].text}`, {type: 'deep-dive'})).rejects.toThrow('token limit reached');
+    expect(chatCompletion).toHaveBeenCalledTimes(1);
+  });
+
+  it('honors an explicit deadline across every batch and reports real progress', async () => {
     const multiSource = Array.from({length: 20}, (_, index) => `SOURCE: Pilot ${index + 1}\nSOURCE_ID: "book-${index + 1}"\n\nThe pilot is planned for ten clinics. No clinical outcomes have been measured. ${'Qualified evidence remains limited. '.repeat(50)}`).join('\n\n');
     vi.mocked(chatCompletion).mockImplementation(async request => {
       const payload = JSON.parse(request.messages[1].content);
-      if (payload.turns) return verified(payload.turns.length);
+      if (payload.turns) return JSON.stringify({...JSON.parse(verified(payload.turns.length)), ...(request.messages.length > 2 ? {coverage: payload.passages.map((passage: {id: string}) => ({passageId: passage.id, missingPoints: []}))} : {})});
       const section = plan();
       section.title = `Pilot section ${payload.section}`;
       section.turns.forEach(turn => {
@@ -493,21 +553,23 @@ describe('grounded Deep discussion', () => {
     });
     const controller = new AbortController();
     const deadlineAt = Date.now() + 60_000;
-    const script = await generatePodcastScript(multiSource, {type: 'deep-dive', signal: controller.signal, deadlineAt});
+    const onProgress = vi.fn();
+    const script = await generatePodcastScript(multiSource, {type: 'deep-dive', signal: controller.signal, deadlineAt, onProgress});
     const calls = vi.mocked(chatCompletion).mock.calls;
     expect(calls.length).toBeGreaterThan(2);
-    expect(calls.length).toBeLessThanOrEqual(8);
+    expect(calls.length).toBeGreaterThan(8);
+    expect(onProgress.mock.calls.at(-1)?.[0]).toMatchObject({phase: 'reviewing', section: calls.length / 2, totalSections: calls.length / 2});
     calls.forEach(([request]) => {
       expect(request.signal).toBe(controller.signal);
       expect(request.deadlineAt).toBe(deadlineAt);
       expect(request.messages.map(message => message.content).join('').length).toBeLessThan(20_000);
     });
     const coverage = script.metadata!.sourceCoverage!;
-    expect(coverage.consideredPassages).toBeLessThan(coverage.indexedPassages!);
+    expect(coverage.consideredPassages).toBe(coverage.indexedPassages!);
     expect(coverage.usedPassages).toBe(script.metadata!.evidencePassageIds!.length);
     expect(coverage.excerpted).toBe(true);
-    expect(coverage.explanation).toContain('limited to four evidence batches');
-    expect(coverage.explanation).toContain('does not cover every source or passage');
+    expect(coverage.explanation).toContain('Every indexed substantive passage');
+    expect(coverage.explanation).toContain('excerpt');
   });
 
   it('rejects model-written narration in the existing Standard path', async () => {
@@ -538,7 +600,7 @@ describe('discussion evidence contract', () => {
     const compiled = compileDiscussionSections([parsed], quotedPassages, 'Alex', 'Sarah');
     expect(compiled.segmentEvidence[0].evidence[0].quote).toBe(quotedSource);
     section.turns[0].evidence.push({passageId: 'p1', quote: quotedSource});
-    expect(() => parseDiscussionSection(JSON.stringify(section), quotedPassages, false)).toThrow('quote absent');
+    expect(parseDiscussionSection(JSON.stringify(section), quotedPassages, false).turns[0].evidence).toEqual(parsed.turns[0].evidence);
   });
 
   it.each([
@@ -574,13 +636,11 @@ describe('discussion evidence contract', () => {
     ]);
   });
 
-  it('rejects unknown IDs, duplicate evidence, missing explanation, and a second host in solo mode', () => {
+  it('rejects unknown IDs, missing explanation, and a second host in solo mode', () => {
     const unknown = plan(); unknown.turns[0].evidence[0].passageId = 'p99';
     expect(() => parseDiscussionSection(JSON.stringify(unknown), passages, false)).toThrow('unknown');
-    const duplicate = plan(); duplicate.turns[0].evidence.push(duplicate.turns[0].evidence[0]);
-    expect(() => parseDiscussionSection(JSON.stringify(duplicate), passages, false)).toThrow();
     const shallow = plan(); shallow.turns[1].kind = 'question';
-    expect(() => parseDiscussionSection(JSON.stringify(shallow), passages, false)).toThrow('explain');
+    expect(() => parseDiscussionSection(JSON.stringify(shallow), passages, false)).toThrow('at least two turns');
     expect(() => parseDiscussionSection(JSON.stringify(plan()), passages, true)).toThrow();
   });
 
@@ -601,4 +661,103 @@ describe('discussion evidence contract', () => {
     expect(compiled.evidenceSourceIds).toEqual(['used-book', 'unused-book']);
     expect(compiled.segmentEvidence[1].evidence[0].passageId).toBe('p2');
   });
+
+  it.each([[1000, 4500], [11530, 6918], [20000, 9000]])('bounds episode length for a %i-word source at %i words', (sourceWords, budget) => {
+    const section = parseDiscussionSection(JSON.stringify(plan()), passages, false);
+    const sourcePassages = [{...passages[0], text: Array(sourceWords).fill('source').join(' ')}];
+    const makeEpisode = (count: number) => [{...section, turns: [{...section.turns[0], text: Array(count).fill('spoken').join(' ')}]}];
+    expect(compileDiscussionSections(makeEpisode(budget), sourcePassages, 'Alex', 'Sarah').words).toBe(budget);
+    expect(() => compileDiscussionSections(makeEpisode(budget + 1), sourcePassages, 'Alex', 'Sarah')).toThrow('episode budget');
+  });
 });
+
+
+describe('Deep Dive coverage review', () => {
+  const verdict = (coverage: unknown) => JSON.stringify({...JSON.parse(verified()), coverage});
+  it('rejects a supported but shallow section with actionable missing points', () => {
+    expect(() => verifyDiscussionSection(verdict([{passageId: 'p1', missingPoints: ['Explain why the return to the cave matters.']}]), 3, ['p1'])).toThrow(DiscussionCoverageError);
+  });
+  it('preserves verbose coverage rejections for repair without accepting the section', () => {
+    const point = 'Explain the omitted conditions on the central claim. '.repeat(11);
+    expect(point.length).toBeGreaterThan(500);
+    try {
+      verifyDiscussionSection(verdict([{passageId: 'p1', missingPoints: [point]}]), 3, ['p1']);
+      throw new Error('Expected rejection');
+    } catch (error) {
+      expect(error).toBeInstanceOf(DiscussionCoverageError);
+      expect(error).toMatchObject({missingPoints: [`p1: ${point}`]});
+    }
+  });
+  it.each(['', 'x'.repeat(1001), 123])('rejects malformed or unbounded coverage feedback %j', point => {
+    expect(() => verifyDiscussionSection(verdict([{passageId: 'p1', missingPoints: [point]}]), 3, ['p1'])).toThrow(IncompleteDiscussionVerdictError);
+  });
+  it('requires a distinct coverage verdict for every supplied passage', () => {
+    expect(() => verifyDiscussionSection(verdict([{passageId: 'p1', missingPoints: []}]), 3, ['p1', 'p2'])).toThrow(IncompleteDiscussionVerdictError);
+    expect(() => verifyDiscussionSection(verdict([{passageId: 'p1', missingPoints: []}, {passageId: 'p1', missingPoints: []}]), 3, ['p1', 'p2'])).toThrow(IncompleteDiscussionVerdictError);
+    expect(() => verifyDiscussionSection(verdict([{passageId: 'p1', missingPoints: []}, {passageId: 'p2', missingPoints: []}]), 3, ['p1', 'p2'])).not.toThrow();
+  });
+});
+
+
+it.each([
+  [1, 'Explain the absence of measured outcomes.'],
+  [2, 'Explain the absence of measured outcomes.'],
+  [1, 'Explain the omitted conditions on the central claim. '.repeat(11)],
+] as const)('repairs %i rounds of substantive coverage findings before allowing narration (%s)', async (repairs, missingPoint) => {
+  const longerSource = `SOURCE: Pilot\nSOURCE_ID: "used-book"\n\n${passages[0].text} ${'The limitations of this planned pilot remain important. '.repeat(40)}`;
+  let reviews = 0;
+  const onProgress = vi.fn();
+  vi.mocked(chatCompletion).mockImplementation(async request => {
+    const payload = JSON.parse(request.messages[1].content);
+    if (payload.turns) {
+      reviews++;
+      return JSON.stringify({...JSON.parse(verified()), coverage: payload.passages.map((passage: {id: string}) => ({passageId: passage.id, missingPoints: reviews <= repairs ? [missingPoint] : []}))});
+    }
+    if (payload.previousSection) expect(payload.missingPoints).toEqual([`p1: ${missingPoint}`]);
+    return JSON.stringify(plan());
+  });
+  await generatePodcastScript(longerSource, {type: 'deep-dive', onProgress});
+  expect(chatCompletion).toHaveBeenCalledTimes(2 + repairs * 2);
+  expect(onProgress.mock.calls.map(([progress]) => progress.phase)).toEqual(['drafting', 'reviewing', ...Array.from({length: repairs}, () => ['revising', 'reviewing']).flat()]);
+
+});
+
+it('stops after two unsuccessful semantic revisions without producing a script', async () => {
+  const longerSource = `SOURCE: Pilot\nSOURCE_ID: "used-book"\n\n${passages[0].text} ${'The limitations of this planned pilot remain important. '.repeat(40)}`;
+  vi.mocked(chatCompletion).mockImplementation(async request => {
+    const payload = JSON.parse(request.messages[1].content);
+    if (payload.turns) return JSON.stringify({...JSON.parse(verified()), coverage: payload.passages.map((passage: {id: string}) => ({passageId: passage.id, missingPoints: ['Explain the absence of measured outcomes.']}))});
+    return JSON.stringify(plan());
+  });
+  await expect(generatePodcastScript(longerSource, {type: 'deep-dive'})).rejects.toThrow('omits substantive');
+  expect(chatCompletion).toHaveBeenCalledTimes(6);
+});
+
+  it('preserves both factual rejections and coverage gaps for the same repair', () => {
+    const verdict = JSON.stringify({
+      verdicts: [{turnIndex: 0, supported: false, reason: 'The source does not attribute this claim to the prisoner.'}],
+      coverage: [{passageId: 'p1', missingPoints: ['The stated limitation']}],
+    });
+    try {
+      verifyDiscussionSection(verdict, 1, ['p1']);
+      throw new Error('Expected rejection');
+    } catch (error) {
+      expect(error).toMatchObject({rejectedTurnIndexes: [0], missingPoints: ['p1: The stated limitation'], supportFeedback: ['Turn 0: The source does not attribute this claim to the prisoner.']});
+    }
+  });
+
+  it('keeps a detailed rejection actionable instead of blocking its correction', () => {
+    const reason = 'The claim requires another cited passage. '.repeat(12);
+    expect(reason.length).toBeGreaterThan(400);
+    try {
+      verifyDiscussionSection(JSON.stringify({verdicts: [{turnIndex: 0, supported: false, reason}]}), 1);
+      throw new Error('Expected rejection');
+    } catch (error) {
+      expect(error).toBeInstanceOf(DiscussionSupportError);
+      expect(error).toMatchObject({rejectedTurnIndexes: [0], supportFeedback: [`Turn 0: ${reason}`]});
+    }
+  });
+
+  it.each(['', 'x'.repeat(1001), 123])('rejects malformed factual-review feedback %j', (reason) => {
+    expect(() => verifyDiscussionSection(JSON.stringify({verdicts: [{turnIndex: 0, supported: false, reason}]}), 1)).toThrow();
+  });

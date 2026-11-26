@@ -14,6 +14,7 @@ import {
 import { ApiService } from "@/services/apiService";
 import { generateAIResponse } from "@/services/chatAiService";
 import { validateCitations, validateAIResponse } from "@/lib/extraction/contentValidator";
+import { findGuestPassage } from "@/lib/chat/guestPassage";
 import { mapPersistedMessage } from "@/lib/chat/persistedMessage";
 import { buildLocalConversation, isObviouslyIncompleteLocalAnswer, isPracticeContext, localLearningSystemPrompt } from "@/lib/chat/localLearningGuidance";
 import { isOllamaEnabled } from "@/config/ollamaConfig";
@@ -278,12 +279,12 @@ export const useChatMessages = (
             }
 
             if (item.response && item.response.trim()) {
-              expandedMessages.push({
+              expandedMessages.push(mapPersistedMessage({
                 id: `${item.id}-ai`,
                 notebook_id: item.notebook_id,
-                message: { type: "ai", content: item.response },
+                role: "assistant", content: item.response, groundedSources: item.citations,
                 created_at: item.created_at,
-              });
+              }));
             }
           });
         }
@@ -512,6 +513,17 @@ ${evidence}` },
       }
 
       // Guest account - local processing
+      const notebookSources = localStorageService.getSources(messageData.notebookId);
+      const selected = messageData.sourceIds ? notebookSources.filter(source => messageData.sourceIds!.includes(source.id)) : notebookSources;
+      if (/^find (?:a )?passage:/i.test(messageData.content) || selected.some(source => source.metadata?.revisionPlanner === true)) {
+        const citation = findGuestPassage(messageData.content.replace(/^find (?:a )?passage:/i, ''), selected);
+        const conversationPair = localStorageService.createChatMessage({
+          notebook_id: messageData.notebookId, message: messageData.content,
+          response: citation ? "Matching passage [1]\n\n" + citation.excerpt : "I couldn't find a matching passage. Try a day or a topic from your source.",
+          citations: { version: 1, citations: citation ? [citation] : [] },
+        });
+        return { conversationPair, notebookId: messageData.notebookId };
+      }
       let aiResponse = await generateAIResponse(
         messageData.content,
         user as unknown as LocalUser,

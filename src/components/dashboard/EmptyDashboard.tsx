@@ -1,6 +1,6 @@
 import React, { useState } from "react";
 import { Button } from "@/components/ui/button";
-import { Plus, FileText, MessageCircle, Headphones, ArrowRight } from "lucide-react";
+import { Plus, FileText, MessageCircle, Headphones } from "lucide-react";
 import { useNavigate } from "react-router-dom";
 import { useNotebooks } from "@/hooks/useNotebooks";
 import { useGuest } from "@/hooks/useGuest";
@@ -13,16 +13,18 @@ import {
   DialogDescription,
 } from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
+import { revisionGuide } from '@/lib/chat/guestPassage';
+
 const EmptyDashboard = () => {
   const navigate = useNavigate();
-  const { createNotebook, isCreating, joinNotebookAsync, isJoining } = useNotebooks();
+  const { createNotebookAsync, isCreating, joinNotebookAsync, isJoining } = useNotebooks();
   const { canCreateNotebook, showAuthPrompt, isGuest } = useGuest();
   const { toast } = useToast();
 
   const [isJoinOpen, setIsJoinOpen] = useState(false);
   const [joinCodeInput, setJoinCodeInput] = useState('');
 
-  const handleCreateNotebook = () => {
+  const handleCreateNotebook = async (revisionPlanner = false) => {
     console.log("Create notebook button clicked");
     console.log("isCreating:", isCreating);
 
@@ -41,29 +43,20 @@ const EmptyDashboard = () => {
     });
     const title = `New Notebook - ${dateStr}`;
 
-    createNotebook(
-      {
-        title: title,
-        description: "Add sources and start exploring",
-      },
-      {
-        onSuccess: (data) => {
-          console.log("Navigating to notebook:", data.id);
-          navigate(`/notebook/${data.id}`);
-        },
-        onError: (error) => {
-          console.error(
-            "Failed to create notebook:",
-            JSON.stringify(error, null, 2),
-          );
-          toast({
-            title: "Error creating notebook",
-            description: error instanceof Error ? error.message : "Unknown error",
-            variant: "destructive",
-          });
-        },
-      },
-    );
+    try {
+      const notebook = await createNotebookAsync({
+        title: revisionPlanner ? revisionGuide.title : title,
+        description: revisionPlanner ? revisionGuide.description : "Add sources and start exploring",
+        revisionPlanner,
+      });
+      navigate(`/notebook/${notebook.id}`);
+    } catch (error) {
+      toast({
+        title: "Error creating notebook",
+        description: error instanceof Error ? error.message : "Unknown error",
+        variant: "destructive",
+      });
+    }
   };
 
   const handleJoinNotebook = async (e: React.FormEvent) => {
@@ -89,42 +82,40 @@ const EmptyDashboard = () => {
     }
   };
   return (
-    <section className="rounded-3xl border border-slate-200 bg-white px-6 py-10 sm:px-10 sm:py-14 dark:border-border dark:bg-card">
-      <div className="grid gap-10 lg:grid-cols-[1.1fr_1fr] lg:items-center">
-        <div className="max-w-xl">
-          <p className="mb-4 text-xs font-semibold uppercase tracking-[0.18em] text-indigo-800 dark:text-indigo-300">Your material. Your pace.</p>
-          <h2 className="text-4xl font-semibold leading-tight tracking-tight text-slate-900 sm:text-5xl dark:text-foreground">
-            Make room for<br />a little understanding.
-          </h2>
-          <p className="mt-5 max-w-lg text-base leading-relaxed text-slate-600 dark:text-muted-foreground">
-            Bring your reading into a notebook. Explore it with questions, then turn selected sources into a podcast you can take with you.
+    <section className="overflow-hidden rounded-3xl border border-indigo-200 bg-indigo-50/60 dark:border-border dark:bg-card">
+      <div className="grid lg:grid-cols-[1.2fr_1fr]">
+        <div className="self-center px-6 py-9 sm:px-10 sm:py-14">
+          <h1 className="max-w-lg text-4xl font-semibold leading-tight tracking-tight text-slate-950 sm:text-5xl dark:text-foreground">
+            Start your first notebook
+          </h1>
+          <p className="mt-4 max-w-md text-base leading-relaxed text-slate-700 dark:text-muted-foreground">
+            Bring a reading, lecture transcript or set of notes. Ask a question and follow the answer back to your source.
           </p>
-          <div className="mt-7 flex flex-wrap items-center gap-3">
-            <Button onClick={handleCreateNotebook} size="lg" className="rounded-full bg-indigo-800 px-6 text-white hover:bg-indigo-900 dark:bg-indigo-700 dark:hover:bg-indigo-600" disabled={isCreating}>
-              <Plus className="mr-2 h-5 w-5" />
+          <div className="mt-6 flex flex-wrap gap-3">
+            <Button onClick={() => handleCreateNotebook()} size="lg" className="rounded-full bg-indigo-800 px-6 text-white hover:bg-indigo-900 dark:bg-indigo-700 dark:hover:bg-indigo-600" disabled={isCreating}>
+              <Plus aria-hidden="true" className="mr-2 h-5 w-5" />
               {isCreating ? "Creating..." : "Create notebook"}
-              <ArrowRight className="ml-3 h-4 w-4" />
             </Button>
-            {!isGuest && (
-              <Button onClick={() => setIsJoinOpen(true)} size="lg" variant="outline" className="rounded-full border-slate-300 dark:border-border" disabled={isJoining}>
-                Join notebook
-              </Button>
-            )}
+            {isGuest && <Button onClick={() => handleCreateNotebook(true)} disabled={isCreating} size="lg" variant="outline" className="rounded-full">Try the revision planner</Button>}
+            {!isGuest && <Button onClick={() => setIsJoinOpen(true)} size="lg" variant="outline" className="rounded-full" disabled={isJoining}>Join notebook</Button>}
           </div>
-          {isGuest && <p className="mt-3 text-xs text-slate-500 dark:text-muted-foreground">Guest notebooks stay in this browser. Sign up when you want to sync.</p>}
+          {isGuest && <p className="mt-4 text-sm text-slate-600 dark:text-muted-foreground">Guest notebooks stay in this browser.</p>}
         </div>
-        <ol className="space-y-3" aria-label="How to study with StudyPod">
-          {[
-            { icon: FileText, title: 'Bring your sources', body: 'Start with a PDF, pasted text, or a web page. Keep the material that matters together.' },
-            { icon: MessageCircle, title: 'Follow your questions', body: 'Ask about your sources and check the references as you build your understanding.' },
-            { icon: Headphones, title: 'Give your reading a voice', body: 'Choose sources for a podcast discussion or solo explanation. Read-aloud availability depends on your setup.' },
-          ].map(({ icon: Icon, title, body }, index) => (
-            <li key={title} className="flex gap-4 rounded-2xl border border-slate-200/80 bg-white p-5 dark:border-border dark:bg-background">
-              <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-indigo-50 text-indigo-800 dark:bg-indigo-950 dark:text-indigo-300"><Icon className="h-5 w-5" aria-hidden="true" /></div>
-              <div><p className="mb-1 text-xs font-medium text-slate-500 dark:text-muted-foreground">0{index + 1}</p><h3 className="font-semibold text-slate-900 dark:text-foreground">{title}</h3><p className="mt-1 text-sm leading-relaxed text-slate-600 dark:text-muted-foreground">{body}</p></div>
-            </li>
-          ))}
-        </ol>
+        <div className="border-t border-indigo-100 bg-white/80 px-6 py-7 sm:px-10 lg:border-l lg:border-t-0 dark:border-border dark:bg-background">
+          <h2 className="mb-4 font-semibold text-foreground">Inside a notebook</h2>
+          <ul className="divide-y divide-slate-200 dark:divide-border">
+            {[
+              { icon: FileText, title: 'Sources', body: 'Collect files, links and pasted text.' },
+              { icon: MessageCircle, title: 'Chat', body: 'Ask questions about the sources you choose.' },
+              { icon: Headphones, title: 'Studio', body: 'Make a quiz, review flashcards or create an audio overview.' },
+            ].map(({ icon: Icon, title, body }) => (
+              <li key={title} className="flex items-start gap-3 py-3">
+                <Icon className="mt-1 h-5 w-5 shrink-0 text-indigo-800 dark:text-indigo-300" aria-hidden="true" />
+                <div><h3 className="font-medium text-foreground">{title}</h3><p className="text-sm leading-relaxed text-muted-foreground">{body}</p></div>
+              </li>
+            ))}
+          </ul>
+        </div>
       </div>
       <Dialog open={isJoinOpen} onOpenChange={setIsJoinOpen}>
         <DialogContent className="sm:max-w-md bg-white dark:bg-card border border-border rounded-2xl shadow-xl">
@@ -135,7 +126,8 @@ const EmptyDashboard = () => {
             </DialogDescription>
           </DialogHeader>
           <form onSubmit={handleJoinNotebook} className="space-y-4 pt-2">
-            <Input
+            <label htmlFor="empty-join-code" className="block text-sm font-medium">Join code</label>
+            <Input id="empty-join-code"
               placeholder="e.g. A4K9B2"
               value={joinCodeInput}
               onChange={(e) => setJoinCodeInput(e.target.value.toUpperCase())}

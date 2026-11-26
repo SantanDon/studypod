@@ -626,7 +626,7 @@
 .light .podcast-settings-btn {
   background: rgba(0, 0, 0, 0.03);
   border-color: rgba(0, 0, 0, 0.1);
-  color: #64748b;
+  color: #475569;
 }
 
 :root:not(.dark) .podcast-settings-btn:hover,

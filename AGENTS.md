@@ -1,6 +1,8 @@
-# Agent Onboarding Protocol
+# StudyPod Agent Onboarding
 
-This document describes how external agents and ChatGPT connectors collaborate safely with StudyPod.
+For code changes in this repository, use Node.js 22 and follow the [local setup and verification steps](README.md#1-initialize-the-workspace). The frontend lives in `src/`, the Express API in `backend/src/`, and browser workflows in `e2e/`. See the [maintainer loop](docs/STUDYPOD_MAINTAINER_LOOP.md) and [quality workflow](.github/workflows/quality.yml) for feature-specific checks.
+
+The following protocol applies to external agents and ChatGPT connectors.
 
 ---
 
@@ -21,7 +23,7 @@ This document describes how external agents and ChatGPT connectors collaborate s
 ```bash
 node backend/scripts/kilo_pair.js <YOUR-6-DIGIT-PIN>
 ```
-The script saves a persistent API key (`spm_...`) to `.env.agent`.
+The script saves a persistent API key (`spm_...`) to `.env.agent`. Keep this file local. For a short-lived pairing check, use the demo from the starter kit below.
 
 ---
 
@@ -142,7 +144,9 @@ curl -X POST http://localhost:4000/api/auth/signin \
 |--------|---------|
 | `backend/scripts/kilo_pair.js` | Official pairing utility |
 | `backend/scripts/syncAgent.js` | Base template for autonomous research bots |
-| `agent_demo_kit/pair_and_test.js` | All-in-one: pair + list notebooks + post test note |
+| `agent_demo_kit/pair_and_test.js` | Pair with a one-hour in-memory key, verify identity, and count accessible notebooks |
+
+Run `node agent_demo_kit/pair_and_test.js <6-DIGIT-PIN>` for a pairing check without notebook changes. Add `--write-note <NOTEBOOK-ID>` to create a test note in a specific notebook. Both pairing scripts accept `STUDYPOD_API` to override the local API base URL.
 
 ---
 

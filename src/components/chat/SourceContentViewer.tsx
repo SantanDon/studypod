@@ -55,68 +55,17 @@ const SourceContentViewer = ({
     typeof citation.chunk_lines_to === 'number' &&
     citation.chunk_lines_from > 0;
 
-  console.log('SourceContentViewer: Render with citation', {
-    citationId: citation?.citation_id,
-    sourceId: citation?.source_id,
-    hasValidCitationLines,
-    isOpenedFromSourceList,
-    chunkLinesFrom: citation?.chunk_lines_from,
-    chunkLinesTo: citation?.chunk_lines_to
-  });
-
-  // Auto-scroll to highlighted content when citation changes and has valid line data
   useEffect(() => {
-    console.log('SourceContentViewer: Auto-scroll effect triggered', {
-      hasValidCitationLines,
-      citationId: citation?.citation_id,
-      hasHighlightedRef: !!highlightedContentRef.current,
-      hasScrollAreaRef: !!scrollAreaViewportRef.current
+    if (!hasValidCitationLines || !sourceContent) return;
+    const frame = requestAnimationFrame(() => {
+      const line = highlightedContentRef.current;
+      const viewport = scrollAreaViewportRef.current?.querySelector<HTMLElement>('[data-radix-scroll-area-viewport]');
+      if (!line || !viewport) return;
+      const offset = line.getBoundingClientRect().top - viewport.getBoundingClientRect().top;
+      viewport.scrollTop += offset - Math.max(0, (viewport.clientHeight - line.offsetHeight) / 2);
     });
-
-    if (hasValidCitationLines && highlightedContentRef.current && scrollAreaViewportRef.current) {
-      console.log('SourceContentViewer: Starting auto-scroll process');
-      
-      // Increased delay to ensure DOM has fully updated
-      const timer = setTimeout(() => {
-        if (highlightedContentRef.current && scrollAreaViewportRef.current) {
-          console.log('SourceContentViewer: Executing auto-scroll');
-          
-          // Find the actual viewport element within the ScrollArea
-          const scrollAreaElement = scrollAreaViewportRef.current;
-          const viewport = scrollAreaElement.querySelector('[data-radix-scroll-area-viewport]') as HTMLElement;
-          
-          if (viewport && highlightedContentRef.current) {
-            const highlightedElement = highlightedContentRef.current;
-            
-            console.log('SourceContentViewer: Scroll calculation', {
-              highlightedOffsetTop: highlightedElement.offsetTop,
-              highlightedHeight: highlightedElement.clientHeight,
-              viewportHeight: viewport.clientHeight,
-              currentScrollTop: viewport.scrollTop
-            });
-            
-            // Calculate the scroll position to center the highlighted content
-            const scrollTop = highlightedElement.offsetTop - (viewport.clientHeight / 2) + (highlightedElement.clientHeight / 2);
-            const targetScrollTop = Math.max(0, scrollTop);
-            
-            console.log('SourceContentViewer: Scrolling to position', { targetScrollTop });
-            
-            viewport.scrollTo({
-              top: targetScrollTop,
-              behavior: 'smooth'
-            });
-          } else {
-            console.log('SourceContentViewer: Viewport or highlighted element not found', {
-              viewport: !!viewport,
-              highlightedElement: !!highlightedContentRef.current
-            });
-          }
-        }
-      }, 300); // Increased delay for better reliability
-
-      return () => clearTimeout(timer);
-    }
-  }, [citation?.citation_id, citation?.chunk_lines_from, citation?.chunk_lines_to, citation?.source_id, hasValidCitationLines]);
+    return () => cancelAnimationFrame(frame);
+  }, [citation?.citation_id, citation?.chunk_lines_from, citation?.chunk_lines_to, citation?.source_id, hasValidCitationLines, sourceContent, accordionValue]);
 
   // Close guide when a real citation is clicked (has valid line data)
   useEffect(() => {
@@ -223,6 +172,7 @@ const SourceContentViewer = ({
         <div
           key={index}
           ref={isFirstHighlightedLine ? highlightedContentRef : null}
+          data-cited-line={isHighlighted ? lineNumber : undefined}
           className={`py-2 px-3 rounded leading-relaxed ${
             isHighlighted 
               ? 'border-l-4' 
@@ -265,7 +215,7 @@ const SourceContentViewer = ({
         </div>
         {!isOpenedFromSourceList && notebookId && createSourceLearningQuestion(notebookId, citation, sourceContent, 'explain') && (
           <div className="mt-3 space-y-2" aria-label="Learn from this passage">
-            <p className="text-xs text-slate-500">Explore the highlighted passage · lines {citation.chunk_lines_from}–{citation.chunk_lines_to}</p>
+            <p className="text-xs text-slate-500">Highlighted passage · {citation.chunk_lines_from === citation.chunk_lines_to ? `Line ${citation.chunk_lines_from}` : `Lines ${citation.chunk_lines_from}–${citation.chunk_lines_to}`}</p>
             <div className="flex flex-wrap gap-2">
               {(['explain', 'practice'] as SourceLearningAction[]).map((action) => (
                 <Button key={action} variant="outline" size="sm" className="h-auto min-h-9 whitespace-normal border-blue-200 text-blue-700 hover:bg-blue-50" onClick={() => {
@@ -358,7 +308,7 @@ const SourceContentViewer = ({
 
       {/* Content */}
       <ScrollArea className="flex-1 h-full" ref={scrollAreaViewportRef}>
-        <div className="p-4">
+        <div className="p-4 pb-24 sm:pb-4" role="region" aria-label="Source passage" tabIndex={0}>
           <div className="prose prose-gray max-w-none space-y-1">
             {renderHighlightedContent()}
           </div>

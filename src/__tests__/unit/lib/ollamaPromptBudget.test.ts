@@ -16,6 +16,8 @@ describe("Ollama chat prompt budgeting", () => {
   beforeEach(() => {
     vi.resetModules();
     vi.stubEnv("VITE_ENABLE_OLLAMA", "true");
+    vi.stubEnv("VITE_OLLAMA_THINK", "false");
+    vi.stubEnv("VITE_OLLAMA_CONTEXT", "0");
     vi.stubEnv("VITE_OLLAMA_MODEL", "qwen2.5:7b");
     window.localStorage.clear();
     mocks.generate.mockReset().mockResolvedValue("ok");

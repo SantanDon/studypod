@@ -1,14 +1,13 @@
 import React, { useRef } from 'react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
-import { Carousel, CarouselContent, CarouselItem, CarouselNext, CarouselPrevious } from '@/components/ui/carousel';
 import { useToast } from '@/hooks/use-toast';
 import { Loader2, Send } from 'lucide-react';
 
 /**
  * ChatInput Component
  * 
- * Handles user input for chat messages with send button and example questions carousel.
+ * Handles user input for chat messages with send button and suggested questions.
  * 
  * @component
  * @example
@@ -142,34 +141,22 @@ const ChatInput: React.FC<ChatInputProps> = ({
           </Button>
         </div>
 
-        {/* Example Questions Carousel */}
         {shouldShowExamples && (
-          <div className="mt-4">
-            <Carousel aria-label="Suggested learning questions" className="w-full max-w-4xl">
-              <CarouselContent className="-ml-2 md:-ml-4">
-                {exampleQuestions.map((question, index) => (
-                  <CarouselItem key={index} className="pl-2 md:pl-4 basis-auto">
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      aria-label={`Suggested question: ${getExampleQuestionLabel(question)}`}
-                      title={question}
-                      className="h-auto max-w-[min(82vw,28rem)] whitespace-normal break-words py-2 px-3 text-left text-sm leading-snug sm:max-w-none sm:whitespace-nowrap"
-                      onClick={() => onExampleQuestionClick?.(question)}
-                    >
-                      {getExampleQuestionLabel(question)}
-                    </Button>
-                  </CarouselItem>
-                ))}
-              </CarouselContent>
-              {exampleQuestions.length > 2 && (
-                <>
-                  <CarouselPrevious className="left-0 hidden sm:inline-flex" />
-                  <CarouselNext className="right-0 hidden sm:inline-flex" />
-                </>
-              )}
-            </Carousel>
-          </div>
+          <section aria-label="Suggested learning questions" className="mt-3 flex max-h-32 flex-wrap gap-2 overflow-y-auto p-1">
+            {exampleQuestions.map((question) => (
+              <Button
+                key={question}
+                variant="outline"
+                size="sm"
+                aria-label={`Suggested question: ${getExampleQuestionLabel(question)}`}
+                title={question}
+                className="h-auto max-w-full whitespace-normal break-words px-3 py-2 text-left text-sm leading-snug"
+                onClick={() => onExampleQuestionClick?.(question)}
+              >
+                {getExampleQuestionLabel(question)}
+              </Button>
+            ))}
+          </section>
         )}
       </div>
     </div>

@@ -61,8 +61,7 @@ const NotebookGrid = () => {
     return sorted;
   }, [notebooks, sortBy]);
 
-  const toggleSelection = (id: string, e: React.MouseEvent) => {
-    e.stopPropagation();
+  const toggleSelection = (id: string) => {
     setSelectedIds(prev => 
       prev.includes(id) ? prev.filter(i => i !== id) : [...prev, id]
     );
@@ -130,19 +129,12 @@ const NotebookGrid = () => {
     }
   };
 
-  const handleNotebookClick = (notebookId: string, e: React.MouseEvent) => {
+  const handleNotebookClick = (notebookId: string) => {
     if (isSelectionMode) {
-      toggleSelection(notebookId, e);
+      toggleSelection(notebookId);
       return;
     }
 
-    // Check if the click is coming from a delete action or other interactive element
-    const target = e.target as HTMLElement;
-    const isDeleteAction = target.closest('[data-delete-action="true"]') || target.closest('.delete-button') || target.closest('[role="dialog"]');
-    if (isDeleteAction) {
-      console.log('Click prevented due to delete action');
-      return;
-    }
     navigate(`/notebook/${notebookId}`);
   };
 
@@ -196,10 +188,10 @@ const NotebookGrid = () => {
 
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
-              <div className="flex items-center space-x-2 bg-white rounded-lg border px-3 py-2 cursor-pointer hover:bg-gray-50 transition-colors">
+              <button type="button" aria-label={`Sort notebooks: ${sortBy}`} className="flex items-center space-x-2 bg-white rounded-lg border px-3 py-2 cursor-pointer hover:bg-gray-50 transition-colors">
                 <span className="text-sm text-gray-600">{sortBy}</span>
                 <i className="fi fi-rr-angle-down h-4 w-4 text-gray-400"></i>
-              </div>
+              </button>
             </DropdownMenuTrigger>
             <DropdownMenuContent align="end" className="w-48">
               <DropdownMenuItem onClick={() => setSortBy('Most recent')} className="flex items-center justify-between">
@@ -217,7 +209,8 @@ const NotebookGrid = () => {
 
       <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4 pb-24">
         {sortedNotebooks.map(notebook => (
-          <div key={notebook.id} onClick={e => handleNotebookClick(notebook.id, e)} className="relative group">
+          <div key={notebook.id} className="relative group">
+            <button type="button" onClick={() => handleNotebookClick(notebook.id)} aria-label={`${isSelectionMode ? 'Select' : 'Open'} ${notebook.title || 'Untitled'}`} aria-pressed={isSelectionMode ? selectedIds.includes(notebook.id) : undefined} className="absolute inset-0 z-10 w-full rounded-lg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-2" />
             <NotebookCard notebook={{
               id: notebook.id,
               title: notebook.title || 'Untitled',
@@ -251,7 +244,7 @@ const NotebookGrid = () => {
       </div>
 
       {isSelectionMode && selectedIds.length > 0 && (
-        <div className="fixed bottom-8 left-1/2 -translate-x-1/2 bg-white border border-gray-200 shadow-2xl rounded-2xl px-6 py-4 flex items-center space-x-6 z-50 animate-in fade-in slide-in-from-bottom-4 duration-300">
+        <div className="fixed bottom-4 left-1/2 -translate-x-1/2 w-[calc(100%-2rem)] max-w-xl bg-white border border-gray-200 shadow-2xl rounded-2xl px-4 py-3 flex flex-wrap items-center justify-between gap-3 z-50 animate-in fade-in slide-in-from-bottom-4 duration-300">
           <div className="flex flex-col">
             <span className="text-sm font-semibold text-gray-900">{selectedIds.length} notebooks selected</span>
             <span className="text-xs text-gray-500 italic">This will delete all content within these notebooks.</span>
@@ -279,7 +272,9 @@ const NotebookGrid = () => {
             </DialogDescription>
           </DialogHeader>
           <form onSubmit={handleJoinNotebook} className="space-y-4 pt-2">
+            <label htmlFor="join-code" className="block text-sm font-medium">Join code</label>
             <Input
+              id="join-code"
               placeholder="e.g. A4K9B2"
               value={joinCodeInput}
               onChange={(e) => setJoinCodeInput(e.target.value.toUpperCase())}

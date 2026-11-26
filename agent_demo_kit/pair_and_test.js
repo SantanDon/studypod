@@ -1,122 +1,90 @@
-/**
- * StudyPodLM Agent Demo Kit - pair_and_test.js
- *
- * All-in-one script: pairs with a human-generated PIN, verifies identity,
- * lists notebooks, posts a test note, and checks notebook chat.
- *
- * Usage:
- *   node agent_demo_kit/pair_and_test.js <6-DIGIT-PIN>
- *
- * Prerequisites:
- *   - Node 18+ (uses native fetch)
- *   - A human user must be logged into StudyPodLM and generate the PIN
- *
- * No external dependencies required.
- */
+// Exchange a human-generated PIN for a short-lived demo key.
+const API_BASE = (process.env.STUDYPOD_API || "http://127.0.0.1:4000/api").replace(/\/+$/, "");
+const [pin, option, notebookId, ...extraArgs] = process.argv.slice(2);
 
-const API_BASE = process.env.STUDYPOD_API || "http://localhost:4000/api";
-const PIN = process.argv[2];
-
-if (!PIN || PIN.length !== 6) {
-  console.error("Usage: node pair_and_test.js <6-DIGIT-PIN>");
-  console.error(
-    "  Generate the PIN from StudyPodLM -> Profile -> Agent Pairing",
-  );
-  process.exit(1);
+async function request(step, path, options) {
+  let response;
+  try {
+    response = await fetch(`${API_BASE}${path}`, {
+      ...options,
+      redirect: "error",
+      signal: AbortSignal.timeout(15_000),
+    });
+  } catch {
+    throw new Error(`${step} failed. Check STUDYPOD_API and the server connection.`);
+  }
+  if (!response.ok) {
+    throw new Error(`${step} failed (HTTP ${response.status}).`);
+  }
+  try {
+    return await response.json();
+  } catch {
+    throw new Error(`${step} returned invalid JSON.`);
+  }
 }
 
 async function main() {
-  console.log(`\nPairing with code [${PIN}]...`);
-  const pairRes = await fetch(`${API_BASE}/auth/pair/complete`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ code: PIN, label: "DemoAgent" }),
-  });
-
-  if (!pairRes.ok) {
-    const err = await pairRes.json().catch(() => ({}));
-    console.error("Pairing failed:", err.error || pairRes.statusText);
-    process.exit(1);
+  const invalidWriteOption =
+    option !== undefined &&
+    (option !== "--write-note" || !notebookId?.trim() || extraArgs.length > 0);
+  if (!/^\d{6}$/.test(pin ?? "") || invalidWriteOption) {
+    throw new Error(
+      "Usage: node agent_demo_kit/pair_and_test.js <6-DIGIT-PIN> [--write-note <NOTEBOOK-ID>]",
+    );
   }
 
-  const { key } = await pairRes.json();
-  console.log(`Pairing successful. API key: ${key.substring(0, 12)}...`);
+  const { key } = (await request("Pairing", "/auth/pair/complete", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      code: pin,
+      label: "DemoAgent",
+      scopes: notebookId ? ["notebooks:read", "notes:create"] : ["notebooks:read"],
+      notebookIds: notebookId ? [notebookId] : undefined,
+      expiresInHours: 1,
+    }),
+  })) ?? {};
+  if (typeof key !== "string" || !key.startsWith("spm_")) {
+    throw new Error("Pairing returned no usable agent key.");
+  }
 
   const headers = {
     Authorization: `Bearer ${key}`,
     "Content-Type": "application/json",
   };
+  const identity = await request("Identity verification", "/auth/me", { headers });
+  if (!identity?.id) {
+    throw new Error("Identity verification returned no user ID.");
+  }
 
-  console.log("\nVerifying identity...");
-  const meRes = await fetch(`${API_BASE}/auth/me`, { headers });
-  const me = await meRes.json();
-  console.log(`   ID: ${me.id}`);
-  console.log(`   Name: ${me.displayName}`);
-  console.log(`   Type: ${me.accountType || me.account_type}`);
+  const notebooks = await request("Notebook listing", "/notebooks", { headers });
+  if (!Array.isArray(notebooks)) {
+    throw new Error("Notebook listing returned an unexpected response.");
+  }
+  console.log(`Pairing and identity verified. Accessible notebooks: ${notebooks.length}.`);
 
-  console.log("\nListing notebooks...");
-  const nbRes = await fetch(`${API_BASE}/notebooks`, { headers });
-  const notebooks = await nbRes.json();
-
-  if (!Array.isArray(notebooks) || notebooks.length === 0) {
-    console.log(
-      "   No notebooks found. Create one in the StudyPodLM UI first.",
+  if (notebookId) {
+    if (!notebooks.some((notebook) => notebook?.id === notebookId)) {
+      throw new Error("The requested notebook is unavailable to the demo key.");
+    }
+    const note = await request(
+      "Test note creation",
+      `/notebooks/${encodeURIComponent(notebookId)}/notes`,
+      {
+        method: "POST",
+        headers,
+        body: JSON.stringify({ content: "StudyPod agent pairing test note." }),
+      },
     );
-    return;
+    if (!note?.id) {
+      throw new Error("Test note creation returned no note ID.");
+    }
+    console.log("Test note created in the requested notebook.");
   }
-
-  notebooks.forEach((nb, i) => {
-    console.log(`   [${i + 1}] ${nb.title} (${nb.id})`);
-  });
-
-  const targetNotebook = notebooks[0];
-  console.log(`\nPosting test note to "${targetNotebook.title}"...`);
-  const noteRes = await fetch(
-    `${API_BASE}/notebooks/${targetNotebook.id}/notes`,
-    {
-      method: "POST",
-      headers,
-      body: JSON.stringify({
-        content: `**AGENT TEST** - This note was posted by pair_and_test.js at ${new Date().toISOString()}.`,
-      }),
-    },
-  );
-
-  if (noteRes.ok) {
-    const note = await noteRes.json();
-    console.log(`Note created: ${note.id}`);
-  } else {
-    const err = await noteRes.json().catch(() => ({}));
-    console.error("Note creation failed:", err.error || noteRes.statusText);
-  }
-
-  console.log(`\nTesting notebook chat on "${targetNotebook.title}"...`);
-  const chatRes = await fetch(
-    `${API_BASE}/notebooks/${targetNotebook.id}/chat`,
-    {
-      method: "POST",
-      headers,
-      body: JSON.stringify({
-        message: "Summarize the current notebook context in one sentence.",
-        saveAsNote: false,
-      }),
-    },
-  );
-
-  if (chatRes.ok) {
-    const chat = await chatRes.json();
-    console.log(
-      `Chat success. Model says: ${chat.response?.substring(0, 80)}...`,
-    );
-  } else {
-    const err = await chatRes.json().catch(() => ({}));
-    console.error("Chat failed:", err.error || chatRes.statusText);
-  }
-
-  console.log("\nAgent demo complete.");
+  console.log("Agent demo complete.");
 }
 
-main().catch((err) => {
-  console.error("Fatal error:", err.message);
-  process.exit(1);
+main().catch((error) => {
+  console.error(error.message);
+  process.exitCode = 1;
 });

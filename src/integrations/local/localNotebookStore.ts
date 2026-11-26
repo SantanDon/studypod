@@ -1,5 +1,7 @@
 import { localStorageService } from '@/services/localStorageService';
 
+import { revisionGuide } from '@/lib/chat/guestPassage';
+
 interface Notebook {
   id: string;
   title: string;
@@ -33,15 +35,25 @@ class LocalNotebookStore {
     });
   }
 
-  async createNotebook(notebookData: { title: string; description?: string }, userId: string): Promise<Notebook> {
+  async createNotebook(notebookData: { title: string; description?: string; revisionPlanner?: boolean }, userId: string): Promise<Notebook> {
     // Simulate async operation
     await new Promise(resolve => setTimeout(resolve, 50));
     const newNotebook = localStorageService.createNotebook({
       title: notebookData.title,
       description: notebookData.description,
       user_id: userId,
-      generation_status: 'pending',
+      example_questions: notebookData.revisionPlanner ? revisionGuide.questions : undefined,
+      generation_status: notebookData.revisionPlanner ? 'completed' : 'pending',
     });
+    if (notebookData.revisionPlanner) {
+      try {
+        localStorageService.createSource({ notebook_id: newNotebook.id, title: 'Five-day revision plan', type: 'text',
+          content: revisionGuide.content, processing_status: 'completed', metadata: { revisionPlanner: true } });
+      } catch (error) {
+        localStorageService.deleteNotebook(newNotebook.id);
+        throw error;
+      }
+    }
     return newNotebook;
   }
 

@@ -33,6 +33,18 @@ afterEach(() => {
 });
 
 describe("useOllamaModels discovery", () => {
+  it("initializes browser defaults from the configured model without overriding saved choices", () => {
+    vi.stubEnv("VITE_OLLAMA_MODEL", "bonsai-2:27b");
+    const first = setup();
+    expect(first.result.current.defaultModels.chat).toBe("bonsai-2:27b");
+    expect(first.result.current.defaultModels.code).toBe("bonsai-2:27b");
+    expect(first.result.current.defaultModels.embedding).not.toBe("bonsai-2:27b");
+    first.unmount();
+    window.localStorage.setItem("ollama-default-models", JSON.stringify({ chat: "chosen:7b", code: "chosen:7b", embedding: "embed:latest" }));
+    const second = setup();
+    expect(second.result.current.defaultModels.chat).toBe("chosen:7b");
+  });
+
   it("reports disabled without probing Ollama until runtime opt-in", async () => {
     service.checkOllamaHealth.mockResolvedValue(false);
     const { result } = setup();

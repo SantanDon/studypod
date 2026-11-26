@@ -17,7 +17,7 @@ import { Analytics, type BeforeSendEvent } from "@vercel/analytics/react";
 
 const queryClient = new QueryClient();
 
-const Dashboard = lazy(() => import('./pages/Dashboard'));
+import Dashboard from './pages/Dashboard';
 const Notebook = lazy(() => import('./pages/Notebook'));
 const Settings = lazy(() => import('./pages/Settings'));
 const NotFound = lazy(() => import('./pages/NotFound'));
@@ -26,15 +26,22 @@ const Privacy = lazy(() => import('./pages/Privacy'));
 const Terms = lazy(() => import('./pages/Terms'));
 const ChatGPTConnect = lazy(() => import('./pages/ChatGPTConnect'));
 
-const RouteFallback = () => (
-  <div className="flex min-h-screen items-center justify-center bg-background text-foreground">
-    <div className="flex items-center gap-3 text-sm text-muted-foreground">
-      <span className="h-5 w-5 animate-spin rounded-full border-2 border-current border-t-transparent" />
-      Loading StudyPod…
+const RouteFallback = () => {
+  const [delayed, setDelayed] = useState(false);
+  useEffect(() => {
+    const timer = window.setTimeout(() => setDelayed(true), 8000);
+    return () => window.clearTimeout(timer);
+  }, []);
+  return (
+    <div className="flex min-h-screen flex-col items-center justify-center gap-4 bg-background text-foreground">
+      <div role="status" className="flex items-center gap-3 text-sm text-muted-foreground">
+        <span aria-hidden="true" className="h-5 w-5 animate-spin rounded-full border-2 border-current border-t-transparent motion-reduce:animate-none" />
+        {delayed ? "This page is taking longer to load." : "Loading StudyPod…"}
+      </div>
+      {delayed && <button type="button" className="rounded-md border px-4 py-2 text-sm" onClick={() => window.location.reload()}>Reload page</button>}
     </div>
-  </div>
-);
-
+  );
+};
 const redactAnalyticsEvent = (event: BeforeSendEvent): BeforeSendEvent | null => {
   try {
     const url = new URL(event.url);
@@ -81,7 +88,7 @@ const AppContent = () => {
       <Analytics beforeSend={redactAnalyticsEvent} />
       <GuestBanner />
       <GlobalSearch open={searchOpen} setOpen={setSearchOpen} />
-      <Suspense fallback={<RouteFallback />}>
+      <Suspense key={location.pathname} fallback={<RouteFallback />}>
         <Routes>
         {/* Dedicated authentication route */}
         <Route 

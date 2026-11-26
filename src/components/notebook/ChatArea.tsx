@@ -2,8 +2,7 @@ import StudioAudioCommandCard from './StudioAudioCommandCard';
 import { parseStudioAudioIntent, useStudioAudioCommands } from '@/lib/audio/studioAudioCommands';
 import { lazy, Suspense, useState, useEffect, useRef, useCallback } from 'react';
 import { Button } from '@/components/ui/button';
-import { Input } from '@/components/ui/input';
-import { Bot, List, Loader2, MessageSquare, RefreshCw, Search, Send, Share2 } from 'lucide-react';
+import { Bot, List, Loader2, MessageSquare, RefreshCw, Search, Share2 } from 'lucide-react';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { useChatMessages, type ChatMessageRequest } from '@/hooks/useChatMessages';
 import { useSources } from '@/hooks/useSources';
@@ -272,7 +271,6 @@ const ChatArea = ({
         return;
       }
 
-      console.log('📤 Sending message:', textToSend);
 
       try {
         if (!isToastRetry || failedMessage === textToSend) setFailedMessage(null);
@@ -305,7 +303,6 @@ const ChatArea = ({
           incrementUsage('messages', notebookId);
         }
 
-        console.log('✅ Message sent successfully');
 
         // Clear pending message, draft, and loading state after response
         setPendingUserMessage(null);
@@ -424,7 +421,6 @@ const ChatArea = ({
 
   const handleRefreshChat = () => {
     if (notebookId) {
-      console.log('Refresh button clicked for notebook:', notebookId);
       deleteChatHistory(notebookId);
       // Reset clicked questions when chat is refreshed
       setClickedQuestions(new Set());
@@ -521,8 +517,8 @@ const ChatArea = ({
     // Show remaining messages for guests
     if (isGuest) {
       return chatMode === 'agent' 
-        ? `Collaborate with Agent... (${messagesRemaining} msgs)`
-        : `Start typing... (${messagesRemaining} msgs)`;
+        ? `Ask your agent · ${messagesRemaining} messages left`
+        : `Ask about your sources · ${messagesRemaining} messages left`;
     }
     if (chatScope === 'active' && activeSource) {
       return `Ask only ${activeSource.title}...`;
@@ -540,7 +536,7 @@ const ChatArea = ({
             {sourcesFetching ? 'Retrying…' : 'Retry loading sources'}
           </Button>
         </div>
-      ) : hasSource ? <div className="flex-1 flex flex-col h-full overflow-hidden">
+      ) : hasSource || message.length > 0 ? <div className="flex-1 flex flex-col h-full overflow-hidden">
         {/* Chat Header */}
           <div className="p-4 border-b border-gray-200 dark:border-border flex-shrink-0 bg-background dark:bg-background">
             <div className="max-w-4xl mx-auto">
@@ -618,6 +614,14 @@ const ChatArea = ({
                 </Button>
               </div>
               </div>
+              <details className="mt-2 sm:hidden">
+                <summary className="cursor-pointer rounded-md py-2 text-sm font-medium">More chat actions</summary>
+                <div className="flex flex-wrap gap-2 py-1">
+                  <Button size="sm" variant="outline" onClick={() => setShowResearchDialog(true)}>Research further</Button>
+                  {(notebook?.joinCode || notebook?.join_code) && <Button size="sm" variant="outline" onClick={handleShareNotebook}>Share notebook</Button>}
+                  {shouldShowRefreshButton && <Button size="sm" variant="outline" onClick={handleRefreshChat} disabled={isDeletingChatHistory || isChatDisabled}>Clear chat</Button>}
+                </div>
+              </details>
               <div className="mt-3 md:hidden">
                 <ChatEvidenceScope
                   value={chatScope}
@@ -678,7 +682,7 @@ const ChatArea = ({
                {/* Chat Messages */}
                 {(messages.length > 0 || pendingUserMessage || showAiLoading || failedMessage) && <div className="mb-6 space-y-4">
                     {messages.map((msg) => <div key={msg.id} className={`group flex ${isUserMessage(msg) ? 'justify-end' : 'justify-start'}`}>
-                        <div className={`${isUserMessage(msg) ? 'max-w-xs lg:max-w-md px-4 py-2 bg-blue-500 text-white rounded-lg' : 'w-full'}`}>
+                        <div className={`${isUserMessage(msg) ? 'max-w-xs lg:max-w-md px-4 py-2 bg-blue-600 text-white rounded-lg' : 'w-full'}`}>
                           <div className={isUserMessage(msg) ? '' : 'prose prose-gray dark:prose-invert max-w-none text-gray-800 dark:text-gray-200'}>
                             <MarkdownRenderer content={isUserMessage(msg) && typeof msg.message.content === 'string' ? getVisibleChatQuestion(msg.message.content) : msg.message.content} className={isUserMessage(msg) ? '' : ''} onCitationClick={handleCitationClick} isUserMessage={isUserMessage(msg)} />
                           </div>
@@ -690,7 +694,7 @@ const ChatArea = ({
                     
                     {/* Pending user message */}
                     {pendingUserMessage && <div className="flex justify-end">
-                        <div className="max-w-xs lg:max-w-md px-4 py-2 bg-blue-500 text-white rounded-lg">
+                        <div className="max-w-xs lg:max-w-md px-4 py-2 bg-blue-600 text-white rounded-lg">
                           <MarkdownRenderer content={getVisibleChatQuestion(pendingUserMessage)} className="" isUserMessage={true} />
                         </div>
                       </div>}
@@ -761,18 +765,6 @@ const ChatArea = ({
             </Button>
           </div>
 
-          {/* Bottom Input */}
-          <div className="w-full max-w-2xl">
-            <div className="flex gap-2 sm:gap-4">
-              <Input aria-label="Chat message" value={message} placeholder="Add a source to get started" disabled className="min-w-0 flex-1 h-11 sm:h-10" />
-              <div className="flex shrink-0 items-center text-sm text-gray-500">
-                0 sources
-              </div>
-              <Button disabled aria-label="Send message" className="h-11 min-w-11 shrink-0 sm:h-10">
-                <Send className="h-4 w-4" aria-hidden="true" />
-              </Button>
-            </div>
-          </div>
         </div>}
       
       {/* Footer */}

@@ -13,7 +13,7 @@
 import { generateTextToString, listModels } from "./ollamaClient";
 import { DOCUMENT_PROMPTS, formatPrompt } from "@/config/prompts";
 import { getModelForTask, getRuntimeModelForTask, type OllamaTask } from "@/config/ollamaModels";
-import { getOllamaBaseUrl, isOllamaEnabled } from "@/config/ollamaConfig";
+import { getOllamaBaseUrl, isOllamaEnabled, getOllamaGenerationConfig } from "@/config/ollamaConfig";
 import { createRequestDeadline, type RequestDeadlineOptions } from './requestDeadline';
 import { generateServerAiResponse } from "./serverAiClient";
 import { getLocalModelSettings, isCompatibleLocalModelSelected } from "@/config/localModelConfig";
@@ -421,6 +421,8 @@ type ChatCompletionParams = RequestDeadlineOptions & {
   temperature?: number;
   maxOutputTokens?: number;
   jsonMode?: boolean;
+  /** Constrain native Ollama output; other providers still undergo strict parsing. */
+  jsonSchema?: Record<string, unknown>;
   onChunk?: (chunk: string) => void;
   /** Force local inference for this request; failures are surfaced without cloud fallback. */
   localOnly?: boolean;
@@ -430,10 +432,10 @@ export async function chatCompletion(params: ChatCompletionParams): Promise<stri
   if (params.maxOutputTokens !== undefined && (!Number.isInteger(params.maxOutputTokens) || params.maxOutputTokens < 1 || params.maxOutputTokens > 8192)) {
     throw new Error("maxOutputTokens must be an integer between 1 and 8192");
   }
-  const scope = createRequestDeadline(params);
+  const scope = createRequestDeadline({ ...params, deadlineAt: params.deadlineAt ?? Date.now() + 300000 });
   try {
     scope.signal.throwIfAborted();
-    const result = await chatCompletionInternal({ ...params, signal: params.signal || params.deadlineAt !== undefined ? scope.signal : undefined });
+    const result = await chatCompletionInternal({ ...params, signal: scope.signal });
     scope.signal.throwIfAborted();
     return result;
   } finally {
@@ -489,7 +491,8 @@ async function chatCompletionInternal(params: ChatCompletionParams): Promise<str
 
   // Check cache for non-streaming requests
   // Use the full prompt (not just first 100 chars) to avoid cache collisions
-  const useCache = params.maxOutputTokens === undefined && !params.jsonMode;
+  const generation = getOllamaGenerationConfig();
+  const useCache = !generation.think && params.maxOutputTokens === undefined && !params.jsonMode && !params.jsonSchema;
   if (!params.stream && useCache) {
     const cached = getCachedResponse(model, sanitizedPrompt); // Use sanitizedPrompt instead of original prompt
     if (cached) return cached;
@@ -506,14 +509,13 @@ async function chatCompletionInternal(params: ChatCompletionParams): Promise<str
           model,
           prompt: finalPrompt,
           stream: true,
-          think: false,
-          ...(params.jsonMode ? { format: "json" } : {}),
+          think: generation.think,
+          ...(params.jsonSchema ? { format: params.jsonSchema } : params.jsonMode ? { format: "json" } : {}),
           options: {
             temperature: params.temperature ?? 0.7,
-            num_predict: params.maxOutputTokens ?? 1024,
-            top_k: 40,
-            top_p: 0.9,
-            num_ctx: params.jsonMode || (params.maxOutputTokens ?? 0) > 1024 ? 16384 : 2048,
+            num_predict: (params.maxOutputTokens ?? 1024) + generation.reasoningTokens,
+            ...(!generation.think ? { top_k: 40, top_p: 0.9 } : {}),
+            num_ctx: generation.context ?? 16384,
           },
         }),
       });
@@ -525,25 +527,34 @@ async function chatCompletionInternal(params: ChatCompletionParams): Promise<str
 
       const decoder = new TextDecoder();
       let fullResponse = "";
-
-      while (true) {
-        const { done, value } = await reader.read();
-        if (done) break;
-
-        const chunk = decoder.decode(value);
-        const lines = chunk.split("\n").filter(Boolean);
-
-        for (const line of lines) {
-          try {
-            const json = JSON.parse(line);
-            if (json.response) {
-              fullResponse += json.response;
-              params.onChunk(json.response);
-            }
-          } catch {
-            // Skip invalid JSON
-          }
+      let pending = "";
+      let completed = false;
+      const consume = (line: string) => {
+        if (!line.trim()) return;
+        const json = JSON.parse(line);
+        if (json.error) throw new Error(String(json.error));
+        if (json.done_reason === "length") throw new Error("Ollama generation ended before completion (token limit reached).");
+        if (typeof json.response === "string") {
+          fullResponse += json.response;
+          params.onChunk!(json.response);
         }
+        if (json.done === true) completed = true;
+      };
+      try {
+        while (true) {
+          const { done, value } = await reader.read();
+          pending += decoder.decode(value, { stream: !done });
+          const lines = pending.split("\n");
+          pending = lines.pop() || "";
+          for (const line of lines) consume(line);
+          if (done) break;
+        }
+        consume(pending);
+        if (!completed) throw new Error("Ollama stream ended before completion. Please retry.");
+        if (!fullResponse.trim()) throw new Error("Ollama returned no answer text. Please retry with a larger generation budget.");
+      } finally {
+        await reader.cancel().catch(() => {});
+        reader.releaseLock();
       }
 
       if (useCache) cacheResponse(model, sanitizedPrompt, fullResponse);
@@ -552,7 +563,9 @@ async function chatCompletionInternal(params: ChatCompletionParams): Promise<str
       // Non-streaming mode - ultra fast
       // Use smaller context for chat queries, larger for document processing
       const isShortQuery = sanitizedPrompt.length < 500;
-      const timeoutMs = isShortQuery ? 30000 : 120000;
+      const timeoutMs = params.deadlineAt
+        ? Math.max(1, params.deadlineAt - Date.now())
+        : generation.think ? 300000 : (isShortQuery ? 30000 : 120000);
       // Ollama's fetch timeout only covers waiting for response headers. The
       // non-streaming client then consumes response.json(), which can hang if
       // the server stalls mid-body. Keep our own deadline alive through the
@@ -573,18 +586,17 @@ async function chatCompletionInternal(params: ChatCompletionParams): Promise<str
           prompt: finalPrompt,
           stream: false,
           params: {
-            think: false,
-            ...(params.jsonMode ? { format: "json" } : {}),
+            think: generation.think,
+            ...(params.jsonSchema ? { format: params.jsonSchema } : params.jsonMode ? { format: "json" } : {}),
             options: {
               temperature: params.temperature ?? 0.7,
               // Keep long grounded replies bounded while leaving room for the
               // source-heavy prompt and its citations in the model context.
-              num_predict: params.maxOutputTokens ?? (isShortQuery ? 512 : 1024),
-              top_k: 40,
-              top_p: 0.9,
+              num_predict: (params.maxOutputTokens ?? (isShortQuery ? 512 : 1024)) + generation.reasoningTokens,
+              ...(!generation.think ? { top_k: 40, top_p: 0.9 } : {}),
               // buildOllamaChatPrompt permits up to 20k characters (roughly
               // 5k+ tokens), so 4096 could crowd out the latest source evidence.
-              num_ctx: params.jsonMode || (params.maxOutputTokens ?? 0) > 1024 ? 16384 : (isShortQuery ? 2048 : 8192),
+              num_ctx: generation.context ?? (generation.think || params.jsonMode || (params.maxOutputTokens ?? 0) > 1024 ? 16384 : (isShortQuery ? 2048 : 8192)),
             },
           },
           signal: requestSignal,

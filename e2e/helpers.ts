@@ -34,7 +34,15 @@ export async function observeBrowser(page: Page, testInfo: TestInfo, fixtureMode
     if (response.status() >= 400 && !expectedProfile) errors.push(`HTTP ${response.status()} ${response.url()}`);
   });
   const origin = new URL(testInfo.project.use.baseURL as string).origin;
-  await page.route('**/*', async route => {
+  // Let Chromium load the local preview's immutable build files directly.
+  // Keep all external traffic, API requests and production requests intercepted.
+  const isPreviewAsset = (url: URL) => fixtureMode && url.origin === origin && url.pathname.startsWith('/assets/');
+  page.on('request', request => {
+    if (isPreviewAsset(new URL(request.url())) && !['GET', 'HEAD'].includes(request.method())) {
+      errors.push('Unexpected write to a static preview asset');
+    }
+  });
+  await page.route(url => !isPreviewAsset(url), async route => {
     const request = route.request();
     const url = new URL(request.url());
     if (!['GET', 'HEAD', 'OPTIONS'].includes(request.method())) {

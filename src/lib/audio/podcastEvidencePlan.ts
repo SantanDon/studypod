@@ -145,7 +145,7 @@ export function isLikelyNonSubstantiveFrontMatter(passage: string): boolean {
   return titleCard;
 }
 
-export function indexPodcastEvidence(content: string, budget = 12000, focus?: string) {
+export function indexPodcastEvidence(content: string, budget = 12000, focus?: string, maxPassages = 60) {
   const passages: EvidencePassage[] = [];
   let used = 0;
   let omitted = /^COVERAGE: partial;/m.test(content);
@@ -195,7 +195,7 @@ export function indexPodcastEvidence(content: string, budget = 12000, focus?: st
       continue;
     }
     // Do not split a paragraph: qualifiers and a planned/result distinction must remain together.
-    if (text.length > 4000 || used + text.length > budget || passages.length >= 60) { omitted = true; continue; }
+    if (text.length > 4000 || used + text.length > budget || passages.length >= maxPassages) { omitted = true; continue; }
     const id = `p${passages.length + 1}`;
     passages.push({id, text, ...(sectionHeading ? {sectionHeading} : {}), ...(sourceId ? {sourceId} : {})});
     used += text.length;

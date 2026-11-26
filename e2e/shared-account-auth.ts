@@ -9,6 +9,6 @@ export async function openSharedAccountLogin(context: BrowserContext, origin: st
   // A successful access-link response alone does not establish app access.
   await expect(page.getByLabel('Email Address')).toBeVisible();
   await expect(page.getByLabel('Password', { exact: true })).toBeVisible();
-  await expect(page.getByRole('button', { name: 'Sign in', exact: true })).toBeVisible();
+  await expect(page.getByRole('button', { name: /^(Sign in|Login to Cloud)$/ })).toBeVisible();
   return page;
 }

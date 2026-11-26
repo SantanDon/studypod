@@ -31,7 +31,7 @@ export const SourceSchema = z.object({
   file_path: z.string().optional().describe('File path (for uploaded files)'),
   file_size: z.number().optional().describe('File size in bytes'),
   processing_status: z.enum(SOURCE_PROCESSING_STATUSES).optional().describe('Processing status'),
-  metadata: z.record(z.unknown()).optional().describe('Additional metadata'),
+  metadata: z.record(z.string(), z.unknown()).optional().describe('Additional metadata'),
   created_at: z.string().datetime().describe('Creation timestamp'),
   updated_at: z.string().datetime().describe('Last update timestamp'),
 });

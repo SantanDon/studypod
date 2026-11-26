@@ -26,24 +26,6 @@ const CopiedTextDialog = ({
   const { pasteTextAsSource, isProcessing } = useTextPaste();
   const [validationWarning, setValidationWarning] = useState<string | null>(null);
 
-  // Auto-populate with clipboard content when dialog opens
-  useEffect(() => {
-    if (open) {
-      navigator.clipboard.readText()
-        .then(text => {
-          if (text && text.trim()) {
-            setContent(text);
-            // Generate a default title based on content length
-            const words = text.trim().split(' ').slice(0, 8).join(' ');
-            setTitle(words.length > 50 ? words.substring(0, 50) + '...' : words);
-          }
-        })
-        .catch(err => {
-          console.log('Could not read clipboard:', err);
-        });
-    }
-  }, [open]);
-
   const handleSubmit = async () => {
     if (!title.trim() || !content.trim() || !notebookId) {
       return;
@@ -117,9 +99,18 @@ const CopiedTextDialog = ({
         <div className="space-y-4">
           <div>
             <p className="text-sm text-gray-600 mb-4">
-              This dialog automatically reads from your clipboard. You can also manually paste content below.
+              Paste your own text or try a short sample to explore your notebook.
             </p>
           </div>
+
+          {!content && !title && (
+            <Button variant="outline" onClick={() => {
+              setTitle('School garden experiment');
+              setContent('In a fictional school garden, students planted twelve bean seedlings in two equal groups. Both groups received the same amount of water. One group grew in full sun and the other in partial shade. After four weeks, the full-sun group averaged 18 cm tall and the partial-shade group averaged 14 cm. The students planned to repeat the experiment before drawing a conclusion.');
+            }}>
+              Try a sample
+            </Button>
+          )}
 
           <div className="space-y-2">
             <Label htmlFor="title" className="text-sm font-medium">

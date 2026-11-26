@@ -142,7 +142,7 @@ describe('source learning chat delivery', () => {
     state.sources = [];
     render(view('book-empty', false));
     act(() => queueSourceLearningQuestion(makeRequest('book-empty')));
-    expect((screen.getByRole('textbox', { name: 'Chat message' }) as HTMLInputElement).value).toContain('Cells use energy.');
+    expect((screen.getByRole('textbox', { name: 'Learning draft' }) as HTMLTextAreaElement).value).toContain('Cells use energy.');
     expect(state.send).not.toHaveBeenCalled();
   });
   it('restores a blocked passage draft after remount and retries with its original source', async () => {

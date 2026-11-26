@@ -114,7 +114,7 @@ describe('ChatInput Component', () => {
     expect(input).toBeDisabled();
   });
 
-  it('renders example questions carousel', () => {
+  it('wraps suggested questions so each label is readable', () => {
     const questions = ['What is AI?', 'How does ML work?', 'What is deep learning?'];
     render(
       <ChatInput
@@ -131,7 +131,7 @@ describe('ChatInput Component', () => {
     expect(firstPrompt).toHaveAttribute('title', 'What is AI?');
     expect(firstPrompt).toHaveClass('whitespace-normal', 'break-words', 'leading-snug');
     expect(screen.getByRole('region', { name: 'Suggested learning questions' })).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'Previous slide' })).toHaveClass('hidden', 'sm:inline-flex');
+    expect(screen.getByRole('region', { name: 'Suggested learning questions' })).toHaveClass('flex-wrap');
   });
 
   it('calls onExampleQuestionClick when example question is clicked', async () => {

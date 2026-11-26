@@ -1,0 +1,30 @@
+<!doctype html>
+<html lang="en"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Passage Finder | StudyPod</title>
+<style>*{box-sizing:border-box}body{margin:0;background:#faf8f1;color:#18372e;font:18px/1.55 system-ui}main{max-width:44rem;margin:10vh auto;padding:1.4rem}header{font-weight:700;color:#35684e}h1{font:clamp(2.8rem,8vw,5rem)/1.05 Georgia;margin:1.2rem 0}form{display:grid;gap:.6rem;margin:2rem 0}input,button{font:inherit;padding:.65rem .85rem;border:1px solid #586e61;border-radius:.5rem}button{background:#214f3a;color:white;cursor:pointer;justify-self:start}a{color:#205a42}blockquote{margin:1rem 0;padding-left:1rem;border-left:3px solid #517858}*:focus-visible{outline:3px solid #8a4114;outline-offset:3px}</style>
+<main><header>StudyPod</header><h1>Passage Finder</h1><p>Ask the weekly revision guide a question. Follow the answer back to the exact line.</p>
+<form><label for="question">Your question</label><input id="question" name="q" maxlength="240" required value="What should I do on Friday?"><button>Find passage</button></form>
+<section aria-live="polite"><strong id="status"></strong><blockquote hidden></blockquote><a hidden>Open exact line on GitHub</a></section></main>
+<script>
+const form = document.querySelector('form');
+const statusText = document.querySelector('#status');
+const quote = document.querySelector('blockquote');
+const link = document.querySelector('a');
+form.addEventListener('submit', async event => {
+  event.preventDefault();
+  form.querySelector('button').disabled = true;
+  quote.hidden = link.hidden = true;
+  statusText.textContent = 'Reading the guide...';
+  try {
+    const response = await fetch('/answer?' + new URLSearchParams(new FormData(form)));
+    if (!response.ok) throw new Error();
+    const { passage } = await response.json();
+    statusText.textContent = passage ? passage.heading : 'No clear match. Try a day or a topic from the guide.';
+    if (passage) {
+      quote.textContent = passage.quote;
+      link.href = passage.url;
+      quote.hidden = link.hidden = false;
+    }
+  } catch { statusText.textContent = 'The guide is unavailable. Please try again.'; }
+  finally { form.querySelector('button').disabled = false; }
+});
+</script></html>

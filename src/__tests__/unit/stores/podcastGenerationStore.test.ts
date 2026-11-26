@@ -122,6 +122,20 @@ describe("podcast generation identity persistence", () => {
     });
   });
 
+  it("recovers a long recording draft with its source attribution, but never stale blob URLs", () => {
+    act(() => usePodcastGenerationStore.getState().startGeneration("notebook-1", script, { sourceIds: ["source-a"], type: "deep-dive" }));
+    const saved = JSON.parse(localStorage.getItem("active_podcast_notebook-1")!);
+    saved.timestamp = Date.now() - 2 * 60 * 60 * 1000;
+    saved.partialAudioUrls = ["blob:expired"];
+    localStorage.setItem("active_podcast_notebook-1", JSON.stringify(saved));
+    usePodcastGenerationStore.setState({ isGenerating: false, script: null, notebookId: null });
+    act(() => { usePodcastGenerationStore.getState().rehydrateState("notebook-1"); });
+    expect(usePodcastGenerationStore.getState()).toMatchObject({
+      isGenerating: false, script, sourceIds: ["source-a"], partialAudioUrls: [],
+      podcastType: "deep-dive", progress: { phase: "error" },
+    });
+  });
+
   it("retains a terminal generation error after the generating banner closes", () => {
     act(() => {
       usePodcastGenerationStore.getState().startGeneration("notebook-1", script);

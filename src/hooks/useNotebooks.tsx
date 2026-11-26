@@ -73,6 +73,7 @@ export const useNotebooks = () => {
   // ─── CREATE ────────────────────────────────────────────────────────────────
   const createNotebook = useMutation({
     mutationFn: async (notebookData: {
+      revisionPlanner?: boolean;
       title: string;
       description?: string;
     }) => {
@@ -96,6 +97,7 @@ export const useNotebooks = () => {
           {
             title: notebookData.title,
             description: notebookData.description,
+            revisionPlanner: notebookData.revisionPlanner,
           },
           effectiveUserId,
         );
@@ -172,6 +174,7 @@ export const useNotebooks = () => {
     error: (error as Error)?.message || null,
     isError,
     createNotebook: createNotebook.mutate,
+    createNotebookAsync: createNotebook.mutateAsync,
     isCreating: createNotebook.isPending,
     joinNotebook: joinNotebook.mutate,
     joinNotebookAsync: joinNotebook.mutateAsync,
