@@ -58,7 +58,7 @@ async function initializeKokoro(): Promise<void> {
   try {
     postResponse({
       type: 'progress',
-      message: 'Loading Kokoro TTS model...',
+      message: 'Preparing the reading voice on this device…',
       percentage: 10,
     });
 
@@ -67,7 +67,7 @@ async function initializeKokoro(): Promise<void> {
     
     postResponse({
       type: 'progress',
-      message: 'Initializing model (this may take a moment)...',
+      message: 'Checking for saved voice files…',
       percentage: 30,
     });
 
@@ -77,28 +77,44 @@ async function initializeKokoro(): Promise<void> {
 
     postResponse({
       type: 'progress',
-      message: `Loading Kokoro TTS model (WASM fp32)...`,
+      message: 'Opening the voice model. On first use, keep this tab open while its files download.',
       percentage: 40,
     });
 
-    const received = new Map<string, number>();
-    let totalReceived = 0;
-    let lastReport = 0;
+    const transfers = new Map<string, { started: number; initial: number; loaded: number }>();
+    let lastReport = -Infinity;
     kokoroInstance = await KokoroTTS.from_pretrained('onnx-community/Kokoro-82M-v1.0-ONNX', {
       dtype,
       device,
       progress_callback: (event) => {
-        if (event.status !== 'progress' || !Number.isFinite(event.loaded)) return;
-        const previous = received.get(event.file) || 0;
-        if (event.loaded <= previous) return;
-        received.set(event.file, event.loaded);
-        totalReceived += event.loaded - previous;
-        const now = Date.now();
+        if (event.status !== 'progress' || !Number.isFinite(event.loaded) || event.loaded < 0) return;
+        const now = performance.now();
+        let transfer = transfers.get(event.file);
+        if (transfer && event.loaded <= transfer.loaded) return;
+        if (!transfer) {
+          transfer = { started: now, initial: event.loaded, loaded: event.loaded };
+          transfers.set(event.file, transfer);
+        }
+        transfer.loaded = event.loaded;
         if (now - lastReport < 1000) return;
         lastReport = now;
+        const received = (event.loaded / 1_000_000).toFixed(1);
+        let detail = event.loaded < 1000 ? `${event.loaded} bytes received` :
+          event.loaded < 100_000 ? `${Math.round(event.loaded / 1000)} kB received` : `${received} MB received`;
+        if (Number.isFinite(event.total) && event.total > 0 && event.loaded <= event.total) {
+          const percent = Math.floor(100 * event.loaded / event.total);
+          detail = `${percent}% · ${received} of ${(event.total / 1_000_000).toFixed(1)} MB`;
+          const elapsed = (now - transfer.started) / 1000;
+          const gained = event.loaded - transfer.initial;
+          if (elapsed >= 2 && gained > 0 && event.loaded < event.total) {
+            const seconds = Math.ceil(elapsed * (event.total - event.loaded) / gained);
+            const estimate = seconds < 60 ? `${seconds} sec` : `${Math.ceil(seconds / 60)} min`;
+            detail += ` · about ${estimate} left for this file`;
+          }
+        }
         postResponse({
           type: 'progress',
-          message: `Downloading the voice model (${(totalReceived / 1_000_000).toFixed(1)} MB received)...`,
+          message: `Downloading voice file ${event.file.split('/').pop()} · ${detail}`,
           percentage: 40,
         });
       },

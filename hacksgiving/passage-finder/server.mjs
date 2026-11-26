@@ -63,7 +63,7 @@ async function answer(question) {
 export const server = createServer(async (req, res) => {
   res.setHeader('X-Content-Type-Options', 'nosniff');
   res.setHeader('Referrer-Policy', 'no-referrer');
-  res.setHeader('Content-Security-Policy', "default-src 'none'; style-src 'unsafe-inline'; script-src 'sha256-tF2fbGiGtegs/JQ+cX4hL5szvDlRTm+wH+eN24y3OsY='; connect-src 'self'; base-uri 'none'; frame-ancestors 'none'; form-action 'self'");
+  res.setHeader('Content-Security-Policy', "default-src 'none'; style-src 'unsafe-inline'; script-src 'sha256-0OSmp8ahSZI69bfOBKFO65nNd6RXFDE6qg2EK1Af6/c='; connect-src 'self'; base-uri 'none'; frame-ancestors 'none'; form-action 'self'");
   if (req.method !== 'GET') { res.writeHead(405, { Allow: 'GET' }).end(); return; }
   let url;
   try { url = new URL(req.url, 'http://localhost'); }

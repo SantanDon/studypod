@@ -54,3 +54,21 @@ it("reports received bytes, reuses the narrator for another chapter, and frees i
   view.unmount();
   expect(voice.terminate).toHaveBeenCalledTimes(1);
 });
+
+it("only offers part navigation for a source with more than one part", async () => {
+  const sources = [
+    { id: "short", title: "Short source", content: "A short passage." },
+    { id: "long", title: "Long source", content: "Long passage. ".repeat(60) },
+  ].map(source => ({ ...source, notebook_id: "test-parts" })) as Source[];
+  const view = render(<HostedChapterReader notebookId="test-parts" sources={sources} />);
+  await act(async () => {});
+  expect(screen.queryByRole("button", { name: "Next" })).toBeNull();
+  fireEvent.change(screen.getByRole("combobox"), { target: { value: "long" } });
+  expect(screen.getByText("Part 1 of 2")).toBeVisible();
+  expect(screen.getByRole("button", { name: "Previous" })).toBeDisabled();
+  fireEvent.click(screen.getByRole("button", { name: "Next" }));
+  expect(screen.getByText("Part 2 of 2")).toBeVisible();
+  fireEvent.click(screen.getByRole("button", { name: "Previous" }));
+  expect(screen.getByText("Part 1 of 2")).toBeVisible();
+  view.unmount();
+});

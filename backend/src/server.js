@@ -212,14 +212,15 @@ app.use(
 // Count each request once, before parsing its body or dispatching to a router.
 app.use(apiLimiter);
 
+app.use(cookieParser());
+app.use(protectBrowserWrites(allowedOrigins, process.env.NODE_ENV !== "production"));
+
 // Extracted documents and their chunk metadata can exceed Express's 100 KB
 // default. Keep a bounded, configurable limit so normal research PDFs can be
 // persisted without accepting unbounded request bodies.
 const structuredBodyLimit = process.env.STRUCTURED_BODY_LIMIT || "20mb";
 app.use(express.json({ limit: structuredBodyLimit }));
 app.use(express.urlencoded({ extended: true, limit: structuredBodyLimit }));
-app.use(cookieParser());
-app.use(protectBrowserWrites(allowedOrigins, process.env.NODE_ENV !== "production"));
 app.use(requestLogger);
 app.use(normalizeBodyKeys);
 app.use(oauthRoutes);

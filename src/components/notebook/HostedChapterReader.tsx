@@ -146,11 +146,11 @@ export default function HostedChapterReader({ notebookId, sources, token }: Prop
           {readable.map(s => <option key={s.id} value={s.id}>{s.title}</option>)}
         </select>
       </label>
-      <div className="flex items-center justify-between gap-2">
+      {parts.length > 1 && <div className="flex items-center justify-between gap-2">
         <Button variant="outline" disabled={busy || partNumber === 0} onClick={() => choosePart(partNumber - 1)}>Previous</Button>
         <span className="text-sm">Part {partNumber + 1} of {parts.length}</span>
         <Button variant="outline" disabled={busy || partNumber + 1 >= parts.length} onClick={() => choosePart(partNumber + 1)}>Next</Button>
-      </div>
+      </div>}
       <blockquote className="rounded-lg border-l-4 border-primary bg-muted/40 p-3 text-sm leading-6 break-words">{passage}</blockquote>
       {(!player || player.id !== saved?.id) && <Button disabled={busy || !loaded} onClick={listen}>{busy ? "Working…" : saved ? "Open saved recording" : "Generate chapter audio"}</Button>}
       {player && player.id === saved?.id && <div className="flex flex-wrap items-center gap-2 rounded-xl border bg-muted/30 p-3"><audio className="min-w-0 basis-48 flex-1" aria-label={title} controls src={player.url}

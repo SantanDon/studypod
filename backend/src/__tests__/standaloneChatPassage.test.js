@@ -81,6 +81,29 @@ describe("standalone chat during a provider outage", () => {
   ])("declines an ambiguous or unsupported paraphrase: %s", (prompt, line) => {
     expect(() => recoverStandalonePassage(error, prompt, [{ ...source, content: line }])).toThrow(error);
   });
+  it.each([
+    ["Who approves the annual budget?", "The annual budget is approved by Morgan."],
+    ["Who tallies the visitor slips?", "Visitor slips are tallied by Gabriela."],
+    ["What shade is the fabric swatch?", "The fabric swatch is navy."],
+    ["What temperature is the drying oven?", "The drying oven is maintained at 80 degrees Celsius."],
+    ["What material is the exhibit plaque made from?", "The exhibit plaque is brass."],
+    ["How long does the training session last?", "The training session lasts five hours."],
+    ["How does the curator transport the artworks?", "The curator transports the artworks by courier."],
+    ["How many filters does the kit contain?", "The kit contains eight sealed filters."],
+  ])("opens the exact passage for a supported property or inflection: %s", (message, excerpt) => {
+    const result = recoverStandalonePassage(error, message, [{ ...source, content: "Overview\n" + excerpt }]);
+    expect(result.citations[0]).toMatchObject({ excerpt, chunk_lines_from: 2 });
+  });
+  it.each([
+    ["What shade is the fabric swatch?", "The fabric swatch is on display."],
+    ["What shade is the fabric swatch?", "The fabric swatch is on display. The floor is navy."],
+    ["What material is the exhibit plaque made from?", "The exhibit plaque is missing."],
+    ["How long does the training session last?", "The training session lasts until the vote."],
+    ["How many filters does the kit contain?", "The kit contains eight packets of filters."],
+    ["Who approves the annual budget?", "Morgan approved the operating budget."],
+  ])("preserves the retry when attributes or required terms lack evidence: %s", (message, content) => {
+    expect(() => recoverStandalonePassage(error, message, [{ ...source, content }])).toThrow(error);
+  });
   it.each(["PERSONAL_PROVIDER_UNAVAILABLE", "DATABASE_TEMPORARILY_UNAVAILABLE", "GROUNDING_UNAVAILABLE", "CHAT_TIMEOUT"])(
     "preserves %s", code => {
       const original = Object.assign(new Error(code), { code });

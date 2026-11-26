@@ -18,13 +18,9 @@ it.each([
   const { dispatchToTitan } = await import("../services/titanProvider.js");
   vi.useFakeTimers();
   let aborted = false;
-  vi.stubGlobal("fetch", vi.fn(async (_url, { signal }) => ({
-    ok: true,
-    json: () => new Promise((_resolve, reject) => signal.addEventListener("abort", () => {
-      aborted = true;
-      reject(signal.reason);
-    }, { once: true })),
-  })));
+  vi.stubGlobal("fetch", vi.fn(async () => new Response(new ReadableStream({
+    cancel() { aborted = true; },
+  }))));
   const request = { messages: [{ role: "user", content: "Test" }], priority: "performance", timeoutMs: 120_000 };
   const pending = mode === "personal"
     ? generateWithPersonalProvider({ provider: "groq", key: "fixture", model: "model" }, request)

@@ -20,12 +20,8 @@ describe("Groq brief rate-window recovery", () => {
     return import("../services/titanProvider.js");
   }
   const request = { messages: [{ role: "user", content: "Explain the source." }], priority: "performance" };
-  const failure = (message, headers = {}, status = 429) => ({
-    ok: false, status,
-    headers: { get: (name) => headers[name] || null },
-    text: async () => JSON.stringify({ error: { message } }),
-  });
-  const success = () => ({ ok: true, json: async () => ({ choices: [{ message: { content: "Recovered grounded answer" } }] }) });
+  const failure = (message, headers = {}, status = 429) => Response.json({ error: { message } }, { status, headers });
+  const success = () => Response.json({ choices: [{ message: { content: "Recovered grounded answer" } }] });
   afterEach(() => { vi.useRealTimers(); vi.unstubAllEnvs(); vi.unstubAllGlobals(); vi.clearAllMocks(); });
 
   it("forwards structured discussion budgets to managed chat providers", async () => {
@@ -157,8 +153,8 @@ describe("LLM7 model availability recovery", () => {
     vi.stubEnv("TOKENLLM7_MODEL", model);
     vi.resetModules();
   }
-  const failure = (status, message) => ({ ok: false, status, headers: { get: () => null }, text: async () => JSON.stringify({ error: { message } }) });
-  const success = () => ({ ok: true, json: async () => ({ choices: [{ message: { content: "Supported response" } }] }) });
+  const failure = (status, message) => Response.json({ error: { message } }, { status });
+  const success = () => Response.json({ choices: [{ message: { content: "Supported response" } }] });
   const request = { messages: [{ role: "user", content: "Summarize the source." }], priority: "context" };
   afterEach(() => { vi.unstubAllEnvs(); vi.unstubAllGlobals(); vi.clearAllMocks(); });
 
@@ -235,7 +231,7 @@ describe("Titan provider configuration", () => {
     let requestBody;
     vi.stubGlobal("fetch", vi.fn(async (_url, options) => {
       requestBody = JSON.parse(options.body);
-      return { ok: true, json: async () => ({ choices: [{ message: { content: "17 blue trays" } }] }) };
+      return Response.json({ choices: [{ message: { content: "17 blue trays" } }] });
     }));
     const { dispatchToTitan } = await import("../services/titanProvider.js?ollama-interactive-test");
     const result = await dispatchToTitan({ messages: [{ role: "user", content: "How many trays?" }], priority: "context" });
@@ -294,24 +290,13 @@ describe("Titan provider configuration", () => {
       requestModels.push(body.model);
 
       if (requestModels.length === 1) {
-        return {
-          ok: false,
-          status: 404,
-          headers: { get: () => null },
-          text: async () =>
-            JSON.stringify({
-              error: { message: "The requested model does not exist." },
-            }),
-        };
+        return Response.json({ error: { message: "The requested model does not exist." } }, { status: 404 });
       }
 
-      return {
-        ok: true,
-        json: async () => ({
+      return Response.json({
           choices: [{ message: { content: "fallback response" } }],
           usage: { total_tokens: 7 },
-        }),
-      };
+        });
     });
     vi.stubGlobal("fetch", fetchMock);
 
@@ -354,13 +339,10 @@ describe("Titan provider configuration", () => {
       maximumActive = Math.max(maximumActive, active);
       await new Promise((resolve) => setTimeout(resolve, 20));
       active -= 1;
-      return {
-        ok: true,
-        json: async () => ({
+      return Response.json({
           choices: [{ message: { content: "queued response" } }],
           usage: { total_tokens: 5 },
-        }),
-      };
+        });
     });
     vi.stubGlobal("fetch", fetchMock);
 
@@ -400,18 +382,12 @@ describe("Titan provider configuration", () => {
     ]);
     vi.stubGlobal(
       "fetch",
-      vi.fn(async () => ({
-        ok: false,
-        status: 429,
-        headers: { get: (name) => responseHeaders.get(name) || null },
-        text: async () =>
-          JSON.stringify({
+      vi.fn(async () => Response.json({
             error: {
               code: "rate_limit_exceeded",
               message: "Daily provider allowance exhausted.",
             },
-          }),
-      })),
+          }, { status: 429, headers: Object.fromEntries(responseHeaders) })),
     );
 
     const { dispatchToTitan, getAvailableProviders } =
@@ -446,13 +422,10 @@ describe("Titan provider configuration", () => {
     let requestBody;
     const fetchMock = vi.fn(async (_url, options) => {
       requestBody = JSON.parse(options.body);
-      return {
-        ok: true,
-        json: async () => ({
+      return Response.json({
           choices: [{ message: { content: "grounded response" } }],
           usage: { total_tokens: 10 },
-        }),
-      };
+        });
     });
     vi.stubGlobal("fetch", fetchMock);
 

@@ -62,6 +62,9 @@ jobs:
       - name: Unit and integration tests
         run: npm test -- --run
 
+      - name: Install browser acceptance runtime
+        run: npx playwright install --with-deps chromium
+
       - name: Acceptance gate decision and audio contracts
         run: npm run test:gate:unit
 
@@ -91,9 +94,6 @@ jobs:
 
       - name: Production build
         run: npm run build
-
-      - name: Install browser acceptance runtime
-        run: npx playwright install --with-deps chromium
 
       - name: Built-app desktop and mobile acceptance gate
         run: npm run test:e2e

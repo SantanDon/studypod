@@ -172,15 +172,15 @@ describe('TTS worker operation settlement', () => {
   });
 });
 describe('voice download progress', () => {
-  it('only forwards advancing bytes and accounts for multiple files', async () => {
+  it('reports advancing bytes, current-file percentage and measured remaining time', async () => {
     vi.useFakeTimers();
     const worker = { postMessage: vi.fn(), onmessage: undefined as undefined | ((event: { data: object }) => Promise<void>) };
     vi.stubGlobal('self', worker);
     vi.doMock('kokoro-js', () => ({ KokoroTTS: {
       from_pretrained: async (_id: string, options: { progress_callback: (event: object) => void }) => {
-        for (const [file, loaded] of [['config', 100], ['model', 1_000_000], ['model', 1_000_000], ['model', 900_000], ['model', 2_000_000]]) {
+        for (const [file, loaded, total] of [['config', 100], ['onnx/model', 1_000_000, 4_000_000], ['onnx/model', 1_000_000, 4_000_000], ['onnx/model', 900_000, 4_000_000], ['onnx/model', 2_000_000, 4_000_000], ['onnx/model', 4_000_000, 4_000_000]]) {
           vi.advanceTimersByTime(2000);
-          options.progress_callback({ status: 'progress', file, loaded });
+          options.progress_callback({ status: 'progress', file, loaded, total });
         }
         return {};
       },
@@ -189,9 +189,15 @@ describe('voice download progress', () => {
       await import('@/lib/tts/ttsWorkerScript');
       await worker.onmessage!({ data: { type: 'init' } });
       const downloads = worker.postMessage.mock.calls.map(([event]) => event.message)
-        .filter((message: string) => message.startsWith('Downloading the voice model'));
-      expect(downloads).toHaveLength(3);
-      expect(downloads.at(-1)).toContain('2.0 MB received');
+        .filter((message: string) => message.startsWith('Downloading voice file'));
+      expect(downloads).toHaveLength(4);
+      expect(downloads[0]).toContain('config · 100 bytes received');
+      expect(downloads[0]).not.toMatch(/%|left/);
+      expect(downloads[1]).toContain('model · 25%');
+      expect(downloads[1]).not.toContain('left');
+      expect(downloads[2]).toContain('50% · 2.0 of 4.0 MB · about 12 sec left for this file');
+      expect(downloads[3]).toContain('100%');
+      expect(downloads[3]).not.toContain('left');
     } finally {
       vi.doUnmock('kokoro-js');
       vi.unstubAllGlobals();

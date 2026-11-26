@@ -10,13 +10,13 @@ vi.mock('../utils/logger.js', () => ({ logger: { info: vi.fn(), warn: vi.fn(), e
 const groq = { provider: 'groq', key: 'groq-fixture-secret', model: 'llama-3.3-70b-versatile' };
 const gemini = { provider: 'gemini', key: 'gemini-fixture-secret', model: 'gemini-2.5-flash' };
 const request = { messages: [{ role: 'user', content: 'Explain this source.' }] };
-const response = (data, status = 200) => ({ ok: status < 400, status, json: async () => data });
+const response = (data, status = 200) => Response.json(data, { status });
 
 afterEach(() => { vi.unstubAllGlobals(); vi.unstubAllEnvs(); vi.clearAllMocks(); });
 
 describe('personal cloud provider request isolation', () => {
   it('forwards explicit structured output controls without changing defaults', async () => {
-    const fetchMock = vi.fn().mockResolvedValue(response({ choices: [{ message: { content: '{}' } }] }));
+    const fetchMock = vi.fn(async () => response({ choices: [{ message: { content: '{}' } }] }));
     vi.stubGlobal('fetch', fetchMock);
     await generateWithPersonalProvider(groq, { ...request, maxOutputTokens: 4096, jsonMode: true });
     expect(JSON.parse(fetchMock.mock.calls[0][1].body)).toMatchObject({ max_tokens: 4096, response_format: { type: 'json_object' } });

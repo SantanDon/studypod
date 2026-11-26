@@ -30,15 +30,28 @@ const form = document.querySelector('form');
 const statusText = document.querySelector('#status');
 const quote = document.querySelector('blockquote');
 const link = document.querySelector('a');
+const button = form.querySelector('button');
+let activeRequest;
+form.addEventListener('input', () => {
+  activeRequest?.abort();
+  button.disabled = false;
+  statusText.textContent = '';
+  quote.hidden = link.hidden = true;
+  link.removeAttribute('href');
+});
 form.addEventListener('submit', async event => {
   event.preventDefault();
-  form.querySelector('button').disabled = true;
+  activeRequest?.abort();
+  const request = new AbortController();
+  activeRequest = request;
+  button.disabled = true;
   quote.hidden = link.hidden = true;
   statusText.textContent = 'Reading the guide...';
   try {
-    const response = await fetch('/answer?' + new URLSearchParams(new FormData(form)));
+    const response = await fetch('/answer?' + new URLSearchParams(new FormData(form)), { signal: request.signal });
     if (!response.ok) throw new Error();
     const { passage } = await response.json();
+    if (request.signal.aborted) return;
     statusText.textContent = passage ? passage.heading : 'No clear match. Try a day or a topic from the guide.';
     if (passage) {
       quote.textContent = passage.quote;
@@ -47,7 +60,10 @@ form.addEventListener('submit', async event => {
       link.textContent = line ? 'Open line ' + line[1] + ' on GitHub' : 'Open exact line on GitHub';
       quote.hidden = link.hidden = false;
     }
-  } catch { statusText.textContent = 'The guide is unavailable. Please try again.'; }
-  finally { form.querySelector('button').disabled = false; }
+  } catch {
+    if (!request.signal.aborted) statusText.textContent = 'The guide is unavailable. Please try again.';
+  } finally {
+    if (activeRequest === request) button.disabled = false;
+  }
 });
 </script></body></html>

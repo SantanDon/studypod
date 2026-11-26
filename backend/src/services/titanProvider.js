@@ -8,6 +8,7 @@
 import "dotenv/config";
 import { getPersonalProvider, generateWithPersonalProvider } from './personalProviderService.js';
 import { logger } from "../utils/logger.js";
+import { readProviderJson, readProviderText } from "../utils/providerResponse.js";
 
 function boundedInteger(value, fallback, minimum, maximum) {
   const parsed = Number.parseInt(value || "", 10);
@@ -303,8 +304,9 @@ async function waitForRateWindow(delayMs, signal) {
   signal.throwIfAborted();
 }
 
-async function createProviderHttpError(titan, response) {
-  const rawBody = await response.text().catch(() => "");
+async function createProviderHttpError(titan, response, signal) {
+  const rawBody = await readProviderText(response, 64 * 1024, signal).catch(() => "");
+  signal?.throwIfAborted();
   let parsedBody;
   try {
     parsedBody = JSON.parse(rawBody);
@@ -421,10 +423,10 @@ async function makeOpenAIResponsesRequest(
   );
 
   if (!response.ok) {
-    throw await createProviderHttpError(titan, response);
+    throw await createProviderHttpError(titan, response, signal);
   }
 
-  const data = await response.json();
+  const data = await readProviderJson(response, signal);
   const answer = extractResponsesText(data);
   if (!answer) throw new Error("OpenAI returned an empty response");
 
@@ -490,10 +492,10 @@ async function makeChatCompletionsRequest(
   );
 
   if (!response.ok) {
-    throw await createProviderHttpError(titan, response);
+    throw await createProviderHttpError(titan, response, signal);
   }
 
-  const data = await response.json();
+  const data = await readProviderJson(response, signal);
   const answer = data.choices?.[0]?.message?.content;
   if (!answer) throw new Error(`${titan.provider} returned an empty response`);
 
@@ -538,10 +540,10 @@ async function makeAnthropicRequest(titan, messages, temperature, timeoutMs, sig
   );
 
   if (!response.ok) {
-    throw await createProviderHttpError(titan, response);
+    throw await createProviderHttpError(titan, response, signal);
   }
 
-  const data = await response.json();
+  const data = await readProviderJson(response, signal);
   const answer = data.content?.find((part) => part.type === "text")?.text;
   if (!answer) throw new Error("Anthropic returned an empty response");
 

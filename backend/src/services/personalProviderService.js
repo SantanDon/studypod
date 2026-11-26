@@ -1,4 +1,5 @@
 import { AsyncLocalStorage } from 'node:async_hooks';
+import { readProviderJson } from '../utils/providerResponse.js';
 
 // Credentials live only for this request. Never write this context to logs or storage.
 const requestContext = new AsyncLocalStorage();
@@ -49,12 +50,13 @@ async function providerRequest(context, path, { body, signal, timeoutMs = 30_000
       signal: controller.signal,
     });
     if (!response.ok) {
+      void response.body?.cancel().catch(() => {});
       if (response.status === 401 || response.status === 403) throw personalProviderError('AUTH', 'The selected provider rejected this key. Check the key and its permissions.', 401);
       if (response.status === 429) throw personalProviderError('QUOTA', 'The selected provider has reached its rate or quota limit. Wait or choose another provider.', 429);
       if (response.status === 400 || response.status === 404) throw personalProviderError('MODEL', 'The selected provider could not use this model. Check its model name and availability.', 422);
       throw personalProviderError('UNAVAILABLE', 'The selected provider is temporarily unavailable. Retry or choose another provider.', 502);
     }
-    return await response.json();
+    return await readProviderJson(response, controller.signal);
   } catch (error) {
     if (isPersonalProviderError(error)) throw error;
     if (controller.signal.aborted) throw personalProviderError('TIMEOUT', 'The selected provider request timed out or was cancelled. Please retry.', 504);
