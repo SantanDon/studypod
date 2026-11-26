@@ -1,9 +1,10 @@
 import React, { useState, useEffect } from 'react';
+import StudyGlyph from '@/components/notebook/StudyGlyph';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
-import { Copy, Terminal, ExternalLink, Globe, Key, CheckCircle2, Loader2, RefreshCw, Mail, Lock } from 'lucide-react';
+import { Copy, Terminal, ExternalLink, Globe, CheckCircle2, Loader2, RefreshCw, Mail, Lock } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
 import { useAuthState } from '@/hooks/useAuthState';
 import { useAuth } from '@/hooks/useAuth';
@@ -154,7 +155,7 @@ export function DeveloperSettings() {
         <Card>
           <CardHeader>
             <CardTitle className="flex items-center gap-2">
-              <Terminal className="w-5 h-5 text-muted-foreground" />
+              <StudyGlyph kind="agent" className="size-8" />
               Agent Pairing
             </CardTitle>
             <CardDescription>
@@ -240,7 +241,7 @@ export function DeveloperSettings() {
       <Card>
         <CardHeader>
           <CardTitle className="flex items-center gap-2">
-            <Key className="w-5 h-5 text-muted-foreground" />
+            <StudyGlyph kind="agent" className="size-8" />
             Agent Pairing
           </CardTitle>
           <CardDescription>

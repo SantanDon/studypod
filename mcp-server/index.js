@@ -14,21 +14,13 @@ import {
   CallToolRequestSchema,
   ListToolsRequestSchema,
 } from "@modelcontextprotocol/sdk/types.js";
-import { readFileSync } from "fs";
+import dotenv from "dotenv";
 import { join, dirname } from "path";
 import { fileURLToPath } from "url";
 
 // Load .env
 const __dir = dirname(fileURLToPath(import.meta.url));
-try {
-  const envFile = readFileSync(join(__dir, ".env"), "utf-8");
-  for (const line of envFile.split("\n")) {
-    const trimmed = line.trim();
-    if (!trimmed || trimmed.startsWith("#")) continue;
-    const [key, ...rest] = trimmed.split("=");
-    process.env[key.trim()] = rest.join("=").trim();
-  }
-} catch (_) {}
+dotenv.config({ path: join(__dir, ".env") });
 
 const API_URL = process.env.STUDYPODLM_API_URL || "http://localhost:4000";
 
@@ -39,14 +31,13 @@ let sessionToken = process.env.STUDYPODLM_API_KEY || "";
 async function api(path, { method = "GET", body, token } = {}) {
   const tok = token || sessionToken;
   if (!tok) {
-    return {
-      error:
-        "Not authenticated. Configure STUDYPODLM_API_KEY or use the short-lived pair tool first.",
-    };
+    throw new Error("Connect StudyPod using the pair tool or configure STUDYPODLM_API_KEY.");
   }
 
   const res = await fetch(`${API_URL}${path}`, {
     method,
+    redirect: "error",
+    signal: AbortSignal.timeout(60_000),
     headers: {
       "Content-Type": "application/json",
       Authorization: `Bearer ${tok}`,
@@ -54,6 +45,7 @@ async function api(path, { method = "GET", body, token } = {}) {
     ...(body ? { body: JSON.stringify(body) } : {}),
   });
 
+  if (!res.ok) throw new Error(`StudyPod returned HTTP ${res.status}.`);
   const text = await res.text();
   try {
     return JSON.parse(text);
@@ -180,7 +172,7 @@ const TOOLS = [
   {
     name: "pair",
     description:
-      "Authorize this agent using a 6-digit pairing code from the StudyPod UI. Returns a permanent API key.",
+      "Authorize this agent using a 6-digit pairing code from the StudyPod UI. Keeps a one-hour key in this running connector.",
     inputSchema: {
       type: "object",
       properties: {
@@ -331,7 +323,7 @@ async function handleToolCall({ params: { name, arguments: args } }) {
   try {
     switch (name) {
       case "whoami":
-        return { content: text(await api("/api/user/me")) };
+        return { content: text(await api("/api/auth/me")) };
       case "list_notebooks":
         return { content: text(await api("/api/notebooks")) };
 
@@ -411,25 +403,28 @@ async function handleToolCall({ params: { name, arguments: args } }) {
       case "pair": {
         const res = await fetch(`${API_URL}/api/auth/pair/complete`, {
           method: "POST",
+          redirect: "error",
+          signal: AbortSignal.timeout(15_000),
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
             code: args.code,
             label: args.label || "MCP Agent",
+            expiresInHours: 1,
           }),
         });
         const data = await res.json();
-        if (data.key) {
+        if (res.ok && typeof data.key === "string" && data.key.startsWith("spm_")) {
           sessionToken = data.key;
           return {
             content: text({
               success: true,
-              key: data.key,
+              expiresAt: data.expiresAt,
               message:
-                "Pairing successful! This key has been set for the current session. To persist it, update your environment variables with STUDYPODLM_API_KEY.",
+                "Paired for this connector session. Use whoami to confirm your account.",
             }),
           };
         }
-        return { content: text({ error: data.error || "Pairing failed" }) };
+        return { isError: true, content: text({ error: `Pairing failed (HTTP ${res.status}). Request a fresh code in StudyPod and try again.` }) };
       }
 
       case "notebook_context":
@@ -465,9 +460,10 @@ async function handleToolCall({ params: { name, arguments: args } }) {
         const extract = await api(
           `/api/proxy/extract-web?url=${encodeURIComponent(args.url)}`,
         );
-        if (extract.error) return { content: text({ error: extract.error }) };
+        if (extract.error) return { isError: true, content: text({ error: extract.error }) };
         if (!extract.content)
           return {
+            isError: true,
             content: text({ error: "Web extraction returned no content" }),
           };
         let title = args.title || extract.title;
@@ -493,7 +489,7 @@ async function handleToolCall({ params: { name, arguments: args } }) {
         });
         if (res.id)
           return { content: text({ sourceId: res.id, success: true }) };
-        return { content: text({ error: res.error || res }) };
+        return { isError: true, content: text({ error: res.error || res }) };
       }
 
       case "add_source_from_arxiv": {
@@ -501,10 +497,12 @@ async function handleToolCall({ params: { name, arguments: args } }) {
         let pageRes;
         try {
           pageRes = await fetch(absUrl, {
+            signal: AbortSignal.timeout(15_000),
             headers: { "User-Agent": "StudyPodLM-MCP/2.0 (research agent)" },
           });
         } catch (e) {
           return {
+            isError: true,
             content: text({
               error: `Failed to fetch arXiv page: ${e.message}`,
             }),
@@ -512,6 +510,7 @@ async function handleToolCall({ params: { name, arguments: args } }) {
         }
         if (!pageRes.ok)
           return {
+            isError: true,
             content: text({
               error: `arXiv returned status ${pageRes.status} for ${absUrl}`,
             }),
@@ -533,7 +532,7 @@ async function handleToolCall({ params: { name, arguments: args } }) {
         });
         if (res.id)
           return { content: text({ sourceId: res.id, success: true }) };
-        return { content: text({ error: res.error || res }) };
+        return { isError: true, content: text({ error: res.error || res }) };
       }
 
       case "add_source_from_github": {
@@ -541,10 +540,11 @@ async function handleToolCall({ params: { name, arguments: args } }) {
         try {
           const u = new URL(args.repoUrl);
           if (
-            !/github\.com$/i.test(u.hostname) &&
-            !/^(www\.)?github\.com$/i.test(u.hostname)
+            u.protocol !== "https:" ||
+            !["github.com", "www.github.com"].includes(u.hostname)
           ) {
             return {
+              isError: true,
               content: text({ error: "URL is not a github.com repository" }),
             };
           }
@@ -552,10 +552,11 @@ async function handleToolCall({ params: { name, arguments: args } }) {
           owner = parts[0];
           repo = parts[1];
         } catch {
-          return { content: text({ error: "Invalid GitHub repo URL" }) };
+          return { isError: true, content: text({ error: "Invalid GitHub repo URL" }) };
         }
         if (!owner || !repo)
           return {
+            isError: true,
             content: text({ error: "Could not parse owner/repo from URL" }),
           };
         repo = repo.replace(/\.git$/, "");
@@ -564,7 +565,7 @@ async function handleToolCall({ params: { name, arguments: args } }) {
         for (const branch of ["main", "master"]) {
           const rawUrl = `https://raw.githubusercontent.com/${owner}/${repo}/${branch}/README.md`;
           try {
-            const r = await fetch(rawUrl);
+            const r = await fetch(rawUrl, { signal: AbortSignal.timeout(15_000) });
             if (r.ok) {
               readme = await r.text();
               usedBranch = branch;
@@ -576,6 +577,7 @@ async function handleToolCall({ params: { name, arguments: args } }) {
         }
         if (!readme)
           return {
+            isError: true,
             content: text({
               error: `README.md not found on main or master branch for ${owner}/${repo}`,
             }),
@@ -598,7 +600,7 @@ async function handleToolCall({ params: { name, arguments: args } }) {
         });
         if (res.id)
           return { content: text({ sourceId: res.id, success: true }) };
-        return { content: text({ error: res.error || res }) };
+        return { isError: true, content: text({ error: res.error || res }) };
       }
 
       case "add_source_from_text": {
@@ -612,14 +614,15 @@ async function handleToolCall({ params: { name, arguments: args } }) {
         });
         if (res.id)
           return { content: text({ sourceId: res.id, success: true }) };
-        return { content: text({ error: res.error || res }) };
+        return { isError: true, content: text({ error: res.error || res }) };
       }
 
       default:
-        return { content: [{ type: "text", text: `Unknown tool: ${name}` }] };
+        return { isError: true, content: [{ type: "text", text: `Unknown tool: ${name}` }] };
     }
   } catch (err) {
     return {
+      isError: true,
       content: [
         {
           type: "text",

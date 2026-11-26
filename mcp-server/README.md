@@ -8,7 +8,7 @@ Exposes StudyPod notebooks to local CLI agents over MCP stdio. For ChatGPT, use 
 
 ```bash
 cd mcp-server
-npm install
+npm ci
 ```
 
 ### 2. Configure a revocable agent key
@@ -24,7 +24,7 @@ Open `.env` and set:
 
 Never paste a StudyPod password, browser session credential, or ChatGPT credential into an agent conversation.
 
-### 3. Add to Kilo (or Claude Code)
+### 3. Connect a desktop client
 
 **For Kilo** — add to your Kilo MCP config (usually `~/.kilo/mcp_servers.json` or via Kilo settings):
 
@@ -39,7 +39,7 @@ Never paste a StudyPod password, browser session credential, or ChatGPT credenti
 }
 ```
 
-**For Claude Code** — add to `claude_desktop_config.json`:
+**For Claude Desktop** — add to `claude_desktop_config.json`:
 
 ```json
 {
@@ -78,3 +78,12 @@ Once connected, just say:
 | `delete_note`       | Delete a note              |
 | `list_chat_history` | Get chat messages          |
 | `create_notebook`   | Create a new notebook      |
+
+
+## First notebook question
+
+1. Call `whoami` to confirm your account. Alternatively, open **Agent Pairing** in StudyPod, generate a code, and call `pair`. The connector holds the resulting one-hour key in memory.
+2. Call `list_notebooks`, choose a notebook ID, then call `notebook_context` to see its sources.
+3. Call `chat` with the notebook ID and a question about those sources. Use the returned citations when explaining the answer.
+
+The connector also exposes `update_note`, `memory_search`, and source imports from text, a URL, GitHub, or arXiv. Use your MCP client's tool list for their current arguments.

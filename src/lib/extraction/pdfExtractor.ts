@@ -39,336 +39,75 @@ export interface PDFExtractionResult {
   error?: string;
 }
 
-/**
- * Enhanced PDF extraction with multiple fallback strategies
- */
+function pageText(items: Array<TextItem | TextMarkedContent>): string {
+  const lines: string[] = [];
+  let words: string[] = [];
+  for (const item of items.filter(isTextItem)) {
+    if (item.str.trim()) words.push(item.str.trim());
+    if (item.hasEOL) {
+      lines.push(words.join(" "));
+      words = [];
+    }
+  }
+  if (words.length) lines.push(words.join(" "));
+  return lines.join("\n");
+}
+
 export async function extractPDFWithFallbacks(
   file: File,
   options: PDFExtractionOptions = {}
 ): Promise<PDFExtractionResult> {
-  const {
-    maxPages = 50,
-    verbosity = 0
-  } = options;
-
-  const arrayBuffer = await file.arrayBuffer();
-
-  // Strategy 1: Try with worker
-  let result;
-  try {
-    result = await tryExtractWithWorker(arrayBuffer, maxPages, verbosity);
-    if (result.success && result.content.trim().length > 0) {
-      return result;
+  const { maxPages = 50, verbosity = 0 } = options;
+  const methods = ["pdfjs-worker", "pdfjs-no-worker", "pdfjs-alt-params", "pdfjs-page-rendering"];
+  let result = createEmptyResult("all-methods-failed", new Error("No text extracted"));
+  for (const method of methods) {
+    try {
+      // PDF.js can transfer ownership of this buffer to the worker.
+      const data = await file.arrayBuffer();
+      const loadingTask = pdfjsLib.getDocument({
+        data,
+        cMapUrl: "https://unpkg.com/pdfjs-dist@5.4.394/cmaps/",
+        cMapPacked: true,
+        verbosity,
+        ...(method === "pdfjs-alt-params" && { disableRange: true, disableStream: true }),
+      });
+      try {
+        const pdf = await loadingTask.promise;
+        const pages: string[] = [];
+        for (let number = 1; number <= Math.min(pdf.numPages, maxPages); number++) {
+          try {
+            const page = await pdf.getPage(number);
+            const { items } = await page.getTextContent();
+            const text = pageText(items);
+            if (text.trim()) pages.push(text);
+          } catch (error) {
+            console.warn(`Page ${number} extraction failed:`, error);
+          }
+        }
+        const content = pages.join("\n\n");
+        result = {
+          content,
+          chunks: chunkText(content, 1000),
+          metadata: {
+            extractionMethod: method,
+            totalPages: pdf.numPages,
+            extractedPages: pages.length,
+            wordCount: content.split(/\s+/).filter(Boolean).length,
+            charCount: content.length,
+            hasText: pages.length > 0,
+          },
+          success: pages.length > 0,
+        };
+        if (result.success) return result;
+      } finally {
+        await loadingTask.destroy();
+      }
+    } catch (error) {
+      console.warn(`PDF extraction failed (${method}):`, error);
+      result = createEmptyResult(method, error);
     }
-  } catch (error) {
-    console.warn("Worker-based extraction failed, proceeding to alternatives:", error);
   }
-
-  // Strategy 2: Retry with a simpler document-loading configuration
-  try {
-    result = await tryExtractWithoutWorker(arrayBuffer, maxPages, verbosity);
-    if (result.success && result.content.trim().length > 0) {
-      return result;
-    }
-  } catch (error) {
-    console.warn("Non-worker extraction failed, proceeding to alternatives:", error);
-  }
-
-  // Strategy 3: Try with different parameters
-  try {
-    result = await tryExtractWithAlternativeParams(arrayBuffer, maxPages, verbosity);
-    if (result.success && result.content.trim().length > 0) {
-      return result;
-    }
-  } catch (error) {
-    console.warn("Alternative parameters extraction failed, proceeding to alternatives:", error);
-  }
-
-  // Strategy 4: Try with different rendering approach
-  try {
-    result = await tryExtractWithPageRendering(arrayBuffer, maxPages, verbosity);
-  } catch (error) {
-    console.warn("Page rendering extraction failed:", error);
-    result = createEmptyResult("all-methods-failed", maxPages, error);
-  }
-
   return result;
-}
-
-/**
- * Strategy 1: Try extraction with worker
- */
-async function tryExtractWithWorker(
-  arrayBuffer: ArrayBuffer,
-  maxPages: number,
-  verbosity: number
-): Promise<PDFExtractionResult> {
-  // Try to set up worker specifically for this extraction
-  try {
-    pdfjsLib.GlobalWorkerOptions.workerSrc = pdfWorkerUrl;
-  } catch (workerSetupError) {
-    console.warn("Could not set up worker for this extraction:", workerSetupError);
-  }
-
-  try {
-    const loadingTask = pdfjsLib.getDocument({
-      data: arrayBuffer,
-      cMapUrl: "https://unpkg.com/pdfjs-dist@5.4.394/cmaps/",
-      cMapPacked: true,
-      verbosity,
-    });
-
-    const pdf = await loadingTask.promise;
-
-    const totalPages = Math.min(pdf.numPages, maxPages);
-    const contentParts: string[] = [];
-    let extractedPages = 0;
-
-    for (let i = 1; i <= totalPages; i++) {
-      try {
-        const page = await pdf.getPage(i);
-        const textContent = await page.getTextContent();
-
-        if (textContent && textContent.items && textContent.items.length > 0) {
-          const pageText = textContent.items
-            .filter(isTextItem)
-            .map((item) => item.str)
-            .join(" ")
-            .trim();
-
-          if (pageText) {
-            contentParts.push(pageText);
-            extractedPages++;
-          }
-        }
-      } catch (pageError) {
-        console.warn(`Page ${i} extraction failed with worker:`, pageError);
-        continue;
-      }
-    }
-
-    const content = contentParts.join("\n\n");
-
-    return {
-      content,
-      chunks: chunkText(content, 1000),
-      metadata: {
-        extractionMethod: "pdfjs-worker",
-        totalPages: pdf.numPages,
-        extractedPages,
-        wordCount: content.split(/\s+/).filter(w => w.length > 0).length,
-        charCount: content.length,
-        hasText: content.trim().length > 0
-      },
-      success: true
-    };
-  } catch (error) {
-    console.warn("PDF extraction with worker failed:", error);
-    return createEmptyResult("pdfjs-worker", maxPages, error);
-  }
-}
-
-/**
- * Strategy 2: Retry with a simpler document-loading configuration
- */
-async function tryExtractWithoutWorker(
-  arrayBuffer: ArrayBuffer,
-  maxPages: number,
-  verbosity: number
-): Promise<PDFExtractionResult> {
-  try {
-    const loadingTask = pdfjsLib.getDocument({
-      data: arrayBuffer,
-      cMapUrl: "https://unpkg.com/pdfjs-dist@5.4.394/cmaps/",
-      cMapPacked: true,
-      verbosity,
-    });
-
-    const pdf = await loadingTask.promise;
-
-    const totalPages = Math.min(pdf.numPages, maxPages);
-    const contentParts: string[] = [];
-    let extractedPages = 0;
-
-    for (let i = 1; i <= totalPages; i++) {
-      try {
-        const page = await pdf.getPage(i);
-        const textContent = await page.getTextContent();
-
-        if (textContent && textContent.items && textContent.items.length > 0) {
-          const pageText = textContent.items
-            .filter(isTextItem)
-            .map((item) => item.str)
-            .join(" ")
-            .trim();
-
-          if (pageText) {
-            contentParts.push(pageText);
-            extractedPages++;
-          }
-        }
-      } catch (pageError) {
-        console.warn(`Page ${i} extraction failed with basic parameters:`, pageError);
-        continue;
-      }
-    }
-
-    const content = contentParts.join("\n\n");
-
-    return {
-      content,
-      chunks: chunkText(content, 1000),
-      metadata: {
-        extractionMethod: "pdfjs-no-worker",
-        totalPages: pdf.numPages,
-        extractedPages,
-        wordCount: content.split(/\s+/).filter(w => w.length > 0).length,
-        charCount: content.length,
-        hasText: content.trim().length > 0
-      },
-      success: true
-    };
-  } catch (error) {
-    console.warn("PDF extraction with basic parameters failed:", error);
-    return createEmptyResult("pdfjs-no-worker", maxPages, error);
-  }
-}
-
-/**
- * Strategy 3: Try extraction with alternative parameters
- */
-async function tryExtractWithAlternativeParams(
-  arrayBuffer: ArrayBuffer,
-  maxPages: number,
-  verbosity: number
-): Promise<PDFExtractionResult> {
-  try {
-    const loadingTask = pdfjsLib.getDocument({
-      data: arrayBuffer,
-      cMapUrl: "https://unpkg.com/pdfjs-dist@5.4.394/cmaps/",
-      cMapPacked: true,
-      verbosity,
-      disableRange: true,
-      disableStream: true
-    });
-
-    const pdf = await loadingTask.promise;
-
-    const totalPages = Math.min(pdf.numPages, maxPages);
-    const contentParts: string[] = [];
-    let extractedPages = 0;
-
-    for (let i = 1; i <= totalPages; i++) {
-      try {
-        const page = await pdf.getPage(i);
-        const textContent = await page.getTextContent();
-
-        if (textContent && textContent.items && textContent.items.length > 0) {
-          const pageText = textContent.items
-            .filter(isTextItem)
-            .map((item) => item.str)
-            .join(" ")
-            .trim();
-
-          if (pageText) {
-            contentParts.push(pageText);
-            extractedPages++;
-          }
-        }
-      } catch (pageError) {
-        console.warn(`Page ${i} extraction failed with alt params:`, pageError);
-        continue;
-      }
-    }
-
-    const content = contentParts.join("\n\n");
-
-    return {
-      content,
-      chunks: chunkText(content, 1000),
-      metadata: {
-        extractionMethod: "pdfjs-alt-params",
-        totalPages: pdf.numPages,
-        extractedPages,
-        wordCount: content.split(/\s+/).filter(w => w.length > 0).length,
-        charCount: content.length,
-        hasText: content.trim().length > 0
-      },
-      success: true
-    };
-  } catch (error) {
-    console.warn("PDF extraction with alternative params failed:", error);
-    return createEmptyResult("pdfjs-alt-params", maxPages, error);
-  }
-}
-
-/**
- * Strategy 4: Try extraction with page rendering as fallback
- */
-async function tryExtractWithPageRendering(
-  arrayBuffer: ArrayBuffer,
-  maxPages: number,
-  verbosity: number
-): Promise<PDFExtractionResult> {
-  // This is a last resort and might not work well for text-heavy PDFs
-  // but can help with some image-heavy PDFs
-  try {
-    const loadingTask = pdfjsLib.getDocument({
-      data: arrayBuffer,
-      cMapUrl: "https://unpkg.com/pdfjs-dist@5.4.394/cmaps/",
-      cMapPacked: true,
-      verbosity,
-    });
-
-    const pdf = await loadingTask.promise;
-
-    const totalPages = Math.min(pdf.numPages, maxPages);
-    const contentParts: string[] = [];
-    let extractedPages = 0;
-
-    for (let i = 1; i <= totalPages; i++) {
-      try {
-        const page = await pdf.getPage(i);
-        // Try to extract text content one more time with different approach
-        const textContent = await page.getTextContent();
-
-        if (textContent && textContent.items && textContent.items.length > 0) {
-          const pageText = textContent.items
-            .filter(isTextItem)
-            .map((item) => item.str)
-            .join(" ")
-            .trim();
-
-          if (pageText) {
-            contentParts.push(pageText);
-            extractedPages++;
-          }
-        }
-      } catch (pageError) {
-        console.warn(`Page ${i} extraction failed with page rendering:`, pageError);
-        continue;
-      }
-    }
-
-    const content = contentParts.join("\n\n");
-
-    return {
-      content,
-      chunks: chunkText(content, 1000),
-      metadata: {
-        extractionMethod: "pdfjs-page-rendering",
-        totalPages: pdf.numPages,
-        extractedPages,
-        wordCount: content.split(/\s+/).filter(w => w.length > 0).length,
-        charCount: content.length,
-        hasText: content.trim().length > 0
-      },
-      success: extractedPages > 0 // Only succeed if we extracted at least one page
-    };
-  } catch (error) {
-    console.warn("PDF extraction with page rendering failed:", error);
-    return createEmptyResult("pdfjs-page-rendering", maxPages, error);
-  }
 }
 
 /**
@@ -376,7 +115,6 @@ async function tryExtractWithPageRendering(
  */
 function createEmptyResult(
   method: string,
-  _maxPages: number,
   error: unknown
 ): PDFExtractionResult {
   return {

@@ -55,6 +55,7 @@ export default function HostedChapterReader({ notebookId, sources, token }: Prop
   const [attempt, setAttempt] = useState(0);
   const [busy, setBusy] = useState(false);
   const [status, setStatus] = useState("");
+  const [downloadAmount, setDownloadAmount] = useState("");
   const [player, setPlayer] = useState<{ id: string; url: string }>();
   const alive = useRef(false);
   const locked = useRef(false);
@@ -98,9 +99,11 @@ export default function HostedChapterReader({ notebookId, sources, token }: Prop
         const voice = worker.current ?? new TTSWorkerManager();
         worker.current = voice;
         await voice.initialize(message => {
-          if (alive.current && message.startsWith("Downloading")) setStatus(message);
+          const amount = message.match(/\b([\d.]+) MB received\b/);
+          if (alive.current && amount && Number(amount[1]) > 0) setDownloadAmount(amount[0]);
         });
         if (!alive.current) return;
+        setDownloadAmount("");
         setStatus("Reading this passage aloud…");
         const speech = await voice.synthesize(passage, "af_heart", 1);
         URL.revokeObjectURL(speech.audioUrl);
@@ -128,7 +131,7 @@ export default function HostedChapterReader({ notebookId, sources, token }: Prop
     } finally {
       if (alive.current && worker.current) idleTimer.current = setTimeout(releaseVoice, 120_000);
       locked.current = false;
-      if (alive.current) setBusy(false);
+      if (alive.current) { setDownloadAmount(""); setBusy(false); }
     }
   }
 
@@ -157,7 +160,10 @@ export default function HostedChapterReader({ notebookId, sources, token }: Prop
         onEnded={() => rememberPosition("studypod:chapter-time:" + player.id, 0)}
       /><a className="inline-flex min-h-11 items-center rounded-md px-3 text-sm font-semibold underline underline-offset-4 hover:bg-muted" href={player.url} download={title + ".wav"}>Download chapter audio</a></div>}
     </> : <p className="text-sm">Add a text source to this notebook to start a recording.</p>}
-    <p className="text-sm text-muted-foreground" role="status">{status}</p>
+    <div className="space-y-1 text-sm text-muted-foreground">
+      <p role="status">{status}</p>
+      {downloadAmount && <p className="font-medium tabular-nums text-foreground">{downloadAmount}</p>}
+    </div>
     {!loaded && status && <Button variant="outline" onClick={() => setAttempt(n => n + 1)}>Retry saved chapters</Button>}
   </Card>;
 }

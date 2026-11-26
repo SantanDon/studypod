@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import StudyGlyph from '@/components/notebook/StudyGlyph';
 import { useNavigate } from 'react-router-dom';
 import VisualEffectsSettings from '@/components/settings/VisualEffectsSettings';
 import { LocalInferenceSettings } from '@/components/settings/LocalInferenceSettings';
@@ -230,7 +231,7 @@ export function ProfileMenu() {
 
           {/* Agent Pairing */}
           <DropdownMenuItem onClick={() => setShowAgentPairing(true)}>
-            <i className="fi fi-rr-smartphone mr-2 h-4 w-4 text-blue-500"></i>
+            <StudyGlyph kind="agent" className="mr-2 size-6" />
             <span className="font-medium text-blue-600 dark:text-blue-400">Agent Pairing</span>
           </DropdownMenuItem>
 

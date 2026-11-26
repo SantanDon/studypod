@@ -39,6 +39,8 @@ it("reports received bytes, reuses the narrator for another chapter, and frees i
   await act(async () => {});
   fireEvent.click(screen.getByRole("button", { name: "Generate chapter audio" }));
   expect(await screen.findByText(/4.0 MB received/)).toBeVisible();
+  expect(screen.getByRole("status")).toHaveTextContent("The first download can take a few minutes.");
+  expect(screen.getByRole("status")).not.toHaveTextContent("MB received");
   await act(async () => initialized());
   expect(await screen.findByText(/Ready to play/)).toBeVisible();
   fireEvent.change(screen.getByRole("combobox"), { target: { value: "Two" } });

@@ -25,6 +25,7 @@ describe("enhancedPDFExtraction", () => {
 
   it("returns extracted text and metadata for a readable PDF", async () => {
     pdfjs.getDocument.mockReturnValue({
+      destroy: vi.fn(),
       promise: Promise.resolve({
         numPages: 1,
         getPage: vi.fn().mockResolvedValue({
@@ -53,8 +54,43 @@ describe("enhancedPDFExtraction", () => {
     expect(result.chunks).toEqual(["StudyPod extracts real PDF text"]);
   });
 
+  it("reopens transferred bytes after failure and preserves PDF line breaks for citations", async () => {
+    const destroyFailed = vi.fn();
+    const destroyRead = vi.fn();
+    pdfjs.getDocument
+      .mockImplementationOnce(({ data }: { data: ArrayBuffer }) => {
+        structuredClone(data, { transfer: [data] });
+        return { promise: Promise.reject(new Error("Worker load failed")), destroy: destroyFailed };
+      })
+      .mockImplementationOnce(({ data }: { data: ArrayBuffer }) => {
+        expect(Array.from(new Uint8Array(data))).toEqual([1, 2, 3]);
+        expect(destroyFailed).toHaveBeenCalledOnce();
+        return {
+          destroy: destroyRead,
+          promise: Promise.resolve({
+            numPages: 1,
+            getPage: async () => ({
+              getTextContent: async () => ({ items: [
+                { str: "Rain" }, { str: "gauge", hasEOL: true },
+                { type: "beginMarkedContent" }, { str: "", hasEOL: true },
+                { str: "Read the scale.", hasEOL: true },
+              ] }),
+            }),
+          }),
+        };
+      });
+
+    const file = new File([new Uint8Array([1, 2, 3])], "lines.pdf");
+    const result = await enhancedPDFExtraction(file);
+    expect(result.content).toBe("Rain gauge\n\nRead the scale.");
+    expect(result.chunks).toEqual([result.content]);
+    expect(result.metadata.extractionMethod).toBe("pdfjs-no-worker");
+    expect(destroyRead).toHaveBeenCalledOnce();
+  });
+
   it("returns a structured failure instead of a false success for an invalid PDF", async () => {
     pdfjs.getDocument.mockReturnValue({
+      destroy: vi.fn(),
       promise: {
         then: (_resolve: unknown, reject: (error: Error) => void) =>
           reject(new Error("Invalid PDF structure")),

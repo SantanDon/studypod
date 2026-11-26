@@ -53,6 +53,20 @@ afterEach(() => {
 });
 
 describe("audiobookBookService", () => {
+  it("preserves titled EPUB spine entries when the EPUB reader omits navigation labels", async () => {
+    const bodies = [
+      "<h1>Opening reading</h1><p>First passage.</p>",
+      "<h2>Chapter 2</h2><p>Second passage.</p>",
+      "<p>Continued paragraph.</p><h3>Later heading</h3>",
+    ];
+    const result = await extractEpubChapters({
+      flow: bodies.map((_, id) => ({ id, href: id + ".xhtml" })),
+      getChapter: async (id) => bodies[id],
+    });
+    expect(result.map((chapter) => chapter.title)).toEqual(["Opening reading", "Chapter 2"]);
+    expect(result[1].text).toContain("Continued paragraph.");
+  });
+
   it("admits text PDFs with complete extraction using the established 90% coverage bar", () => {
     const source = "A complete paragraph of extracted source text. ".repeat(30);
     const result = validatePdfExtractionCompleteness(source, [{ text: source }]);

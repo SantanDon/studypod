@@ -1,4 +1,5 @@
 import { locateCitationLines } from "../services/citationLines.js";
+import { recoverStandalonePassage } from "../services/standaloneChatPassage.js";
 import express from "express";
 import { withPersonalProvider, sendPersonalProviderError } from '../services/personalProviderService.js';
 import { v4 as uuidv4 } from "uuid";
@@ -1825,6 +1826,9 @@ router.post("/:id/chat", requireScope("chat:all"), withPersonalProvider, async (
         responseStyle,
         allowWebFallback: requestedSourceIds.length === 0,
         requestBudget,
+      }).catch((error) => {
+        if (callerIsAgent || requestBudget.signal.aborted || parseExplicitDocumentSection(message)) throw error;
+        return recoverStandalonePassage(error, message, scopedSources);
       }));
 
       // Persist the complete turn only after a response was generated.

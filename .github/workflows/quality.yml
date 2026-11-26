@@ -47,6 +47,12 @@ jobs:
       - name: Install backend dependencies
         run: npm --prefix backend ci
 
+      - name: Install and test the MCP server
+        working-directory: mcp-server
+        run: |
+          npm ci
+          node --test arxiv.test.js pairing.test.js
+
       - name: Typecheck
         run: npm run typecheck
 

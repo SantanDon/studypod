@@ -1,5 +1,5 @@
 type StudyGlyphProps = {
-  kind: 'notebook' | 'podcast' | 'audiobook';
+  kind: 'notebook' | 'podcast' | 'audiobook' | 'agent';
   className?: string;
 };
 
@@ -12,7 +12,7 @@ export default function StudyGlyph({ kind, className }: StudyGlyphProps) {
       width={40}
       height={40}
       draggable={false}
-      className={`rounded-lg object-contain dark:bg-stone-100 dark:p-0.5 ${className ?? ''}`}
+      className={`shrink-0 rounded-md object-contain dark:bg-stone-100 ${className ?? ''}`}
     />
   );
 }

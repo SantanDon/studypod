@@ -17,6 +17,7 @@ export default defineConfig({
       "**/dist/**",
       "**/cypress/**",
       "**/.ai-bridge/**",
+      "mcp-server/*.test.js",
       "hacksgiving/passage-finder/*.test.mjs",
       "e2e/full-flow-decision.test.mjs",
       "e2e/full-flow-reporter.test.mjs",

@@ -185,12 +185,17 @@ export function cleanPlainText(input = "") {
     .trim();
 }
 
-export function stripHtmlToText(html = "") {
+function readHtmlPassage(html = "") {
   const $ = load(String(html), {}, false);
   $("script, style, template").remove();
+  const firstHeading = $("h1, h2, h3, h4, h5, h6").first().text().trim();
   $("br").replaceWith("\n");
   $("p, div, h1, h2, h3, h4, h5, h6, li, section, article, chapter").append("\n");
-  return cleanPlainText($.root().text().replaceAll("\u00a0", " "));
+  return { firstHeading, text: cleanPlainText($.root().text().replaceAll("\u00a0", " ")) };
+}
+
+export function stripHtmlToText(html = "") {
+  return readHtmlPassage(html).text;
 }
 
 export async function parseEpub(filePath) {
@@ -272,13 +277,17 @@ export async function extractEpubChapters(epub) {
     const chapter = epub.flow[i];
     const meta = titledChapters[i] || { id: chapter.id, title: `Chapter ${i + 1}` };
     try {
-      const rawText = stripHtmlToText(await epub.getChapter(chapter.id) || "");
+      const { firstHeading, text: rawText } = readHtmlPassage(await epub.getChapter(chapter.id) || "");
       const text = trimGutenbergLicense(rawText);
       if (!text || isEpubNavigationItem(chapter, meta.title, text)) continue;
-      const title = titleFromEpubText(meta.title || `Chapter ${i + 1}`, text);
+      const firstLine = text.split("\n", 1)[0].trim();
+      const startsWithHeading = Boolean(firstHeading && firstHeading === firstLine);
+      const title = /^chapter\s*\d+$/i.test(meta.title) && startsWithHeading
+        ? firstHeading
+        : titleFromEpubText(meta.title || `Chapter ${i + 1}`, text);
       const isUntitledContinuation =
         /^chapter\s*\d+$/i.test(String(meta.title || "").trim()) &&
-        title === meta.title;
+        title === meta.title && !startsWithHeading;
       if (isUntitledContinuation && chapters.length > 0) {
         // Some EPUB builders split one long, explicitly titled section across
         // files without adding headings to the continuation fragments. Keep
