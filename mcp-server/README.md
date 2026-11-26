@@ -77,4 +77,6 @@ Once connected, just say:
 2. Call `list_notebooks`, choose a notebook ID, then call `notebook_context` to see its sources.
 3. Call `chat` with the notebook ID and a question about those sources. Use the returned citations when explaining the answer.
 
+To let an agent read sources from just one notebook, copy its ID from the notebook URL and pass it when pairing. For example, use `{"code":"123456","notebook_ids":["your-notebook-id"],"scopes":["notebooks:read","sources:read"]}` with your own code and ID. Include `chat:all` if the agent needs to ask questions.
+
 The connector also exposes `update_note`, `memory_search`, and source imports from text, a URL, GitHub, or arXiv. Use your MCP client's tool list for their current arguments.

@@ -19,6 +19,21 @@ describe("saved podcast download", () => {
     mocked.loadAudio.mockReset();
   });
 
+  it("keeps source access and deletion next to the player while other episodes retain playback and download", () => {
+    mocked.podcasts = ["Current lesson", "Earlier lesson"].map((title, index) => ({
+      id: `episode-${index}`, notebook_id: "book-1", title,
+      created_at: "2026-11-01T10:00:00Z", source_ids: [],
+    }));
+    render(<PodcastHistory notebookId="book-1" playerVisible currentPodcastId="episode-0" onPlay={vi.fn()} sources={[]} sourcesLoading={false} sourcesError={null} sourcesFetching={false} retrySources={vi.fn()} />);
+
+    expect(screen.queryByRole("button", { name: "Play Current lesson" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Prepare download for Current lesson" })).toBeNull();
+    expect(screen.getByRole("button", { name: "Delete Current lesson" })).toBeVisible();
+    expect(screen.getAllByText("Sources used for this audio (0)")).toHaveLength(2);
+    expect(screen.getByRole("button", { name: "Play Earlier lesson" })).toBeVisible();
+    expect(screen.getByRole("button", { name: "Prepare download for Earlier lesson" })).toBeVisible();
+  });
+
   it("prepares audio first and starts the download only on a fresh follow-up click", async () => {
     vi.useFakeTimers({ shouldAdvanceTime: true });
     mocked.podcasts = [{

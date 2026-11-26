@@ -124,6 +124,7 @@ export const useTextPaste = () => {
               notebookId,
               filePath: savedSource.id,
               sourceType: "text",
+              savedSource: { title, type: "text", content: text },
             });
 
             console.log("✅ Notebook generation completed for text source");

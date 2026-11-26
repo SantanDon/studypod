@@ -51,7 +51,7 @@ The example shows selected fields. A key missing the read scope receives HTTP `4
 ```
 
 ### Uploading to Dropbox
-Agents can push files to a specific "Dropbox" route without needing your encryption passphrase. These files are queued and will be encrypted locally the next time you open the corresponding notebook.
+Agent Dropbox queues the original file on the server. When the owner opens the notebook, the browser downloads the file, runs the normal notebook import, and requests deletion of the queued copy. The agent does not need the owner's passphrase.
 
 `POST /api/agent/upload`
 - **Headers:** `Authorization: Bearer spm_your_agent_key`

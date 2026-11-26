@@ -60,8 +60,16 @@ export function DeveloperSettings() {
   };
 
   const [pairingCode, setPairingCode] = useState<string | null>(null);
-  const [, setPairingExpiresAt] = useState<string | null>(null);
+  const [pairingExpiresAt, setPairingExpiresAt] = useState<string | null>(null);
   const [pairingLoading, setPairingLoading] = useState(false);
+
+  useEffect(() => {
+    if (!pairingExpiresAt) return;
+    const timer = window.setTimeout(() => {
+      setPairingCode(null);
+    }, Math.max(0, Date.parse(pairingExpiresAt) - Date.now()));
+    return () => window.clearTimeout(timer);
+  }, [pairingExpiresAt]);
 
   const [generatedKey, setGeneratedKey] = useState<string | null>(null);
   const [genKeyLoading, setGenKeyLoading] = useState(false);
@@ -267,6 +275,11 @@ export function DeveloperSettings() {
             )}
           </Button>
 
+          {pairingExpiresAt && !pairingCode && (
+            <p role="status" className="text-sm text-muted-foreground">
+              Your code expired. Generate a new code to pair your agent.
+            </p>
+          )}
           {pairingCode && (
             <div className="p-4 bg-muted rounded-lg text-center space-y-2">
               <Label className="text-sm font-medium">Agent PIN Code</Label>
@@ -284,7 +297,7 @@ export function DeveloperSettings() {
                 </Button>
               </div>
               <p className="text-sm text-muted-foreground">
-                Expires in 5 minutes. Ask your connected agent to pair with StudyPod
+                Valid until {pairingExpiresAt && new Date(pairingExpiresAt).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}. Ask your connected agent to pair with StudyPod
                 using this code, then ask which account it connected to.
               </p>
             </div>
@@ -353,8 +366,8 @@ export function DeveloperSettings() {
           </CardHeader>
           <CardContent>
             <p className="text-sm text-muted-foreground leading-relaxed">
-              StudyPod is E2EE. Agents pushing files to the "Dropbox" route do <b>not</b> need your passphrase.
-              Uploads are automatically encrypted when you next open the notebook.
+              Agent Dropbox holds the original file on the server until you open the notebook.
+              Your browser imports it and then requests deletion of the queued copy.
             </p>
           </CardContent>
         </Card>

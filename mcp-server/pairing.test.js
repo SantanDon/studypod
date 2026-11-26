@@ -7,12 +7,14 @@ import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js"
 
 test("pairing authorizes identity without returning the credential to the agent", async (t) => {
   const demoKey = "spm_test_fixture";
+  const requests = [];
   const api = createServer(async (req, res) => {
     res.setHeader("Content-Type", "application/json");
     if (req.url === "/api/auth/pair/complete") {
       const chunks = [];
       for await (const chunk of req) chunks.push(chunk);
       const options = JSON.parse(Buffer.concat(chunks));
+      requests.push(options);
       res.writeHead(options.expiresInHours === 1 ? 201 : 400);
       res.end(JSON.stringify({ key: demoKey, expiresAt: "2030-01-01T00:00:00Z" }));
     } else if (req.url === "/api/auth/me" && req.headers.authorization === "Bearer " + demoKey) {
@@ -41,6 +43,14 @@ test("pairing authorizes identity without returning the credential to the agent"
   const paired = await client.callTool({ name: "pair", arguments: { code: "123456" } });
   assert.equal(JSON.parse(paired.content[0].text).success, true);
   assert.ok(!JSON.stringify(paired).includes(demoKey));
+  assert.equal(Object.hasOwn(requests[0], "notebookIds"), false);
+  assert.equal(Object.hasOwn(requests[0], "scopes"), false);
+  const scoped = await client.callTool({ name: "pair", arguments: {
+    code: "234567", notebook_ids: ["sample"], scopes: ["sources:read"],
+  } });
+  assert.equal(JSON.parse(scoped.content[0].text).success, true);
+  assert.deepEqual(requests[1].notebookIds, ["sample"]);
+  assert.deepEqual(requests[1].scopes, ["sources:read"]);
   const identity = await client.callTool({ name: "whoami", arguments: {} });
   assert.equal(JSON.parse(identity.content[0].text).id, "test-account");
   const denied = await client.callTool({ name: "list_notebooks", arguments: {} });

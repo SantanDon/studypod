@@ -1313,11 +1313,7 @@ const PodcastView: React.FC<PodcastViewProps> = ({ notebookId, onOpenSource }) =
           `podcast:${safeNotebookId}:${script?.title || "current"}`
         }
         mediaKind="podcast"
-        onDeleted={() => {
-          // Reset the store when deleted
-          // We'll trust the parent or store to update locally
-          usePodcastGenerationStore.getState().reset();
-        }}
+        allowDelete={false}
       />
 
       {audioValidation && !audioValidation.hasSpeech && (
@@ -1330,19 +1326,15 @@ const PodcastView: React.FC<PodcastViewProps> = ({ notebookId, onOpenSource }) =
           </span>
         </div>
       )}
-      {audioValidation && audioValidation.hasSpeech && (
-        <div className="podcast-validation-ok">
-          <span className="validation-icon" aria-hidden="true">
-            ✓
-          </span>
-          <span className="validation-text">
-            Ready to play
-          </span>
-        </div>
+      {audioValidation?.hasSpeech && (
+        <p role="status" className="podcast-validation-ok sr-only">
+          <span className="validation-text">Ready to play</span>
+        </p>
       )}
 
       <div className="studypod-listen-history">
         <PodcastHistory
+          playerVisible={finalAudioUrl !== "webspeech_fallback"}
           notebookId={safeNotebookId}
           sources={sources}
           sourcesLoading={sourcesLoading}

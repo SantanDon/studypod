@@ -96,10 +96,12 @@ export const useNotebookGeneration = () => {
       notebookId,
       filePath,
       sourceType,
+      savedSource,
     }: {
       notebookId: string;
       filePath?: string;
       sourceType: string;
+      savedSource?: Pick<LocalSource, "title" | "type" | "content">;
     }) => {
       console.log("🚀 Ultra-fast notebook generation:", {
         notebookId,
@@ -139,14 +141,10 @@ export const useNotebookGeneration = () => {
       // 2. Try to match by file_path OR url from the cloud sources
       let sources: LocalSource[] = [];
       try {
-        if (session?.access_token) {
-          const res = await ApiService.fetchSources(
-            notebookId,
-            session.access_token,
-          );
-          sources = Array.isArray(res) ? res : [];
-        } else {
-          const res = await localStorageService.getSources(notebookId);
+        if (!savedSource) {
+          const res = session?.access_token
+            ? await ApiService.fetchSources(notebookId, session.access_token)
+            : await localStorageService.getSources(notebookId);
           sources = Array.isArray(res) ? (res as LocalSource[]) : [];
         }
       } catch (err) {
@@ -155,6 +153,8 @@ export const useNotebookGeneration = () => {
       }
 
       let source: Partial<LocalSource> | undefined =
+        savedSource ||
+        sources.find((s) => s.id === filePath) ||
         sources.find((s) => s.file_path === filePath) ||
         sources.find((s) => s.url === filePath) ||
         sources[0]; // Fallback to first source if no match
@@ -168,8 +168,7 @@ export const useNotebookGeneration = () => {
           type: parsedSourceType.success ? parsedSourceType.data : "text",
         };
       } else {
-        source.content = source.content || cachedContent;
-        source.title = source.title || cachedTitle;
+        source = { ...source, content: source.content || cachedContent, title: source.title || cachedTitle };
       }
 
       let title = formatDisplayTitle(source?.title, "Untitled notebook");

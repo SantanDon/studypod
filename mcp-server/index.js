@@ -178,6 +178,14 @@ const TOOLS = [
       properties: {
         code: { type: "string", description: "The 6-digit numeric PIN" },
         label: { type: "string", description: "Friendly name for this agent" },
+        notebook_ids: {
+          type: "array", maxItems: 50, items: { type: "string" },
+          description: "Limit this session to the listed notebook IDs. Omit for all owned notebooks.",
+        },
+        scopes: {
+          type: "array", items: { type: "string" },
+          description: "Limit permissions, for example notebooks:read and sources:read. Omit for the standard agent permissions.",
+        },
       },
       required: ["code"],
     },
@@ -410,6 +418,8 @@ async function handleToolCall({ params: { name, arguments: args } }) {
             code: args.code,
             label: args.label || "MCP Agent",
             expiresInHours: 1,
+            notebookIds: args.notebook_ids,
+            scopes: args.scopes,
           }),
         });
         const data = await res.json();

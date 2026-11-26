@@ -22,6 +22,7 @@ interface PodcastHistoryProps {
   notebookId: string;
   onPlay: (audioUrl: string, title: string, podcastId: string) => void;
   onDeleted?: (podcastId: string) => void;
+  playerVisible?: boolean;
   currentAudioUrl?: string | null;
   currentPodcastId?: string | null;
   sources: Source[];
@@ -43,6 +44,7 @@ export const PodcastHistory: React.FC<PodcastHistoryProps> = ({
   notebookId,
   onPlay,
   onDeleted,
+  playerVisible = false,
   currentPodcastId,
   sources,
   sourcesLoading,
@@ -160,19 +162,22 @@ export const PodcastHistory: React.FC<PodcastHistoryProps> = ({
               ? Math.min(100, Math.max(0, (resumeAt / podcast.duration) * 100))
               : 0;
           const isCurrent = currentPodcastId === podcast.id;
+          const inPlayer = playerVisible && isCurrent;
 
           return (
             <div
               key={podcast.id}
               className={`group rounded-xl border p-3 transition-colors ${
-                isCurrent
+                inPlayer
+                  ? "border-transparent bg-transparent"
+                  : isCurrent
                   ? "border-indigo-500 bg-indigo-50 dark:border-indigo-600 dark:bg-indigo-950/30"
                   : index === 0
                     ? "border-indigo-200 bg-white dark:border-indigo-900 dark:bg-card"
                     : "border-slate-200 bg-white hover:bg-slate-50 dark:border-border dark:bg-card dark:hover:bg-muted"
               }`}
             >
-              <div className="flex items-center space-x-3 overflow-hidden">
+              {!inPlayer && <div className="flex items-center space-x-3 overflow-hidden">
                 <div className="min-h-11 min-w-11 rounded-full bg-indigo-100 text-indigo-800 dark:bg-indigo-950 dark:text-indigo-300 flex items-center justify-center flex-shrink-0">
                   {loadingAudioId === podcast.id ? (
                     <FontAwesomeIcon
@@ -229,7 +234,7 @@ export const PodcastHistory: React.FC<PodcastHistoryProps> = ({
                     </>
                   )}
                 </div>
-              </div>
+              </div>}
 
               <details className="mt-3 border-t border-slate-200 pt-2 text-sm dark:border-border">
                 <summary className="min-h-11 cursor-pointer rounded-md py-2 font-medium text-indigo-900 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-600 dark:text-indigo-200">
@@ -276,7 +281,7 @@ export const PodcastHistory: React.FC<PodcastHistoryProps> = ({
               </details>
 
               <div className="mt-2 flex flex-wrap items-start gap-x-2">
-                <div className="flex flex-col items-start">
+                {!inPlayer && <div className="flex flex-col items-start">
                   <button
                     type="button"
                     onClick={() => void handleDownload(podcast)}
@@ -305,7 +310,7 @@ export const PodcastHistory: React.FC<PodcastHistoryProps> = ({
                       Audio ready. Select Download file to save it.
                     </span>
                   )}
-                </div>
+                </div>}
                 <button
                   onClick={() => handleDelete(podcast)}
                   disabled={isDeleting}
