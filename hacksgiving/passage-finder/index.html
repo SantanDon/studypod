@@ -21,7 +21,7 @@
   :focus-visible { outline: 3px solid #8a4114; outline-offset: 3px }
 </style></head><body>
 <main><header>StudyPod</header><h1>Passage Finder</h1><p>Ask the weekly revision guide about a study day or activity. Each answer links to the line it came from.</p>
-<form><label for="question">Your question</label><input id="question" name="q" list="examples" maxlength="240" required value="What should I do on Friday?">
+<form><label for="question">Your question</label><input id="question" name="q" list="examples" maxlength="240" required pattern=".*\S.*" title="Enter a question about the weekly guide." value="What should I do on Friday?">
 <datalist id="examples"><option value="When do I revisit mistakes?"></option><option value="What should I do on Tuesday?"></option><option value="When do I take a practice quiz?"></option></datalist>
 <button>Find passage</button></form>
 <section aria-label="Answer" aria-live="polite" aria-atomic="true"><strong id="status"></strong><blockquote hidden></blockquote><a hidden>Open exact line on GitHub</a></section></main>

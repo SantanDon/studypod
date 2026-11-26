@@ -51,7 +51,7 @@ jobs:
         working-directory: mcp-server
         run: |
           npm ci
-          node --test arxiv.test.js pairing.test.js
+          node --test
 
       - name: Typecheck
         run: npm run typecheck

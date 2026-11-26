@@ -98,3 +98,22 @@ it("can cancel a pending voice and retry before its callbacks finish", async () 
   expect(screen.queryByRole("button", {name: "Cancel narration"})).toBeNull();
   view.unmount();
 });
+
+it("renders long passages in sections and joins every word in its original order", async () => {
+  const { encodeSpeechPcmWav } = await import("@/lib/tts/pcmWav");
+  const sample = await encodeSpeechPcmWav([new Float32Array([0.4, -0.4])], 24000);
+  voice.synthesize.mockClear().mockResolvedValue({ audioBlob: { arrayBuffer: async () => sample }, audioUrl: "blob:part" });
+  vi.spyOn(URL, "createObjectURL").mockReturnValue("blob:chapter");
+  vi.spyOn(URL, "revokeObjectURL").mockImplementation(() => {});
+  const content = "Read the scale twice and write down the time. ".repeat(9).trim();
+  const source = { id: "field", title: "Weather", content, notebook_id: "sections" } as Source;
+  const view = render(<HostedChapterReader notebookId="sections" sources={[source]} />);
+  await act(async () => {});
+  fireEvent.click(screen.getByRole("button", { name: "Generate chapter audio" }));
+  expect(await screen.findByText(/Ready to play/)).toBeVisible();
+  const calls = voice.synthesize.mock.calls.map(([text]) => text);
+  expect(calls.length).toBeGreaterThan(1);
+  expect(calls.every(text => text.length <= 150)).toBe(true);
+  expect(calls.join(" ")).toBe(content);
+  view.unmount();
+});

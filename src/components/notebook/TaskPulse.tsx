@@ -10,7 +10,7 @@ const TaskPulse = ({ notebookId }: { notebookId?: string }) => {
     <section aria-label="Saved tasks" className="space-y-3">
       <div className="flex items-center justify-between gap-3">
         <h3 className="text-sm font-semibold text-foreground">Saved tasks</h3>
-        {tasks && <Badge variant="outline">{pending} pending</Badge>}
+        {pending > 0 && <Badge variant="outline">{pending} pending</Badge>}
       </div>
       <p className="text-xs text-muted-foreground">Keep a chat response here with Save response as task.</p>
       {isLoading ? <p role="status" className="text-xs text-muted-foreground">Loading saved tasks…</p>

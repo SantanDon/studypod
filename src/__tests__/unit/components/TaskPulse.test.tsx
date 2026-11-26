@@ -16,6 +16,7 @@ describe('saved tasks rediscovery', () => {
     expect(screen.getByText('Sign in to save and revisit tasks.')).toBeTruthy();
     state.isAuthenticated = true; view.rerender(<TaskPulse notebookId="book" />);
     expect(screen.getByText('No saved tasks yet.')).toBeTruthy();
+    expect(screen.queryByText('0 pending')).toBeNull();
   });
   it('offers retry after a read failure without calling it empty', () => {
     state.isError = true; render(<TaskPulse notebookId="book" />);

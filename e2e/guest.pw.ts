@@ -35,12 +35,28 @@ test('guest notebook persists and exposes sources, chat, studio, and honest audi
     await expect(page.getByRole('heading', { name: 'Sources', exact: true })).toBeVisible();
     await page.getByRole('tab', { name: 'Chat', exact: true }).click();
     await expect(page.getByRole('heading', { name: 'Add a source to get started' })).toBeVisible();
-    await page.getByTestId('mobile-studio-tab').click();
+    await page.getByRole('tab', { name: 'Chat', exact: true }).press('ArrowRight');
+    const studioTab = page.getByRole('tab', { name: 'Studio', exact: true });
+    await expect(studioTab).toBeFocused();
+    await expect(studioTab).toHaveAttribute('aria-selected', 'true');
   } else {
     await expect(page.getByRole('heading', { name: 'Sources', exact: true })).toBeVisible();
   }
   await expect(page.getByRole('heading', { name: 'Studio', exact: true })).toBeVisible();
-  await page.getByRole('button', { name: /^Audiobook\b/ }).click();
+  const audiobook = page.getByRole('button', { name: /^Audiobook\b/ });
+  await expect(audiobook).toBeVisible();
+  if (testInfo.project.name === 'mobile-390') {
+    const target = await audiobook.boundingBox();
+    expect(target?.width).toBeGreaterThanOrEqual(44);
+    expect(target?.height).toBeGreaterThanOrEqual(44);
+  }
+  // Use the browser's tab order so removing the control from keyboard navigation fails this test.
+  for (let step = 0; step < 40; step++) {
+    if (await audiobook.evaluate(button => button === document.activeElement)) break;
+    await page.keyboard.press('Tab');
+  }
+  await expect(audiobook).toBeFocused();
+  await page.keyboard.press('Enter');
   await expect(page.getByTestId('audiobook-workspace')).toBeVisible();
   await expect(page.getByTestId('audiobook-local-beta')).toBeVisible();
   for (const id of ['audiobook-add-book', 'audiobook-create-full', 'audiobook-book-upload']) {

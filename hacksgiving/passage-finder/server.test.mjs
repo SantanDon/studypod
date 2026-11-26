@@ -32,6 +32,12 @@ test('HTTP answers cite the exact revision and line returned by the connector', 
   const home = await request(base);
   const page = new JSDOM(await home.text());
   t.after(() => page.window.close());
+  const question = page.window.document.querySelector('input[name="q"]');
+  assert.equal(question.checkValidity(), true);
+  question.value = '   ';
+  assert.equal(question.checkValidity(), false, 'blank questions should never request the guide');
+  question.value = '  Friday?  ';
+  assert.equal(question.checkValidity(), true);
   const scripts = page.window.document.scripts;
   assert.equal(scripts.length, 1);
   assert.equal(scripts[0].attributes.length, 0, 'the demo must serve one plain inline script');
