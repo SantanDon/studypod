@@ -1873,9 +1873,10 @@ export function getSafeGroundingFailureReason(error) {
 // Remove only a complete trailing presentation instruction. Substantive requests
 // such as an explanation of a second topic remain evidence obligations.
 export function literalRetryCoverageQuestion(question) {
-  return String(question)
-    .replace(/(?:^|(?<=[.!?]))\s*(?:give|provide|write)\s+(?:a\s+)?(?:(?:concise|brief|short|detailed)\s+)?(?:explanation|answer|summary)(?:\s+(?:grounded\s+in|based\s+on|from)\s+(?:(?:this|the|supplied)\s+)?(?:notebook(?:['’]s)?\s+)?(?:sources?|material))?[.!?]?\s*$/i, "")
-    .replace(/\babout\s*[?!.]?\s*$/i, "")
+  return String(question).trimEnd()
+    .replace(/(?:^|(?<=[.!?]))\s*(?:give|provide|write)\s+(?:a\s+)?(?:(?:concise|brief|short|detailed)\s+)?(?:explanation|answer|summary)(?:\s+(?:grounded\s+in|based\s+on|from)\s+(?:(?:this|the|supplied)\s+)?(?:notebook(?:['’]s)?\s+)?(?:sources?|material))?[.!?]?$/i, "")
+    .trimEnd()
+    .replace(/\babout(?:\s*[?!.])?$/i, "")
     .trim();
 }
 
