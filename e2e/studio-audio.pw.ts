@@ -1166,7 +1166,7 @@ for (const scenario of [
           expect(foreignUiResponse.status()).toBe(200);
           expect((await foreignUiResponse.json()).podcast).toBeNull();
           await expect(other.getByRole('heading', { name: 'Saved audio', exact: true })).toBeVisible();
-          await expect(other.getByText('No saved audio yet. Open a notebook\'s Studio to create an audio overview.', { exact: true })).toBeVisible();
+          await expect(other.getByText('No saved audio yet. Create a podcast or audiobook from your sources in Studio.', { exact: true })).toBeVisible();
           await expect(other.getByText(savedPodcast.title, { exact: true })).toHaveCount(0);
           await expect(other.getByRole('link', { name: /^(?:Open|Resume) .* in / })).toHaveCount(0);
           receipt.dashboardCueForeignAccountHidden = true;
@@ -1399,7 +1399,7 @@ for (const scenario of [
         expect(deletedUiResponse.status()).toBe(200);
         expect((await deletedUiResponse.json()).podcast).toBeNull();
         await expect(page.getByRole('heading', { name: 'Saved audio', exact: true })).toBeVisible();
-        await expect(page.getByText('No saved audio yet. Open a notebook\'s Studio to create an audio overview.', { exact: true })).toBeVisible();
+        await expect(page.getByText('No saved audio yet. Create a podcast or audiobook from your sources in Studio.', { exact: true })).toBeVisible();
         await expect(page.getByText(savedPodcast.title, { exact: true })).toHaveCount(0);
         await expect(page.getByRole('link', { name: `Resume ${savedPodcast.title} in ${notebookTitle}` })).toHaveCount(0);
         receipt.podcastOwnerDeletion = { recordRemoved: true, bytesRemoved: true, emptyList: true, absentAfterReload: true, dashboardCueRemoved: true };

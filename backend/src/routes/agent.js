@@ -11,23 +11,13 @@ import { dbHelpers, getDatabase } from "../db/database.js";
 import { logger } from "../utils/logger.js";
 
 const router = express.Router();
+const agentUploadDir = path.join(process.env.VERCEL ? "/tmp" : process.cwd(), "uploads", "agent");
 
 // Configure multer for file uploads
 const storage = multer.diskStorage({
   destination: function (req, file, cb) {
-    const baseDir = process.env.VERCEL ? "/tmp" : process.cwd();
-    const uploadDir = path.join(baseDir, "uploads", "agent");
-    // Standard ESM-style sync directory creation
-    if (!fsSync.existsSync(uploadDir)) {
-      fsSync.mkdirSync(uploadDir, { recursive: true });
-    }
-    cb(null, uploadDir);
-  },
-  filename: function (req, file, cb) {
-    cb(
-      null,
-      `agent_${Date.now()}_${uuidv4()}${path.extname(file.originalname)}`,
-    );
+    fsSync.mkdirSync(agentUploadDir, { recursive: true });
+    cb(null, agentUploadDir);
   },
 });
 
@@ -37,9 +27,9 @@ const upload = multer({
 });
 
 async function removeUploadedFile(file) {
-  if (!file?.path) return;
+  if (!file?.filename || file.filename.length !== 32 || !/^[a-f0-9]+$/.test(file.filename)) return;
   try {
-    await fsPromises.unlink(file.path);
+    await fsPromises.unlink(path.join(agentUploadDir, path.basename(file.filename)));
   } catch (error) {
     if (error?.code !== "ENOENT") {
       logger.warn("Could not remove uploaded agent file:", error);

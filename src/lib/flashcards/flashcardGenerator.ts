@@ -33,6 +33,7 @@ interface GeneratedCard {
   type: CardType;
   front: string;
   back: string;
+  sourceExtracted?: boolean;
 }
 
 
@@ -200,12 +201,25 @@ function rejectedContextSelections(response: string, content: string) {
   return selections;
 }
 
+// Extract short, literal subjects of common factual statements. Every selection
+// still passes the same exact-evidence checks as a provider selection.
+function extractSourceCards(source: string, limit: number): GeneratedCard[] {
+  const subject = /^(?:(?:the|a|an|each)\s+)?([\p{L}][\p{L}\p{M}'’-]*(?:\s+[\p{L}][\p{L}\p{M}'’-]*){0,3}?)\s+(?:is|are|was|were|has|have|had|contains?|uses?|used|holds?|held|receives?|received|measures?|measured|produces?|produced|absorbs?|absorbed|requires?|required)\s/iu;
+  const candidates = normalize(source).split(/(?<=[.!?])\s+/).flatMap(evidence => {
+    const answer = subject.exec(evidence)?.[1];
+    if (!answer || /^(?:i|we|you|he|she|they|there|each|one|all|none|some|any|what|who|which|why|how)\b/i.test(answer)) return [];
+    return [JSON.stringify({ evidence, answer, type: 'fact' })];
+  });
+  return parseFlashcardResponse(candidates.join('\n'), source).slice(0, limit);
+}
+
 export async function generateFlashcards(
   content: string,
   numCards: number = 5,
   sourceId: string,
   sourceTitle: string,
-  onProgress?: (message: string) => void
+  onProgress?: (message: string) => void,
+  allowSourceExtraction = false
 ): Promise<Flashcard[]> {
   if (!content || content.trim().length < 50) {
     throw new Error('Content is too short to generate flashcards');
@@ -238,6 +252,7 @@ export async function generateFlashcards(
   // Reserve five seconds of the existing 65-second Studio interaction budget
   // for validation and saving; both provider attempts share this absolute deadline.
   const deadlineAt = Date.now() + 60_000;
+  let generatedCards: GeneratedCard[] = [];
   try {
     const response = await chatCompletion({
       messages: [
@@ -260,7 +275,7 @@ export async function generateFlashcards(
 
     const diagnostics = newFlashcardDiagnostics();
     const ratioCollector = newRatioCollector(truncatedContent);
-    const generatedCards = parseFlashcardResponse(response, truncatedContent, diagnostics, [], ratioCollector).slice(0, requestedCardCount);
+    generatedCards = parseFlashcardResponse(response, truncatedContent, diagnostics, [], ratioCollector).slice(0, requestedCardCount);
     if (diagnosticsEnabled()) await emitFlashcardDiagnostics(response, diagnostics, requestedCardCount, generatedCards.length, ratioCollector);
 
     // Correct observed selections rejected for too much answer, too little context,
@@ -303,33 +318,40 @@ export async function generateFlashcards(
       throw new Error(`Only ${generatedCards.length} of ${requestedCardCount} requested grounded source-completion flashcards were returned; try a clearer source passage or request fewer cards`);
     }
 
-    const flashcards: Flashcard[] = generatedCards.map((card) => ({
-      id: generateId(),
-      front: card.front,
-      back: card.back,
-      sourceId,
-      sourceTitle,
-      cardType: card.type,
-      difficulty: 'medium',
-      lastReviewed: null as string | null,
-      nextReview: null as string | null,
-      correctCount: 0,
-      incorrectCount: 0,
-      easeFactor: 2.5,
-      interval: 0,
-    }));
-
-    onProgress?.(`Generated ${flashcards.length} flashcards`);
-
-    return flashcards;
   } catch (error) {
-    console.error('Error generating flashcards:', error);
-    throw new Error(
-      error instanceof Error 
-        ? `Failed to generate flashcards: ${error.message}`
-        : 'Failed to generate flashcards'
-    );
+    if (!allowSourceExtraction) {
+      throw new Error(error instanceof Error ? `Failed to generate flashcards: ${error.message}` : 'Failed to generate flashcards');
+    }
+    onProgress?.('Selecting exact phrases from the source…');
+    const evidenceOf = (card: GeneratedCard) => card.front.slice('Complete the source statement: '.length).replace('____', () => card.back);
+    const seen = new Set(generatedCards.map(evidenceOf));
+    for (const card of extractSourceCards(truncatedContent, requestedCardCount + seen.size)) {
+      if (!seen.has(evidenceOf(card))) generatedCards.push({ ...card, sourceExtracted: true });
+      if (generatedCards.length === requestedCardCount) break;
+    }
+    if (!generatedCards.length) {
+      throw new Error('No verified cards could be created. Choose a passage with complete factual sentences that name the subject, then try again.');
+    }
   }
+
+  const flashcards: Flashcard[] = generatedCards.map((card) => ({
+    id: generateId(),
+    front: card.front,
+    back: card.back,
+    sourceId,
+    sourceTitle,
+    ...(card.sourceExtracted && { sourceExtracted: true }),
+    cardType: card.type,
+    difficulty: 'medium',
+    lastReviewed: null,
+    nextReview: null,
+    correctCount: 0,
+    incorrectCount: 0,
+    easeFactor: 2.5,
+    interval: 0,
+  }));
+  onProgress?.(`Generated ${flashcards.length} flashcards`);
+  return flashcards;
 }
 
 export async function generateFlashcardsFromMultipleSources(

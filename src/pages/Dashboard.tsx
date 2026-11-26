@@ -121,7 +121,7 @@ const Dashboard = () => {
           <>
             <h1 className={`mb-6 text-3xl font-semibold tracking-tight text-foreground ${useCustomFonts ? 'font-heading' : ''}`}>Your research workspace</h1>
             <div className="grid grid-cols-1 lg:grid-cols-4 gap-8 items-start">
-            <div className="lg:col-span-3">
+            <div id="dashboard-notebooks" tabIndex={-1} className="lg:col-span-3">
               <NotebookGrid />
             </div>
             <div className="lg:col-span-1 space-y-6">
@@ -140,7 +140,18 @@ const Dashboard = () => {
                     </div>
                     <Link to={`/notebook/${encodeURIComponent(episodeNotebook.id)}?view=studio&episode=${encodeURIComponent(ownedEpisode.id)}`} className="inline-flex min-h-11 items-center rounded-lg bg-indigo-800 px-4 py-2 text-sm font-semibold text-white hover:bg-indigo-900 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-600 focus-visible:ring-offset-2 dark:bg-indigo-700 dark:hover:bg-indigo-600" aria-label={`${resumeAt > 0 ? "Resume" : "Open"} ${ownedEpisode.title} in ${episodeNotebook.title}`}>{resumeAt > 0 ? "Resume in Studio" : "Open episode"}</Link>
                   </div>
-                ) : <p className="mt-2 text-sm text-muted-foreground">No saved audio yet. Open a notebook's Studio to create an audio overview.</p>}
+                ) : (
+                  <div className="mt-2 space-y-1 text-sm leading-6">
+                    <p className="text-slate-600 dark:text-slate-300">No saved audio yet. Create a podcast or audiobook from your sources in Studio.</p>
+                    <Link
+                      to={notebooks.length === 1 ? `/notebook/${encodeURIComponent(notebooks[0].id)}?view=studio` : '#dashboard-notebooks'}
+                      onClick={notebooks.length > 1 ? () => document.getElementById('dashboard-notebooks')?.focus() : undefined}
+                      className="inline-flex min-h-11 items-center rounded font-semibold text-indigo-800 underline underline-offset-4 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-600 dark:text-indigo-300"
+                    >
+                      {notebooks.length === 1 ? 'Go to Studio' : 'Choose a notebook'}
+                    </Link>
+                  </div>
+                )}
               </section>
               <GoalsPulse />
               {FEATURE_FLAGS.SIGNAL_QUEUE_VISIBLE && <WhatsHappening />}

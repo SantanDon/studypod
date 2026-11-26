@@ -23,18 +23,27 @@ const URL_REGEX = /https?:\/\/(?!(?:twitter\.com|x\.com|t\.co))[^\s"'<>]+/g;
  * Parse tweet ID from a twitter/x.com URL
  */
 export function parseTweetId(url) {
-  const match = url.match(/(?:twitter|x)\.com\/[^/]+\/status(?:es)?\/(\d+)/);
-  return match ? match[1] : null;
+  try {
+    const parsed = new URL(url);
+    if (!["http:", "https:"].includes(parsed.protocol) || parsed.port || parsed.username || parsed.password ||
+        !/^(?:(?:www|mobile|m)\.)?(?:twitter|x)\.com$/.test(parsed.hostname)) return null;
+    const match = parsed.pathname.match(/^\/(?:[a-z0-9_]+|i\/web)\/status(?:es)?\/([0-9]{1,20})(?:\/|$)/i);
+    return match?.[1] ?? null;
+  } catch {
+    return null;
+  }
 }
 
 /**
  * Fetch tweet text via oEmbed — no auth required, public tweets only.
  */
-async function fetchViaOEmbed(tweetUrl) {
-  const oembedUrl = `https://publish.twitter.com/oembed?url=${encodeURIComponent(tweetUrl)}&omit_script=true&hide_thread=false`;
+async function fetchViaOEmbed(tweetId) {
+  const oembedUrl = new URL("https://publish.twitter.com/oembed?omit_script=true&hide_thread=false");
+  oembedUrl.searchParams.set("url", `https://twitter.com/i/web/status/${tweetId}`);
 
   const response = await fetch(oembedUrl, {
     headers: { "User-Agent": "StudyPodLM-Research/1.0" },
+    redirect: "error",
     timeout: 10000,
   });
 
@@ -72,7 +81,8 @@ async function fetchViaOEmbed(tweetUrl) {
 async function fetchViaTweetAPI(tweetId) {
   if (!TWITTER_BEARER_TOKEN) return null;
 
-  const url = `https://api.twitter.com/2/tweets/${tweetId}?tweet.fields=text,entities,author_id&expansions=author_id&user.fields=name,username`;
+  const url = new URL("https://api.twitter.com/2/tweets/?tweet.fields=text,entities,author_id&expansions=author_id&user.fields=name,username");
+  url.pathname += tweetId;
 
   try {
     const response = await fetch(url, {
@@ -80,6 +90,7 @@ async function fetchViaTweetAPI(tweetId) {
         Authorization: `Bearer ${TWITTER_BEARER_TOKEN}`,
         "User-Agent": "StudyPodLM-Research/1.0",
       },
+      redirect: "error",
       timeout: 10000,
     });
 
@@ -130,10 +141,8 @@ async function fetchReplyLinks(tweetId) {
   }
 
   // Search for replies to this tweet
-  const query = encodeURIComponent(
-    `conversation_id:${tweetId} has:links -is:retweet`,
-  );
-  const url = `https://api.twitter.com/2/tweets/search/recent?query=${query}&tweet.fields=text,entities&max_results=50`;
+  const url = new URL("https://api.twitter.com/2/tweets/search/recent?tweet.fields=text,entities&max_results=50");
+  url.searchParams.set("query", `conversation_id:${tweetId} has:links -is:retweet`);
 
   try {
     const response = await fetch(url, {
@@ -141,6 +150,7 @@ async function fetchReplyLinks(tweetId) {
         Authorization: `Bearer ${TWITTER_BEARER_TOKEN}`,
         "User-Agent": "StudyPodLM-Research/1.0",
       },
+      redirect: "error",
       timeout: 12000,
     });
 
@@ -245,7 +255,7 @@ export async function extractTweet(tweetUrl) {
       `[TweetExtraction] Got tweet via API v2: "${tweetText.substring(0, 80)}..."`,
     );
   } else {
-    const oembedResult = await fetchViaOEmbed(tweetUrl);
+    const oembedResult = await fetchViaOEmbed(tweetId);
     tweetText = oembedResult.text;
     author = oembedResult.author;
     authorUrl = oembedResult.authorUrl;

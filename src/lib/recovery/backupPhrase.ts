@@ -1,30 +1,13 @@
 /**
- * Backup phrase (BIP-39 mnemonic) generation and validation
+ * StudyPod backup phrase generation and validation
  * 
  * 12-word mnemonic phrases provide a memorable recovery option.
  * Uses BIP-39 English wordlist (2048 words).
  */
 
+import englishWords from 'bip39/src/wordlists/english.json';
 import { BackupPhrase, RecoveryResult } from './types';
 import { encryptionService } from '@/services/encryptionService';
-
-// BIP-39 English wordlist (first 100 words for demo - full list would be 2048)
-// In production, import full BIP-39 wordlist
-const WORDLIST = [
-  'abandon', 'ability', 'able', 'about', 'above', 'absent', 'absorb', 'abstract',
-  'absurd', 'abuse', 'access', 'accident', 'account', 'accuse', 'achieve', 'acid',
-  'acoustic', 'acquire', 'across', 'act', 'action', 'actor', 'actress', 'actual',
-  'adapt', 'add', 'addict', 'address', 'adjust', 'admit', 'adult', 'advance',
-  'advice', 'aerobic', 'affair', 'afford', 'afraid', 'again', 'age', 'agent',
-  'agree', 'ahead', 'aim', 'air', 'airport', 'aisle', 'alarm', 'album',
-  'alcohol', 'alert', 'alien', 'all', 'alley', 'allow', 'almost', 'alone',
-  'alpha', 'already', 'also', 'alter', 'always', 'amateur', 'amazing', 'among',
-  'amount', 'amused', 'analyst', 'anchor', 'ancient', 'anger', 'angle', 'angry',
-  'animal', 'ankle', 'announce', 'annual', 'another', 'answer', 'antenna', 'antique',
-  'anxiety', 'any', 'apart', 'apology', 'appear', 'apple', 'approve', 'april',
-  'arch', 'arctic', 'area', 'arena', 'argue', 'arm', 'armed', 'armor',
-  'army', 'around', 'arrange', 'arrest', 'arrive', 'arrow', 'art', 'artefact',
-];
 
 const PHRASE_LENGTH = 12;
 
@@ -35,15 +18,9 @@ const PHRASE_LENGTH = 12;
  * @returns 12-word mnemonic phrase
  */
 export function generateBackupPhrase(): string {
-  const words: string[] = [];
-  
-  for (let i = 0; i < PHRASE_LENGTH; i++) {
-    // Generate random index
-    const randomIndex = crypto.getRandomValues(new Uint32Array(1))[0] % WORDLIST.length;
-    words.push(WORDLIST[randomIndex]);
-  }
-  
-  return words.join(' ');
+  // The English list has 2,048 entries, so every 11-bit index is equally likely.
+  const randomWords = crypto.getRandomValues(new Uint16Array(PHRASE_LENGTH));
+  return Array.from(randomWords, value => englishWords[value & 0x7ff]).join(' ');
 }
 
 /**
@@ -62,7 +39,7 @@ export function validateBackupPhraseFormat(phrase: string): boolean {
   }
   
   // All words must be in wordlist
-  return words.every(word => WORDLIST.includes(word));
+  return words.every(word => englishWords.includes(word));
 }
 
 /**

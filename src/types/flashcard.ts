@@ -6,6 +6,7 @@ export interface Flashcard {
   back: string;
   sourceId: string;
   sourceTitle: string;
+  sourceExtracted?: boolean;
   cardType: CardType;
   difficulty: 'easy' | 'medium' | 'hard';
   lastReviewed: string | null;

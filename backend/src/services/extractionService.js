@@ -1,7 +1,10 @@
 import fetch from "node-fetch";
+import { lookup } from "node:dns/promises";
+import { Agent } from "node:https";
+import { isIP } from "node:net";
 import * as cheerio from "cheerio";
 import { logger } from "../utils/logger.js";
-import { assertSafeExternalHttpsUrl } from "../utils/externalUrlSafety.js";
+import { assertSafeExternalHttpsUrl, isPublicIpAddress, parseExternalHttpsUrl } from "../utils/externalUrlSafety.js";
 
 // Cheerio keeps the serverless extraction pass lightweight and ESM-compatible.
 
@@ -13,23 +16,52 @@ const USER_AGENTS = [
 const REDIRECT_STATUSES = new Set([301, 302, 303, 307, 308]);
 const MAX_SAFE_REDIRECTS = 4;
 
+class ExternalDestinationError extends Error {}
+
 export async function fetchPublicUrl(url, options, fetchImpl = fetch) {
-  let currentUrl = await assertSafeExternalHttpsUrl(url);
+  let currentUrl = url;
 
   for (let redirectCount = 0; redirectCount <= MAX_SAFE_REDIRECTS; redirectCount += 1) {
-    const response = await fetchImpl(currentUrl, { ...options, redirect: "manual" });
+    let target;
+    let agent;
+    try {
+      target = parseExternalHttpsUrl(currentUrl);
+      const host = target.hostname.replace(/^\[|\]$/g, "");
+      if (!isIP(host)) {
+        const addresses = await lookup(host, { all: true, verbatim: true });
+        if (!addresses.length || addresses.some(({ address }) => !isPublicIpAddress(address))) {
+          throw new Error("Hostname must resolve exclusively to public addresses.");
+        }
+        // Keep the original HTTPS name for TLS and use exactly the vetted DNS answers.
+        agent = new Agent({
+          keepAlive: false,
+          lookup(hostname, options, callback) {
+            if (hostname !== host) return callback(new Error("Unexpected destination hostname."));
+            const candidates = addresses.filter(({ family }) => !options.family || family === options.family);
+            if (!candidates.length) return callback(new Error("No public address for this address family."));
+            if (options.all) return callback(null, candidates);
+            callback(null, candidates[0].address, candidates[0].family);
+          },
+        });
+      }
+    } catch (cause) {
+      throw new ExternalDestinationError(cause.message, { cause });
+    }
+    const response = await fetchImpl(target.toString(), { ...options, agent, redirect: "manual" });
     if (!REDIRECT_STATUSES.has(response.status)) return response;
 
     const location = response.headers.get("location");
     if (!location) return response;
     response.body?.destroy?.();
     if (redirectCount === MAX_SAFE_REDIRECTS) {
-      throw new Error("External URL exceeded the redirect limit.");
+      throw new ExternalDestinationError("External URL exceeded the redirect limit.");
     }
 
-    currentUrl = await assertSafeExternalHttpsUrl(
-      new URL(location, currentUrl).toString(),
-    );
+    try {
+      currentUrl = new URL(location, target).toString();
+    } catch (cause) {
+      throw new ExternalDestinationError("Invalid external redirect.", { cause });
+    }
   }
 
   throw new Error("External URL could not be fetched safely.");
@@ -145,13 +177,17 @@ async function extractWithCheerio(url) {
  * Phase 2 (ULTRA): Jina Reader. Handles JS/SPA rendering without an API key.
  */
 async function extractWithJina(url) {
-  const jinaUrl = `https://r.jina.ai/${url}`;
+  const source = new URL(url);
+  const jinaUrl = new URL("https://r.jina.ai/");
+  jinaUrl.pathname = "/" + source.origin + source.pathname;
+  jinaUrl.search = source.search;
   logger.info(
     `[Extraction] Attempting Jina Reader fallback for: ${new URL(url).hostname}`,
   );
 
   const response = await fetch(jinaUrl, {
     method: "GET",
+    redirect: "error",
     headers: {
       Accept: "text/plain",
       "X-No-Cache": "true",
@@ -190,6 +226,7 @@ async function extractWithFirecrawl(url) {
 
   const response = await fetch("https://api.firecrawl.dev/v0/scrape", {
     method: "POST",
+    redirect: "error",
     headers: {
       "Content-Type": "application/json",
       Authorization: `Bearer ${apiKey}`,
@@ -207,6 +244,24 @@ async function extractWithFirecrawl(url) {
   };
 }
 
+function encodedGithubPath(path) {
+  const segments = path.split("/");
+  if (segments.some(segment => !segment || segment === "." || segment === ".." || /[\\\x00-\x1f]/.test(segment))) {
+    throw new Error("Invalid GitHub path.");
+  }
+  return segments.map(encodeURIComponent).join("/");
+}
+
+function githubApiUrl(owner, repo, branch) {
+  const endpoint = new URL("https://api.github.com/");
+  endpoint.pathname = `/repos/${owner}/${repo}`;
+  if (branch !== undefined) {
+    endpoint.pathname += "/git/trees/" + encodedGithubPath(branch);
+    endpoint.searchParams.set("recursive", "1");
+  }
+  return endpoint;
+}
+
 /**
  * Deep recursive extraction for GitHub repositories
  */
@@ -219,16 +274,21 @@ async function extractGitHubRepo(url) {
   const owner = pathParts[0];
   const repo = pathParts[1].replace(/\.git$/, "");
 
+  if (!/^[A-Za-z0-9-]+$/.test(owner) || !/^[A-Za-z0-9_.-]+$/.test(repo) || repo === "." || repo === "..") {
+    throw new Error("Invalid GitHub repository name.");
+  }
+
   logger.info(`[GitHub Extractor] owner: ${owner}, repo: ${repo}`);
 
   let branch = "main";
   if (pathParts[2] === "tree" && pathParts[3]) {
-    branch = pathParts.slice(3).join("/");
+    branch = pathParts.slice(3).map(decodeURIComponent).join("/");
   } else {
     try {
       const apiResponse = await fetch(
-        `https://api.github.com/repos/${owner}/${repo}`,
+        githubApiUrl(owner, repo),
         {
+          redirect: "error",
           headers: { "User-Agent": "StudyPodLM-Agent" },
           timeout: 5000,
         },
@@ -251,8 +311,9 @@ async function extractGitHubRepo(url) {
   let treeData;
   try {
     const treeResponse = await fetch(
-      `https://api.github.com/repos/${owner}/${repo}/git/trees/${branch}?recursive=1`,
+      githubApiUrl(owner, repo, branch),
       {
+        redirect: "error",
         headers: { "User-Agent": "StudyPodLM-Agent" },
         timeout: 10000,
       },
@@ -263,8 +324,9 @@ async function extractGitHubRepo(url) {
           `[GitHub Extractor] Failed with branch 'main', trying 'master'...`,
         );
         const altTreeResponse = await fetch(
-          `https://api.github.com/repos/${owner}/${repo}/git/trees/master?recursive=1`,
+          githubApiUrl(owner, repo, "master"),
           {
+            redirect: "error",
             headers: { "User-Agent": "StudyPodLM-Agent" },
             timeout: 10000,
           },
@@ -389,9 +451,10 @@ async function extractGitHubRepo(url) {
   consolidatedContent += `Total Files Extracted: ${selectedFiles.length}\n\n`;
 
   const fetchPromises = selectedFiles.map(async (filePath) => {
-    const rawUrl = `https://raw.githubusercontent.com/${owner}/${repo}/${branch}/${filePath}`;
     try {
-      const fileRes = await fetch(rawUrl, { timeout: 8000 });
+      const rawUrl = new URL("https://raw.githubusercontent.com/");
+      rawUrl.pathname = `/${owner}/${repo}/${encodedGithubPath(branch)}/${encodedGithubPath(filePath)}`;
+      const fileRes = await fetch(rawUrl, { timeout: 8000, redirect: "error" });
       if (fileRes.ok) {
         const text = await fileRes.text();
         const extension = filePath.substring(filePath.lastIndexOf(".") + 1);
@@ -428,7 +491,7 @@ export async function extractWebSource(url) {
   url = await assertSafeExternalHttpsUrl(url);
   const logHost = new URL(url).hostname;
   const isGitHubRepo =
-    url.includes("github.com") &&
+    (logHost === "github.com" || logHost === "www.github.com") &&
     !url.includes("/raw/") &&
     !url.includes("/blob/") &&
     !url.includes("/releases/");
@@ -448,6 +511,7 @@ export async function extractWebSource(url) {
   try {
     return await extractWithCheerio(url);
   } catch (err) {
+    if (err instanceof ExternalDestinationError) throw err;
     logger.warn(
       `[Extraction] Cheerio failed for ${logHost}, trying Jina Reader...`,
     );

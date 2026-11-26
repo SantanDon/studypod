@@ -52,6 +52,12 @@ function generateTableOfContents(options: ExportOptions, data: ExportData): stri
   return `## Table of Contents\n\n${sections.join('\n')}\n`;
 }
 
+function yamlString(value: string): string {
+  return JSON.stringify(value).replace(/[\u0085\u2028\u2029]/g, char =>
+    `\\u${char.charCodeAt(0).toString(16).padStart(4, '0')}`
+  );
+}
+
 function generateYamlFrontmatter(data: ExportData, _options: ExportOptions): string {
   const tags: string[] = ['studylm', 'notebook'];
   
@@ -62,27 +68,30 @@ function generateYamlFrontmatter(data: ExportData, _options: ExportOptions): str
 
   const frontmatter = [
     '---',
-    `title: "${data.notebook.title.replace(/"/g, '\\"')}"`,
-    `created: ${data.notebook.created_at}`,
-    `updated: ${data.notebook.updated_at}`,
-    `tags: [${tags.join(', ')}]`,
+    `title: ${yamlString(data.notebook.title)}`,
+    `created: ${yamlString(data.notebook.created_at)}`,
+    `updated: ${yamlString(data.notebook.updated_at)}`,
+    `tags: [${tags.map(yamlString).join(', ')}]`,
   ];
 
   if (data.notebook.description) {
-    frontmatter.push(`description: "${data.notebook.description.replace(/"/g, '\\"')}"`);
+    frontmatter.push(`description: ${yamlString(data.notebook.description)}`);
   }
 
   frontmatter.push('---');
   return frontmatter.join('\n');
 }
 
-function formatLink(title: string, url: string | undefined, obsidianFormat: boolean): string {
-  if (!url) return title;
-  
-  if (obsidianFormat) {
-    return `[[${title}]]`;
+function formatSourceUrl(value: string): string {
+  try {
+    const url = new URL(value);
+    if (url.protocol === 'https:' || url.protocol === 'http:') {
+      return `<${url.href.replace(/</g, '%3C').replace(/>/g, '%3E')}>`;
+    }
+  } catch {
+    // Older notebooks may contain a URL saved as plain text.
   }
-  return `[${title}](${url})`;
+  return value.replace(/[\r\n]+/g, ' ').replace(/[&<>\\\[\]`*_]/g, character => `&#${character.charCodeAt(0)};`);
 }
 
 function generateSourcesSection(sources: LocalSource[], obsidianFormat: boolean): string {
@@ -119,7 +128,7 @@ function generateSourcesSection(sources: LocalSource[], obsidianFormat: boolean)
     lines.push(`- **Added:** ${formatDate(source.created_at)}`);
     
     if (source.url) {
-      lines.push(`- **URL:** ${formatLink(source.url, source.url, false)}`);
+      lines.push(`- **URL:** ${formatSourceUrl(source.url)}`);
     }
 
     if (source.summary) {
@@ -130,7 +139,7 @@ function generateSourcesSection(sources: LocalSource[], obsidianFormat: boolean)
       const truncatedContent = source.content.length > 500 
         ? source.content.substring(0, 500) + '...' 
         : source.content;
-      lines.push(`\n<details>\n<summary>Content Preview</summary>\n\n${truncatedContent}\n\n</details>`);
+      lines.push(`\n<details>\n<summary>Content Preview</summary>\n\n${truncatedContent.split(/\r\n?|\n/).map(line => '    ' + line).join('\n')}\n\n</details>`);
     }
 
     lines.push('');

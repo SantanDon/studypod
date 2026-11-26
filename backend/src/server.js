@@ -212,6 +212,9 @@ app.use(
   }),
 );
 
+// Count each request once, before parsing its body or dispatching to a router.
+app.use(apiLimiter);
+
 // Extracted documents and their chunk metadata can exceed Express's 100 KB
 // default. Keep a bounded, configurable limit so normal research PDFs can be
 // persisted without accepting unbounded request bodies.
@@ -227,24 +230,24 @@ app.use(mcpRoutes);
 // API Routes
 app.use("/api/auth", authRoutes);
 app.use("/api/sync", syncRoutes);
-app.use("/api/user", apiLimiter, userRoutes);
-app.use("/api/notebooks", apiLimiter, documentRoutes);
-app.use("/api/notebooks", apiLimiter, studioRoutes);
-app.use("/api/notebooks", apiLimiter, podcastRoutes);
-app.use("/api/notebooks", apiLimiter, notebookRoutes);
-app.use("/api/pdf", apiLimiter, pdfRoutes);
-app.use("/api/youtube", apiLimiter, youtubeRouter);
-app.use("/api/tasks", apiLimiter, tasksRouter);
-app.use("/api/agent/antigravity", apiLimiter, antigravityRouter);
-app.use("/api/agent", apiLimiter, agentRoutes);
-app.use("/api/agent", apiLimiter, agentMissionRoutes);
-app.use("/api/ai", apiLimiter, aiRoutes);
-app.use("/api/proxy", apiLimiter, proxyRoutes);
-app.use("/api/search", apiLimiter, searchRouter);
-app.use("/api/signal", apiLimiter, signalRouter);
-app.use("/api/signal-queue", apiLimiter, signalQueueRoutes);
-app.use("/api/docx", apiLimiter, docxRouter);
-app.use("/api/audiobook", apiLimiter, audiobookRoutes);
+app.use("/api/user", userRoutes);
+app.use("/api/notebooks", documentRoutes);
+app.use("/api/notebooks", studioRoutes);
+app.use("/api/notebooks", podcastRoutes);
+app.use("/api/notebooks", notebookRoutes);
+app.use("/api/pdf", pdfRoutes);
+app.use("/api/youtube", youtubeRouter);
+app.use("/api/tasks", tasksRouter);
+app.use("/api/agent/antigravity", antigravityRouter);
+app.use("/api/agent", agentRoutes);
+app.use("/api/agent", agentMissionRoutes);
+app.use("/api/ai", aiRoutes);
+app.use("/api/proxy", proxyRoutes);
+app.use("/api/search", searchRouter);
+app.use("/api/signal", signalRouter);
+app.use("/api/signal-queue", signalQueueRoutes);
+app.use("/api/docx", docxRouter);
+app.use("/api/audiobook", audiobookRoutes);
 
 // Health check — expose both the local-process path and the Vercel API path.
 app.get(["/health", "/api/health"], (req, res) =>

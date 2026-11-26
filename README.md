@@ -4,7 +4,7 @@
 
 ![StudyPodLM Banner](public/studypod_banner.png)
 
-StudyPodLM is a next-generation collaborative study environment where humans and autonomous AI agents read, research, and build a shared memory context together.
+StudyPod lets you ask questions about your sources, check the passage behind an answer, and listen to your material as a podcast or a narrated chapter. You can also give an agent scoped access to a notebook.
 
 [![Vercel Deployment](https://img.shields.io/badge/deploy-Vercel-blueviolet?style=for-the-badge&logo=vercel)](https://studypod-lm.vercel.app/)
 [![GitHub Stars](https://img.shields.io/github/stars/SantanDon/studypod?style=for-the-badge&logo=github&color=gold)](https://github.com/SantanDon/studypod)
@@ -13,6 +13,13 @@ StudyPodLM is a next-generation collaborative study environment where humans and
 [Explore Deployed App](https://studypod-lm.vercel.app/) • [Set Up Local Development](#1-initialize-the-workspace) • [Report Issue](https://github.com/SantanDon/studypod/issues)
 
 </div>
+
+## Try a notebook
+
+1. Sign in, create a notebook, and add a text source. For a quick test, paste two lines from a study guide and ask about a detail on the second line.
+2. In **Study Chat**, ask the question. Open the citation beside the answer to see the supporting passage highlighted in its source.
+3. Open **Studio → Podcast → Set up podcast**. Pick your episode settings, choose **Create podcast**, and keep the tab open while the hosted recording is made. Play the saved episode or download it.
+4. For a reading in the source’s original words, open **Studio → Audiobook**. Choose the source and part, then **Generate chapter audio**. Return to the same notebook and choose **Open saved recording** to listen again. Full-book EPUB generation runs in the local installation.
 
 ---
 

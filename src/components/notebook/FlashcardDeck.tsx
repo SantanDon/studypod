@@ -131,7 +131,8 @@ const FlashcardDeckComponent: React.FC<FlashcardDeckProps> = ({ notebookId }) =>
         numCards
       );
       if (currentScopeRef.current !== generationScope) return;
-      setGenerationSummary(`Saved ${savedCards.length} of ${numCards} requested cards. Only source-backed cards were added.`);
+      const extracted = savedCards.filter(card => card.sourceExtracted).length;
+      setGenerationSummary(`Saved ${savedCards.length} of ${numCards} requested cards. ${extracted ? `StudyPod selected ${extracted} directly from your source.` : 'Only source-backed cards were added.'}`);
       setIsGenerateOpen(false);
       setSelectedSourceId('');
     } catch (error) {
@@ -288,10 +289,10 @@ const FlashcardDeckComponent: React.FC<FlashcardDeckProps> = ({ notebookId }) =>
                   </Select>
                 </div>
 
-                <p className="text-xs text-muted-foreground">Card count is a target. Fewer source-backed cards may be saved.</p>
+                <p className="text-sm text-muted-foreground">If AI returns too few verified cards, StudyPod selects phrases directly from your source. Short passages may yield fewer cards.</p>
 
                 {generateError && (
-                  <p className="text-sm text-red-600 dark:text-red-400">{generateError}</p>
+                  <p role="alert" className="text-sm text-red-700 dark:text-red-400">{generateError}</p>
                 )}
 
                 {generatingProgress && (

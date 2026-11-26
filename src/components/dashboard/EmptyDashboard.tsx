@@ -107,7 +107,7 @@ const EmptyDashboard = () => {
             {[
               { icon: FileText, title: 'Sources', body: 'Collect files, links and pasted text.' },
               { icon: MessageCircle, title: 'Chat', body: 'Ask questions about the sources you choose.' },
-              { icon: Headphones, title: 'Studio', body: 'Make a quiz, review flashcards or create an audio overview.' },
+              { icon: Headphones, title: 'Studio', body: 'Create podcasts, audiobooks, quizzes and flashcards from your sources.' },
             ].map(({ icon: Icon, title, body }) => (
               <li key={title} className="flex items-start gap-3 py-3">
                 <Icon className="mt-1 h-5 w-5 shrink-0 text-indigo-800 dark:text-indigo-300" aria-hidden="true" />

@@ -100,13 +100,12 @@ const GoalsPulse: React.FC = () => {
             <span>Research Goals</span>
           </h3>
         </div>
-        <div className="text-center py-6">
-          <div className="w-10 h-10 mx-auto rounded-full bg-gray-50 dark:bg-muted flex items-center justify-center mb-2">
-            <i className="fi fi-rr-bullseye text-gray-300 dark:text-muted-foreground/40 text-base"></i>
-          </div>
-          <p className="text-xs font-bold text-gray-700 dark:text-muted-foreground">No goals yet</p>
-          <p className="text-[10px] text-gray-400 mt-1 max-w-[200px] mx-auto">
-            Open a notebook and add a research goal to start the synthesis loop.
+        <div className="space-y-1 pt-3 text-sm leading-6">
+          <p className="font-semibold text-foreground">No goals yet</p>
+          <p className="text-slate-600 dark:text-slate-300">
+            {isAuthenticated
+              ? 'Open Studio in a notebook, then choose Research Goals to add a question.'
+              : 'Sign in to save research questions and track them here.'}
           </p>
         </div>
       </div>

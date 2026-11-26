@@ -1,5 +1,6 @@
 // @vitest-environment node
 import fs from "fs";
+import { randomBytes } from "node:crypto";
 import os from "os";
 import path from "path";
 import AdmZip from "adm-zip";
@@ -19,7 +20,8 @@ function upload(originalname = "source.txt") {
   const uploadsDir = path.join(root, "uploads");
   const tempDir = path.join(uploadsDir, "temp");
   fs.mkdirSync(tempDir, { recursive: true });
-  const file = { originalname, path: path.join(tempDir, "upload.tmp") };
+  const filename = randomBytes(16).toString("hex");
+  const file = { originalname, filename, path: path.join(tempDir, filename) };
   fs.writeFileSync(file.path, "A temporary source with meaningful study content.");
   return { root, uploadsDir, file, ownerId: "qa-owner" };
 }
@@ -29,6 +31,17 @@ afterEach(() => {
 });
 
 describe("uploaded book persistence", () => {
+  it("reads and removes only the temporary file assigned by storage", async () => {
+    const input = upload();
+    const other = upload();
+    const result = await extractUploadedBook({
+      ...input, file: { ...input.file, path: other.file.path }, persistOption: "false",
+    });
+    expect(result.content).toContain("meaningful study content");
+    expect(fs.existsSync(input.file.path)).toBe(false);
+    expect(fs.existsSync(other.file.path)).toBe(true);
+  });
+
   it("extracts a real EPUB as a source without creating a book asset or manifest", async () => {
     const input = upload("chapter.epub");
     const zip = new AdmZip();

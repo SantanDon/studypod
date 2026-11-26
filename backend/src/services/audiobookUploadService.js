@@ -25,11 +25,18 @@ export async function extractUploadedBook({
   persistBook,
   extractBook = extractBookFromFile,
 }) {
+  // Multer's disk storage assigns each upload a random 16-byte hex filename.
+  const storedName = file.filename;
+  if (typeof storedName !== "string" || storedName.length !== 32 || !/^[a-f0-9]+$/.test(storedName)) {
+    throw new Error("Invalid temporary upload identifier");
+  }
+  const tempPath = path.join(uploadsDir, "temp", path.basename(storedName));
+  if (!fs.lstatSync(tempPath).isFile()) throw new Error("Expected a regular upload file");
   let permanentPath;
   try {
     if (!parseBookPersistenceOption(persistOption)) {
       const fileName = sanitizeFileName(file.originalname);
-      const extraction = await extractBook(file.path, fileName);
+      const extraction = await extractBook(tempPath, fileName);
       const book = buildBookResponse({
         fileName,
         permanentPath: null,
@@ -44,8 +51,9 @@ export async function extractUploadedBook({
     }
 
     const fileName = uniqueSafeFileName(file.originalname);
-    permanentPath = path.join(uploadsDir, fileName);
-    fs.copyFileSync(file.path, permanentPath);
+    const destination = path.join(uploadsDir, path.basename(fileName));
+    fs.copyFileSync(tempPath, destination, fs.constants.COPYFILE_EXCL);
+    permanentPath = destination;
     return await persistBook({
       permanentPath,
       fileName,
@@ -56,6 +64,6 @@ export async function extractUploadedBook({
     if (permanentPath) fs.rmSync(permanentPath, { force: true });
     throw error;
   } finally {
-    fs.rmSync(file.path, { force: true });
+    fs.rmSync(tempPath, { force: true });
   }
 }

@@ -144,7 +144,8 @@ export function useFlashcards(notebookId?: string) {
         numCards,
         sourceId,
         sourceTitle,
-        progress => { try { identity.assertCurrent(); setGeneratingProgress(progress); } catch { /* stale generation */ } }
+        progress => { try { identity.assertCurrent(); setGeneratingProgress(progress); } catch { /* stale generation */ } },
+        true
       );
       
       identity.assertCurrent();

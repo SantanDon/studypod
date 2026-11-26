@@ -12,14 +12,8 @@ async function test() {
   const html = await pageResponse.text();
   console.log('HTML Length (Android):', html.length);
   
-  // Try innerTube api key
-  const apiKeyMatch = html.match(/"INNERTUBE_API_KEY"\s*:\s*"([^"]+)"/);
-  console.log('Key found:', !!apiKeyMatch);
-  
-  if (apiKeyMatch) {
-     console.log('Key:', apiKeyMatch[1]);
-  }
-  
+  console.log('Key found:', /"INNERTUBE_API_KEY"\s*:\s*"[^"]+"/.test(html));
+
   console.log('Bot detection?:', html.includes('captcha') || html.includes('consent'));
   
   // Test Piped API fallback just in case
