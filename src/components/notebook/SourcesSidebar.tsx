@@ -681,7 +681,6 @@ const SourcesSidebar = ({
                       <Card
                         role="button"
                         tabIndex={0}
-                        aria-label={`Open source ${formatDisplayTitle(source.title, 'Untitled source')}`}
                         className="min-h-14 p-3 border border-gray-200 dark:border-border cursor-pointer bg-white dark:bg-card hover:bg-gray-50 dark:hover:bg-muted/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring transition-colors shadow-sm"
                         onClick={() => handleSourceClick(source)}
                         onKeyDown={(event) => {
@@ -691,9 +690,10 @@ const SourcesSidebar = ({
                           }
                         }}
                       >
+                        <span className="sr-only">Open source </span>
                         <div className="flex items-start justify-between space-x-3">
                           <div className="flex items-center space-x-2 flex-1 min-w-0">
-                            <div className="w-6 h-6 bg-white dark:bg-zinc-950 rounded border border-gray-200 dark:border-border flex items-center justify-center flex-shrink-0 overflow-hidden">
+                            <div aria-hidden="true" className="w-6 h-6 bg-white dark:bg-zinc-950 rounded border border-gray-200 dark:border-border flex items-center justify-center flex-shrink-0 overflow-hidden">
                               {renderSourceIcon(source.type)}
                             </div>
                             <div className="flex-1 min-w-0">

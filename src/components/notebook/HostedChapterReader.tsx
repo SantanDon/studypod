@@ -147,12 +147,12 @@ export default function HostedChapterReader({ notebookId, sources, token }: Prop
         </select>
       </label>
       {parts.length > 1 && <div className="flex items-center justify-between gap-2">
-        <Button variant="outline" disabled={busy || partNumber === 0} onClick={() => choosePart(partNumber - 1)}>Previous</Button>
+        <Button className="min-h-11" variant="outline" disabled={busy || partNumber === 0} onClick={() => choosePart(partNumber - 1)}>Previous</Button>
         <span className="text-sm">Part {partNumber + 1} of {parts.length}</span>
-        <Button variant="outline" disabled={busy || partNumber + 1 >= parts.length} onClick={() => choosePart(partNumber + 1)}>Next</Button>
+        <Button className="min-h-11" variant="outline" disabled={busy || partNumber + 1 >= parts.length} onClick={() => choosePart(partNumber + 1)}>Next</Button>
       </div>}
       <blockquote className="rounded-lg border-l-4 border-primary bg-muted/40 p-3 text-sm leading-6 break-words">{passage}</blockquote>
-      {(!player || player.id !== saved?.id) && <Button disabled={busy || !loaded} onClick={listen}>{busy ? "Working…" : saved ? "Open saved recording" : "Generate chapter audio"}</Button>}
+      {(!player || player.id !== saved?.id) && <Button className="min-h-11" disabled={busy || !loaded} onClick={listen}>{busy ? "Working…" : saved ? "Open saved recording" : "Generate chapter audio"}</Button>}
       {player && player.id === saved?.id && <div className="flex flex-wrap items-center gap-2 rounded-xl border bg-muted/30 p-3"><audio className="min-w-0 basis-48 flex-1" aria-label={title} controls src={player.url}
         onLoadedMetadata={e => { const time = storedPosition("studypod:chapter-time:" + player.id); if (time < e.currentTarget.duration) e.currentTarget.currentTime = time; }}
         onPause={e => rememberPosition("studypod:chapter-time:" + player.id, e.currentTarget.currentTime)}
@@ -164,6 +164,6 @@ export default function HostedChapterReader({ notebookId, sources, token }: Prop
       <p role="status">{status}</p>
       {downloadAmount && <p className="font-medium tabular-nums text-foreground">{downloadAmount}</p>}
     </div>
-    {!loaded && status && <Button variant="outline" onClick={() => setAttempt(n => n + 1)}>Retry saved chapters</Button>}
+    {!loaded && status && <Button className="min-h-11" variant="outline" onClick={() => setAttempt(n => n + 1)}>Retry saved chapters</Button>}
   </Card>;
 }

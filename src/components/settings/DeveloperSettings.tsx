@@ -69,13 +69,19 @@ export function DeveloperSettings() {
   const [copied, setCopied] = useState(false);
 
   const copyText = async (text: string, label: string) => {
-    await navigator.clipboard.writeText(text);
-    setCopied(true);
-    toast({
-      title: `${label} Copied!`,
-      description: 'Paste this into your AI agent when it asks for a StudyPodLM API key.',
-    });
-    setTimeout(() => setCopied(false), 2000);
+    try {
+      await navigator.clipboard.writeText(text);
+      setCopied(true);
+      toast({
+        title: `${label} copied`,
+        description: label === 'Pairing Code'
+          ? 'Ask your connected agent to pair with StudyPod using this code.'
+          : 'Save the key in your private connector settings.',
+      });
+      setTimeout(() => setCopied(false), 2000);
+    } catch {
+      toast({ title: 'Copy unavailable', description: 'Select the value and copy it manually.' });
+    }
   };
 
   const generatePairingCode = async () => {
@@ -277,12 +283,9 @@ export function DeveloperSettings() {
                   Copy
                 </Button>
               </div>
-              <p className="text-[11px] text-muted-foreground">
-                Expires in 5 minutes. Give this code to your agent, then run:
-                <br />
-                <code className="text-[10px] bg-background px-1 rounded">
-                  node agent_demo_kit/pair_and_test.js {pairingCode}
-                </code>
+              <p className="text-sm text-muted-foreground">
+                Expires in 5 minutes. Ask your connected agent to pair with StudyPod
+                using this code, then ask which account it connected to.
               </p>
             </div>
           )}
@@ -321,12 +324,13 @@ export function DeveloperSettings() {
                 <Input
                   readOnly
                   value={generatedKey}
-                  className="font-mono text-[11px] h-9 bg-background"
+                  aria-label="Your new API key"
+                  className="font-mono text-sm min-h-11 bg-background"
                 />
                 <Button
                   variant="outline"
                   size="icon"
-                  className="h-9 w-9 shrink-0"
+                  className="size-11 shrink-0"
                   onClick={() => copyText(generatedKey, 'API Key')}
                   title="Copy API key"
                 >
@@ -348,7 +352,7 @@ export function DeveloperSettings() {
             <CardTitle className="text-xs font-semibold">Headless Dropbox</CardTitle>
           </CardHeader>
           <CardContent>
-            <p className="text-[11px] text-muted-foreground leading-relaxed">
+            <p className="text-sm text-muted-foreground leading-relaxed">
               StudyPod is E2EE. Agents pushing files to the "Dropbox" route do <b>not</b> need your passphrase.
               Uploads are automatically encrypted when you next open the notebook.
             </p>
@@ -360,7 +364,7 @@ export function DeveloperSettings() {
             <CardTitle className="text-xs font-semibold">Developer Documentation</CardTitle>
           </CardHeader>
           <CardContent className="space-y-2">
-            <Button variant="outline" size="sm" className="w-full text-[11px] h-7" asChild>
+            <Button variant="outline" size="sm" className="w-full text-sm min-h-11" asChild>
               <a href="/API_HEADLESS.md" target="_blank" rel="noreferrer">
                 <ExternalLink className="w-3 h-3 mr-1" /> View Headless API Guide
               </a>

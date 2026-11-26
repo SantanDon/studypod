@@ -11,18 +11,9 @@ cd mcp-server
 npm ci
 ```
 
-### 2. Configure a revocable agent key
+### 2. Choose your StudyPod workspace
 
-```bash
-cp .env.example .env
-```
-
-Open `.env` and set:
-
-- `STUDYPODLM_API_URL` — `http://localhost:4000` locally or your deployed StudyPod URL.
-- `STUDYPODLM_API_KEY` — a revocable StudyPod agent key created from the signed-in StudyPod account.
-
-Never paste a StudyPod password, browser session credential, or ChatGPT credential into an agent conversation.
+Local development uses `http://localhost:4000` by default. To connect a hosted workspace, copy `.env.example` to `.env` in this directory and set `STUDYPODLM_API_URL` to the workspace's HTTPS origin. Leave `STUDYPODLM_API_KEY` blank for one-hour pairing.
 
 ### 3. Connect a desktop client
 
@@ -82,7 +73,7 @@ Once connected, just say:
 
 ## First notebook question
 
-1. Call `whoami` to confirm your account. Alternatively, open **Agent Pairing** in StudyPod, generate a code, and call `pair`. The connector holds the resulting one-hour key in memory.
+1. Sign in to that StudyPod workspace, open **Profile → Agent Pairing**, and select **Generate Pairing Code**. In your MCP client, call `pair` with the six-digit code and then call `whoami` to confirm the account. Pair again after an hour or a connector restart.
 2. Call `list_notebooks`, choose a notebook ID, then call `notebook_context` to see its sources.
 3. Call `chat` with the notebook ID and a question about those sources. Use the returned citations when explaining the answer.
 

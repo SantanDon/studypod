@@ -4,25 +4,15 @@ This guide provides information on how to integrate autonomous agents and extern
 
 ## Authentication
 
-StudyPodLM uses two types of authentication for headless access:
+For a short session, choose **Generate Pairing Code** in **Profile > Agent Pairing**. Your connected agent exchanges the six-digit code for an agent key. The MCP connector and demo below request a one-hour key and keep it in memory.
 
-### 1. Temporary Session Tokens (JWT)
-Found in the "Manual Integration" section of Developer Tools.
-- **Prefix:** `Bearer `
-- **Duration:** 1 hour
-- **Use Case:** Quick testing or one-off tasks.
-
-### 2. Persistent Agent Keys
-Generated via the **Agent Pairing Wizard**.
-- **Prefix:** `spm_`
-- **Duration:** Can be time-limited when issued and revoked in Developer Settings.
-- **Use Case:** Long-running agents, IDE extensions, or scheduled tasks.
+For a connector that needs to reconnect after a restart, **Generate New API Key** displays a key once. Store it in the connector's private settings. Use the `Authorization: Bearer` header for API requests.
 
 ## Connecting an Agent via Pairing
 
 1. Open **Profile Menu** -> **Agent Pairing**.
 2. Click **Generate Pairing Code**.
-3. In your agent's terminal, run:
+3. From the StudyPod repository, run the command below. It connects to the local server by default. For a hosted workspace, first set `STUDYPOD_API` to that workspace's HTTPS URL followed by `/api`.
    ```bash
    node agent_demo_kit/pair_and_test.js <6-DIGIT-PIN>
    ```
