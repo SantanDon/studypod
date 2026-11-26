@@ -89,7 +89,7 @@ const AudioPlayer = ({
 
   return (
     <Card className="p-4 space-y-4">
-      <audio ref={audioRef} src={audioUrl} preload="metadata" />
+      <audio ref={audioRef} src={audioUrl === "webspeech_fallback" ? undefined : audioUrl} preload="metadata" />
 
       <div className="flex items-center justify-between">
         <div className="flex-1">

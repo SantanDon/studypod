@@ -254,3 +254,33 @@ describe("StreamingTTSGenerator reliability", () => {
     expect(generated.map((chunk) => chunk.text).join("")).toBe(sourceText);
   });
 });
+describe("browser speech playlists", () => {
+  it("advances past the first segment, resumes at the second, and cancels pending playback", async () => {
+    const generator = getStreamingTTSGenerator();
+    const speak = vi.fn((line: SpeechSynthesisUtterance) => line.onend?.({} as SpeechSynthesisEvent));
+    vi.stubGlobal("speechSynthesis", { cancel: vi.fn(), getVoices: () => [{ lang: "en-US", name: "Test" }], speak });
+    vi.stubGlobal("SpeechSynthesisUtterance", class { constructor(public text: string) {} });
+    try {
+      await generator.startStreaming(script, { useKokoro: false }, vi.fn(), vi.fn());
+      vi.useFakeTimers();
+      const changed = vi.fn();
+      const finished = vi.fn();
+      generator.playAll(0, changed, finished);
+      await vi.runAllTimersAsync();
+      expect(changed.mock.calls).toEqual([[0], [1]]);
+      expect(finished).toHaveBeenCalledOnce();
+      generator.playAll(1, changed, finished);
+      await vi.runAllTimersAsync();
+      expect(changed.mock.calls).toEqual([[0], [1], [1]]);
+      expect(finished).toHaveBeenCalledTimes(2);
+      generator.playAll();
+      generator.stopPlayback();
+      await vi.runAllTimersAsync();
+      expect(speak).toHaveBeenCalledTimes(3);
+    } finally {
+      generator.stopPlayback();
+      vi.useRealTimers();
+      vi.unstubAllGlobals();
+    }
+  });
+});

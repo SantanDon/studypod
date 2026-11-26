@@ -38,6 +38,14 @@ export interface StreamingProgress {
   usingKokoro?: boolean;
 }
 
+export function podcastStageLabel(progress: StreamingProgress | null): string {
+  if (!progress || progress.phase === "loading") return "Preparing voices";
+  if (progress.phase === "generating" && progress.currentSegment > 0) {
+    return `Narrating segment ${progress.currentSegment} of ${progress.totalSegments}`;
+  }
+  return progress.message;
+}
+
 export interface StreamingResult {
   audioUrls: string[];
   totalDuration: number;
@@ -100,7 +108,7 @@ class StreamingTTSGenerator {
   private usingKokoro = false;
   private audioElements: HTMLAudioElement[] = [];
   private isPlaying = false; // Prevent double playback
-  private isSequencePlaying = false;
+  private playbackRevision = 0;
 
   /**
    * Check if Kokoro via Web Worker is available
@@ -600,46 +608,31 @@ class StreamingTTSGenerator {
   private async ensureVoicesLoaded(): Promise<SpeechSynthesisVoice[]> {
     if (typeof speechSynthesis === "undefined") return [];
 
-    let voices = speechSynthesis.getVoices();
-
-    // Voices might not be loaded yet, wait for them
-    if (voices.length === 0) {
-      await new Promise<void>((resolve) => {
-        const checkVoices = () => {
-          voices = speechSynthesis.getVoices();
-          if (voices.length > 0) {
-            resolve();
-          } else {
-            // Try again in 100ms
-            setTimeout(checkVoices, 100);
-          }
-        };
-
-        // Also listen for voiceschanged event
-        speechSynthesis.onvoiceschanged = () => {
-          voices = speechSynthesis.getVoices();
-          if (voices.length > 0) resolve();
-        };
-
-        checkVoices();
-
-        // Timeout after 2 seconds
-        setTimeout(resolve, 2000);
-      });
-    }
-
-    return voices;
+    const voices = speechSynthesis.getVoices();
+    if (voices.length) return voices;
+    await new Promise<void>((resolve) => {
+      const finish = () => {
+        clearTimeout(timer);
+        speechSynthesis.removeEventListener("voiceschanged", finish);
+        resolve();
+      };
+      const timer = setTimeout(finish, 2000);
+      speechSynthesis.addEventListener("voiceschanged", finish);
+    });
+    return speechSynthesis.getVoices();
   }
 
   /**
    * Play a specific segment
    */
   playSegment(index: number, onEnd?: () => void): void {
+    this.stopPlayback();
+    this.startSegment(index, onEnd);
+  }
+
+  private startSegment(index: number, onEnd?: () => void): void {
     const segment = this.generatedAudios[index];
     if (!segment) return;
-
-    // Stop any existing playback first
-    this.stopPlayback();
 
     this.isPlaying = true;
 
@@ -688,7 +681,9 @@ class StreamingTTSGenerator {
     // Cancel is already called in playSegment via stopPlayback
 
     // Ensure voices are loaded
+    const revision = this.playbackRevision;
     const voices = await this.ensureVoicesLoaded();
+    if (revision !== this.playbackRevision) return;
 
     const playText = AudioContentCleaner.cleanSegment(segment.text);
     const utterance = new SpeechSynthesisUtterance(playText);
@@ -761,30 +756,21 @@ class StreamingTTSGenerator {
     onSegmentChange?: (index: number) => void,
     onComplete?: () => void,
   ): void {
-    if (startIndex === 0) {
-      this.isSequencePlaying = true;
-    }
-
-    if (!this.isSequencePlaying) {
-      return;
-    }
-
-    if (startIndex >= this.generatedAudios.length) {
-      this.isSequencePlaying = false;
-      this.isPlaying = false;
-      onComplete?.();
-      return;
-    }
-
-    onSegmentChange?.(startIndex);
-
-    this.playSegment(startIndex, () => {
-      if (!this.isSequencePlaying) return;
-      setTimeout(() => {
-        if (!this.isSequencePlaying) return;
-        this.playAll(startIndex + 1, onSegmentChange, onComplete);
-      }, 300);
-    });
+    this.stopPlayback();
+    const revision = this.playbackRevision;
+    const advance = (index: number) => {
+      if (this.playbackRevision !== revision) return;
+      if (index >= this.generatedAudios.length) {
+        this.isPlaying = false;
+        onComplete?.();
+        return;
+      }
+      onSegmentChange?.(index);
+      this.startSegment(index, () => {
+        setTimeout(() => advance(index + 1), 300);
+      });
+    };
+    advance(startIndex);
   }
 
   /**
@@ -792,7 +778,7 @@ class StreamingTTSGenerator {
    */
   stopPlayback(): void {
     this.isPlaying = false;
-    this.isSequencePlaying = false;
+    this.playbackRevision++;
 
     // Stop Audio elements
     for (const audio of this.audioElements) {

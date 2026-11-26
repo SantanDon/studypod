@@ -15,10 +15,20 @@ jobs:
   verify:
     runs-on: ubuntu-24.04
     timeout-minutes: 25
+    env:
+      ONNXRUNTIME_NODE_INSTALL_CUDA: skip
 
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+
+      - name: Reject tracked environment files
+        shell: bash
+        run: |
+          if [[ -n "$(git ls-files -- ':(glob)**/.env*' ':(exclude,glob)**/.env.example')" ]]; then
+            echo "Keep deployment environment files outside Git."
+            exit 1
+          fi
 
       - name: Use Node.js 22
         uses: actions/setup-node@v4
@@ -66,6 +76,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
+          include-hidden-files: true
           name: studypod-auth-gate
           path: |
             .ai-bridge/studypod-renewal-20261012/release-gate/auth-local/*/desktop/report.json
@@ -87,8 +98,8 @@ jobs:
 
       - name: Production dependency audit
         run: |
-          npm audit --omit=dev --audit-level=critical
-          npm --prefix backend audit --omit=dev --audit-level=critical
+          npm audit --omit=dev --audit-level=high
+          npm --prefix backend audit --omit=dev --audit-level=high
 
       - name: Reject committed local artifacts
         shell: bash
