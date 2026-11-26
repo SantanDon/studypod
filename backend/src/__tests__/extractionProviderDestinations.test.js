@@ -30,6 +30,37 @@ describe("source extraction destinations", () => {
     expect(request).toHaveBeenCalledTimes(1);
   });
 
+  it("stops waiting for DNS at the extraction deadline, including on redirects", async () => {
+    const signal = new AbortController();
+    const timeout = vi.spyOn(AbortSignal, "timeout").mockReturnValueOnce(signal.signal);
+    const removeListener = vi.spyOn(signal.signal, "removeEventListener");
+    const pendingDns = Promise.withResolvers();
+    const dnsStarted = Promise.withResolvers();
+    lookup.mockImplementationOnce(async () => [{ address: "8.8.8.8", family: 4 }]);
+    lookup.mockImplementationOnce(() => {
+      dnsStarted.resolve();
+      return pendingDns.promise;
+    });
+    request.mockResolvedValueOnce({ status: 302, headers: { get: () => "https://example.org/guide" } });
+
+    try {
+      const extraction = fetchPublicUrl("https://example.com/guide");
+      const assertion = expect(extraction).rejects.toThrow("Extraction deadline");
+      await dnsStarted.promise;
+      signal.abort(new Error("Extraction deadline"));
+      await assertion;
+      pendingDns.reject(new Error("Late DNS failure"));
+      expect(request).toHaveBeenCalledTimes(1);
+      expect(removeListener.mock.calls).toEqual([
+        ["abort", expect.any(Function)],
+        ["abort", expect.any(Function)],
+      ]);
+    } finally {
+      timeout.mockRestore();
+      removeListener.mockRestore();
+    }
+  });
+
   it("fetches GitHub metadata, trees and nested file paths from their designated providers", async () => {
     request.mockResolvedValueOnce({ ok: true, json: async () => ({ default_branch: "study/guide" }) })
       .mockResolvedValueOnce({ ok: true, json: async () => ({ tree: [{ type: "blob", path: "notes/week 1.md" }] }) })

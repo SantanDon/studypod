@@ -19,8 +19,23 @@ const MAX_SOURCE_BYTES = 8 * 1024 * 1024;
 
 class ExternalDestinationError extends Error {}
 
+async function lookupBeforeDeadline(host, signal) {
+  signal.throwIfAborted();
+  let onAbort;
+  const deadline = new Promise((_, reject) => {
+    onAbort = () => reject(signal.reason);
+    signal.addEventListener("abort", onAbort, { once: true });
+  });
+  try {
+    // The system resolver may finish later. The race still handles its rejection.
+    return await Promise.race([lookup(host, { all: true, verbatim: true }), deadline]);
+  } finally {
+    signal.removeEventListener("abort", onAbort);
+  }
+}
+
 export async function fetchPublicUrl(url, { headers, timeout = 15000 } = {}, fetchImpl = fetch) {
-  // One deadline covers the full redirect chain and reading the decoded body.
+  // One deadline covers DNS, the redirect chain and reading the decoded body.
   const signal = AbortSignal.timeout(timeout);
   let currentUrl = url;
 
@@ -31,7 +46,7 @@ export async function fetchPublicUrl(url, { headers, timeout = 15000 } = {}, fet
       target = parseExternalHttpsUrl(currentUrl);
       const host = target.hostname.replace(/^\[|\]$/g, "");
       if (!isIP(host)) {
-        const addresses = await lookup(host, { all: true, verbatim: true });
+        const addresses = await lookupBeforeDeadline(host, signal);
         if (!addresses.length || addresses.some(({ address }) => !isPublicIpAddress(address))) {
           throw new Error("Hostname must resolve exclusively to public addresses.");
         }
