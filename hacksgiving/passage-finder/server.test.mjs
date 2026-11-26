@@ -5,6 +5,7 @@ import { test } from 'node:test';
 import { server } from './server.mjs';
 
 test('HTTP answers cite the exact revision and line returned by the connector', async t => {
+  process.env.SPRITES_GITHUB_CONNECTOR = 'test-connector';
   const request = globalThis.fetch;
   const sha = 'a'.repeat(40);
   const guide = await readFile(new URL('./guide.md', import.meta.url), 'utf8');
@@ -12,6 +13,7 @@ test('HTTP answers cite the exact revision and line returned by the connector', 
   t.mock.method(globalThis, 'fetch', async url => {
     const path = new URL(url);
     assert.equal(path.origin, 'https://api.sprites.dev');
+    assert.ok(path.pathname.startsWith('/v1/gateway/github/test-connector/repos/SantanDon/studypod/'));
     calls.push(path);
     return Response.json(path.pathname.includes('/commits')
       ? [{ sha }]

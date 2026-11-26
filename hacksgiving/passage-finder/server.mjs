@@ -7,8 +7,13 @@ import { matchPassage } from './match.mjs';
 const repository = 'SantanDon/studypod';
 const branch = 'codex/studypod-audiobook-breakthrough-july-2026';
 const path = 'hacksgiving/passage-finder/guide.md';
-const gateway = process.argv.includes('--public-preview') ? 'https://api.github.com' : 'https://api.sprites.dev/v1/gateway/github';
-const base = gateway + '/repos/' + repository;
+function repositoryBase() {
+  if (process.argv.includes('--public-preview')) return 'https://api.github.com/repos/' + repository;
+  const connector = process.env.SPRITES_GITHUB_CONNECTOR;
+  if (!connector || !/^[A-Za-z0-9_-]+$/.test(connector)) throw new Error('Missing connector ID');
+  return 'https://api.sprites.dev/v1/gateway/github/' + connector + '/repos/' + repository;
+}
+
 const html = await readFile(new URL('./index.html', import.meta.url));
 let cached;
 let loading;
@@ -20,6 +25,7 @@ async function getJson(url) {
 }
 
 async function loadGuide() {
+  const base = repositoryBase();
   const [commit] = await getJson(base + '/commits?per_page=1&sha=' + encodeURIComponent(branch) + '&path=' + encodeURIComponent(path));
   if (!/^[a-f0-9]{40}$/.test(commit?.sha)) throw new Error('Missing revision');
   const file = await getJson(base + '/contents/' + path + '?ref=' + commit.sha);

@@ -6,7 +6,7 @@ Built for Hacksgiving 2026 as a new agent in the existing StudyPod project. Its 
 
 ## Run on a Sprite
 
-Review the GitHub authorization screen before granting this Sprite access to the connector named `github`. The standard connector requests access to public and private repositories and read access to organization membership. The demo itself only reads the public guide. From this directory run `node server.mjs` with Node 22 or newer. Open the Sprite URL on port 8080. For persistent hosting, create a Sprite service using the absolute path to server.mjs as the argument to node.
+Review the GitHub authorization screen before granting this Sprite access to the connector named `github`. The standard connector requests access to public and private repositories and read access to organization membership. The demo itself only reads the public guide. Set the service environment variable `SPRITES_GITHUB_CONNECTOR` to the connector ID shown by Sprites. From this directory run `node server.mjs` with Node 22 or newer. Open the Sprite URL on port 8080. For persistent hosting, create a Sprite service using the absolute path to server.mjs as the argument to node.
 
 The agent reads one fixed public file. Its default requests go through the Sprites gateway. For a local preview using the public GitHub API, run `node server.mjs --public-preview` and open http://localhost:8080. That preview tests passage retrieval separately from the hosted connector.
 
