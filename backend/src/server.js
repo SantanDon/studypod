@@ -98,6 +98,7 @@ if (!jwtSecret || jwtSecret.length < 32) {
 const app = express();
 installAcceptanceTiming(app);
 const PORT = process.env.PORT || 4000;
+const bindHost = process.env.STUDYPOD_BIND_HOST || "127.0.0.1";
 
 // Trust exactly one platform proxy hop. Using `true` lets clients spoof
 // X-Forwarded-For and bypass IP-based rate limits.
@@ -320,7 +321,7 @@ app.get(
 // Static files (Production)
 app.use(express.static(path.join(__dirname, "../../dist")));
 
-app.get("*splat", (req, res, next) => {
+app.get("*", (req, res, next) => {
   if (req.path.startsWith("/api")) return next();
   res.sendFile(path.join(__dirname, "../../dist", "index.html"));
 });
@@ -363,7 +364,7 @@ const listenOnce = () =>
 
     server.once("listening", handleListening);
     server.once("error", handleError);
-    server.listen(PORT, "127.0.0.1");
+    server.listen(PORT, bindHost);
   });
 
 const startServer = async (retries = 5) => {
@@ -373,7 +374,7 @@ const startServer = async (retries = 5) => {
     for (let attempt = 0; attempt <= retries; attempt += 1) {
       try {
         await listenOnce();
-        logger.info(`StudyPod Phoenix running on http://127.0.0.1:${PORT}`);
+        logger.info(`StudyPod Phoenix running on http://${bindHost}:${PORT}`);
         return;
       } catch (error) {
         if (error?.code !== "EADDRINUSE") throw error;

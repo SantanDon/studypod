@@ -1189,7 +1189,7 @@ export default function AudiobookView({
         Use a book you own, created, licensed, or that is in the public domain.
       </p>
       <details className="rounded-lg border border-border bg-muted/30 px-3 py-2">
-        <summary className="cursor-pointer text-xs font-medium text-foreground">
+        <summary className="cursor-pointer content-center min-h-11 rounded text-sm font-medium text-foreground focus-visible:outline focus-visible:outline-2 focus-visible:outline-ring">
           Import a public-domain book
         </summary>
         <div className="mt-3 flex gap-2">
@@ -1198,6 +1198,8 @@ export default function AudiobookView({
             onChange={(event) =>
               setGutenbergId(event.target.value.replace(/\D/g, ""))
             }
+            aria-label="Project Gutenberg book ID"
+            inputMode="numeric"
             placeholder="Gutenberg ID"
             className="min-w-0 flex-1 rounded-md border border-input bg-background px-3 py-2 text-sm text-foreground outline-none placeholder:text-muted-foreground focus:ring-2 focus:ring-ring"
           />
@@ -1219,7 +1221,7 @@ export default function AudiobookView({
       className="flex h-full min-h-0 flex-col bg-background text-foreground"
       data-testid="audiobook-workspace"
     >
-      <div className="flex h-[65px] shrink-0 items-center justify-between border-b border-border px-4">
+      <div className="flex min-h-[65px] shrink-0 flex-wrap items-center justify-between gap-2 border-b border-border px-4 py-2">
         <div className="flex min-w-0 items-center gap-3">
           {onClose && (
             <Button
@@ -1236,7 +1238,7 @@ export default function AudiobookView({
           </div>
           <div className="min-w-0">
             <h2 className="truncate text-base font-semibold">Audiobook</h2>
-            <p className="truncate text-[11px] text-muted-foreground">
+            <p className="text-xs leading-5 text-muted-foreground">
               Turn a book into chaptered, downloadable audio
             </p>
           </div>
@@ -1294,19 +1296,31 @@ export default function AudiobookView({
             </Card>
           ) : !audiobookRuntimeAvailable ? (
             <Card
-              className="border-amber-200 bg-amber-50/70 p-6 text-center shadow-none dark:border-amber-900/70 dark:bg-amber-950/20"
+              className="border-border bg-card p-5 text-center shadow-none sm:p-6"
               data-testid="audiobook-local-beta"
             >
               <div className="mx-auto flex h-12 w-12 items-center justify-center rounded-2xl bg-amber-100 text-amber-800 dark:bg-amber-900/50 dark:text-amber-300">
                 <Headphones className="h-5 w-5" />
               </div>
               <h3 className="mt-4 text-base font-semibold">
-                {runtimeCapabilities.localBeta ? "Audiobook is a local beta" : "Audiobook unavailable"}
+                {runtimeCapabilities.localBeta ? "Create an audiobook on your computer" : "Audiobook unavailable"}
               </h3>
-              {runtimeCapabilities.localBeta && (<p className="mx-auto mt-2 max-w-md text-sm leading-6 text-muted-foreground">
-                Audiobook creation is in local beta. Keep StudyPod open while it
-                reads your book; finished audio stays available here.
-              </p>)}
+              {runtimeCapabilities.localBeta && (
+                <div className="mx-auto mt-2 max-w-md space-y-3 text-sm leading-6">
+                  <p className="text-muted-foreground">
+                    Run StudyPod locally to import your book, preview a chapter,
+                    and download the narration.
+                  </p>
+                  <a
+                    className="inline-flex min-h-11 items-center justify-center rounded-md bg-primary px-4 py-2 text-sm font-semibold text-primary-foreground hover:opacity-90 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring"
+                    href="https://github.com/SantanDon/studypod/blob/HEAD/docs/audiobook-studio-local.md"
+                    target="_blank"
+                    rel="noopener noreferrer"
+                  >
+                    Open the local audiobook guide
+                  </a>
+                </div>
+              )}
               <p className="mx-auto mt-3 max-w-md rounded-lg border border-amber-200 bg-background/70 px-3 py-2 text-xs leading-5 text-muted-foreground dark:border-amber-900/70">
                 {runtimeCapabilities?.reason ||
                   "This StudyPod setup does not support full-book narration."}

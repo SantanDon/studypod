@@ -6,8 +6,9 @@ import { ScrollArea } from '@/components/ui/scroll-area';
 import { useStudioSidebar } from './hooks/useStudioSidebar';
 import NoteEditor from './NoteEditor';
 import PodcastView from './PodcastView';
+import StudyGlyph from './StudyGlyph';
 import FlashcardDeckComponent from './FlashcardDeck';
-import ConceptMapView from './ConceptMapView';
+
 import SourceComparisonView from './SourceComparisonView';
 import QuizSelector from './QuizSelector';
 import QuizView from './QuizView';
@@ -26,7 +27,6 @@ import {
   ChevronDown,
   FileText,
   GitCompare,
-  Headphones,
   Layers3,
   Network,
   NotebookPen,
@@ -34,12 +34,16 @@ import {
 } from 'lucide-react';
 
 
+const ConceptMapView = React.lazy(() => import('./ConceptMapView'));
+
 interface StudioSidebarProps {
   notebookId?: string;
   isExpanded?: boolean;
   onCitationClick?: (citation: Citation) => void;
   activeSourceId?: string | null;
 }
+
+const AudiobookGlyph = () => <StudyGlyph kind="audiobook" className="h-8 w-8" />;
 
 type StudioIcon = React.ComponentType<{ className?: string }>;
 
@@ -322,10 +326,13 @@ const StudioSidebar = ({
         <div className="studypod-studio-sections space-y-8 p-4">
           {notebookId && (
             <section className="studypod-audio-studio space-y-3" aria-label="Audio studio">
-              <StudioSectionHeading
-                title="Audio Overview"
-                description="Listen to saved overviews or create a new overview from your sources."
-              />
+              <div className="flex items-center gap-2">
+                <StudyGlyph kind="podcast" className="h-10 w-10 shrink-0" />
+                <StudioSectionHeading
+                  title="Audio Overview"
+                  description="Listen to saved overviews or create a new overview from your sources."
+                />
+              </div>
               <div data-testid="audio-overview-studio-card">
                 <PodcastView notebookId={notebookId} onOpenSource={onCitationClick} />
               </div>
@@ -348,7 +355,7 @@ const StudioSidebar = ({
 
             {!hasOnlyTweets && (
               <StudioActionCard
-                icon={Headphones}
+                icon={AudiobookGlyph}
                 title="Audiobook"
                 description="Create chapter-by-chapter audio from books you own or that are public domain."
                 onClick={() => setActiveWorkspace('audiobook')}
@@ -598,7 +605,9 @@ const StudioSidebar = ({
                                 <i className="fi fi-rr-trash" />
                               </Button>
                             </div>
-                            <ConceptMapView conceptMap={map} />
+                            <React.Suspense fallback={<p role="status" className="p-3 text-sm text-muted-foreground">Loading concept map…</p>}>
+                              <ConceptMapView conceptMap={map} />
+                            </React.Suspense>
                           </Card>
                         ))}
                       </div>

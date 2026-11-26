@@ -539,22 +539,20 @@ const SourcesSidebar = ({
 
     return (
       <div className="w-full bg-gray-50 dark:bg-background border-r border-gray-200 dark:border-border flex flex-col h-full overflow-hidden">
-        <div className="p-4 border-b border-gray-200 dark:border-border flex-shrink-0">
-          <div className="flex items-center justify-between">
-            <h2 ref={viewerHeadingRef} tabIndex={-1} className="min-w-0 break-words text-lg font-medium text-gray-900 dark:text-foreground outline-none">
-              Source: {selectedCitation.source_title}
-            </h2>
-            <Button variant="ghost" onClick={handleBackToSources} aria-label="Back to source list" className="min-h-11 min-w-11 p-2 [&_svg]:!w-6 [&_svg]:!h-6">
-              <i aria-hidden="true" className="fi fi-rr-arrow-left h-6 w-6"></i>
-            </Button>
-          </div>
+        <div className="flex flex-wrap items-center gap-x-2 border-b border-gray-200 px-3 py-2 dark:border-border">
+          <h2 ref={viewerHeadingRef} tabIndex={-1} className="sr-only">
+            Source: {selectedCitation.source_title}
+          </h2>
+          <Button variant="ghost" onClick={handleBackToSources} aria-label="Back to source list" className="min-h-11 gap-2 px-2 text-sm">
+            <i aria-hidden="true" className="fi fi-rr-arrow-left"></i>
+            Sources
+          </Button>
           {returnToCitationOrigin && onReturnToCitationOrigin && (
-            <Button variant="ghost" onClick={handleReturnToCitationOrigin} className="mt-2 min-h-11 px-2 text-sm">
+            <Button variant="ghost" onClick={handleReturnToCitationOrigin} className="ml-auto min-h-11 px-2 text-sm">
               Back to {returnToCitationOrigin === 'chat' ? 'Chat' : 'Studio'}
             </Button>
           )}
         </div>
-
         <React.Suspense fallback={<div className="flex flex-1 items-center justify-center text-sm text-muted-foreground">Loading source…</div>}>
           <SourceContentViewer
             notebookId={notebookId}

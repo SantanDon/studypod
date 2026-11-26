@@ -91,6 +91,9 @@ test('revision planner answers and opens the exact saved passage after reload', 
     await citation.focus();
     await page.keyboard.press('Enter');
   } else {
+    const citationBox = await citation.boundingBox();
+    expect(citationBox?.width).toBeGreaterThanOrEqual(44);
+    expect(citationBox?.height).toBeGreaterThanOrEqual(44);
     await citation.tap();
   }
   const line = page.locator('[data-cited-line="9"]:visible');
@@ -98,7 +101,18 @@ test('revision planner answers and opens the exact saved passage after reload', 
   await expect(page.locator('[data-cited-line]:visible')).toHaveCount(1);
   await expect(line).toBeInViewport({ ratio: 0.98 });
   await page.screenshot({ path: testInfo.outputPath('revision-passage.png') });
-  if (testInfo.project.name === 'mobile-390') await page.getByRole('tab', { name: 'Chat', exact: true }).click();
+  if (testInfo.project.name === 'mobile-390') {
+    const sections = page.getByRole('tablist', { name: 'Notebook sections' });
+    const sources = sections.getByRole('tab', { name: 'Sources' });
+    await expect(sources).toHaveAttribute('aria-selected', 'true');
+    expect((await sources.boundingBox())?.height).toBeGreaterThanOrEqual(44);
+    await page.getByRole('button', { name: 'Back to Chat' }).press('Enter');
+    await expect(citation).toBeFocused();
+    await sections.getByRole('tab', { name: 'Chat' }).press('ArrowLeft');
+    await expect(sources).toBeFocused();
+    await sources.press('ArrowRight');
+    await expect(sections.getByRole('tab', { name: 'Chat' })).toBeFocused();
+  }
   await chat.fill('Orbital velocity of Saturn?');
   await chat.press('Enter');
   await expect(page.getByText(/couldn't find a matching passage/).first()).toBeVisible();

@@ -31,9 +31,19 @@ interface SourceContentViewerProps {
   isOpenedFromSourceList?: boolean;
 }
 
+function resolvePassage(citation: Citation | null, content?: string): Citation | null {
+  if (!citation || !content || citation.citation_id === -1 || citation.chunk_lines_from) return citation;
+  const excerpt = (citation.excerpt || citation.prefetched_content || '').trim();
+  if (!excerpt) return citation;
+  const offset = content.indexOf(excerpt);
+  if (offset < 0 || content.indexOf(excerpt, offset + 1) >= 0) return citation;
+  const firstLine = content.slice(0, offset).split('\n').length;
+  return { ...citation, chunk_lines_from: firstLine, chunk_lines_to: firstLine + excerpt.split('\n').length - 1 };
+}
+
 const SourceContentViewer = ({ 
   notebookId,
-  citation, 
+  citation: incomingCitation,
   sourceContent, 
   sourceSummary,
   sourceUrl,
@@ -41,6 +51,7 @@ const SourceContentViewer = ({
   className = '',
   isOpenedFromSourceList = false
 }: SourceContentViewerProps) => {
+  const citation = resolvePassage(incomingCitation, sourceContent);
   const highlightedContentRef = useRef<HTMLDivElement>(null);
   const scrollAreaViewportRef = useRef<HTMLDivElement>(null);
   
@@ -70,7 +81,6 @@ const SourceContentViewer = ({
   // Close guide when a real citation is clicked (has valid line data)
   useEffect(() => {
     if (hasValidCitationLines) {
-      console.log('SourceContentViewer: Closing guide for real citation');
       setAccordionValue("");
     }
   }, [hasValidCitationLines]);
@@ -146,21 +156,8 @@ const SourceContentViewer = ({
   // Split content into lines for highlighting
   const lines = sourceContent.split('\n');
   
-  // Determine the highlight range based on whether we have valid citation line data
-  let startLine: number;
-  let endLine: number;
-  
-  if (hasValidCitationLines) {
-    // For real citations with valid line data, highlight the specific lines
-    startLine = citation.chunk_lines_from!;
-    endLine = citation.chunk_lines_to!;
-    console.log('SourceContentViewer: Will highlight lines', { startLine, endLine });
-  } else {
-    // For source list clicks or citations without line data, don't highlight
-    startLine = -1;
-    endLine = -1;
-    console.log('SourceContentViewer: No highlighting (no valid line data)');
-  }
+  const startLine = hasValidCitationLines ? citation.chunk_lines_from! : -1;
+  const endLine = hasValidCitationLines ? citation.chunk_lines_to! : -1;
 
   const renderHighlightedContent = () => {
     return lines.map((line, index) => {
@@ -173,15 +170,11 @@ const SourceContentViewer = ({
           key={index}
           ref={isFirstHighlightedLine ? highlightedContentRef : null}
           data-cited-line={isHighlighted ? lineNumber : undefined}
-          className={`py-2 px-3 rounded leading-relaxed ${
-            isHighlighted 
-              ? 'border-l-4' 
-              : 'hover:bg-gray-50'
+          className={`break-words border-l-[3px] px-3 py-1 text-sm leading-6 [overflow-wrap:anywhere] ${
+            isHighlighted
+              ? 'border-violet-600 bg-violet-100 text-violet-950 dark:border-violet-400 dark:bg-violet-950 dark:text-violet-100'
+              : 'border-transparent text-foreground'
           }`}
-          style={isHighlighted ? { 
-            backgroundColor: '#eadef9', 
-            borderLeftColor: '#9333ea' 
-          } : {}}
         >
           <span className={isHighlighted ? 'font-medium' : ''}>{line}</span>
         </div>
@@ -196,18 +189,18 @@ const SourceContentViewer = ({
       aria-label={`${citation.source_title} source content`}
     >
       {/* Header */}
-      <div className="p-4 border-b border-gray-200 flex-shrink-0">
-        <div className="flex items-center space-x-2 mb-2">
+      <div className="border-b border-border bg-card px-4 py-3 flex-shrink-0">
+        <div className="flex flex-wrap items-center gap-2">
           <div className="w-6 h-6 bg-white rounded border border-gray-200 flex items-center justify-center flex-shrink-0 overflow-hidden">
             {getSourceIcon(citation.source_type)}
           </div>
-          <span className="font-medium text-gray-900 truncate">{citation.source_title}</span>
+          <span className="min-w-0 flex-1 break-words text-sm font-semibold leading-snug text-foreground [overflow-wrap:anywhere]">{citation.source_title}</span>
           {citation.seek_url && (
             <a
               href={citation.seek_url}
               target="_blank"
               rel="noopener noreferrer"
-              className="ml-auto rounded-md border border-red-200 px-2 py-1 text-[11px] font-medium text-red-600 hover:bg-red-50"
+              className="inline-flex min-h-11 items-center rounded-md border border-border px-2 text-xs font-medium text-foreground hover:bg-muted"
             >
               Watch at {citation.timestamp_label || 'cited moment'}
             </a>
@@ -215,10 +208,10 @@ const SourceContentViewer = ({
         </div>
         {!isOpenedFromSourceList && notebookId && createSourceLearningQuestion(notebookId, citation, sourceContent, 'explain') && (
           <div className="mt-3 space-y-2" aria-label="Learn from this passage">
-            <p className="text-xs text-slate-500">Highlighted passage · {citation.chunk_lines_from === citation.chunk_lines_to ? `Line ${citation.chunk_lines_from}` : `Lines ${citation.chunk_lines_from}–${citation.chunk_lines_to}`}</p>
-            <div className="flex flex-wrap gap-2">
+            <p className="text-xs font-medium text-muted-foreground">Highlighted passage · {citation.chunk_lines_from === citation.chunk_lines_to ? `Line ${citation.chunk_lines_from}` : `Lines ${citation.chunk_lines_from}–${citation.chunk_lines_to}`}</p>
+            <div className="grid grid-cols-[repeat(auto-fit,minmax(min(8rem,100%),1fr))] gap-2">
               {(['explain', 'practice'] as SourceLearningAction[]).map((action) => (
-                <Button key={action} variant="outline" size="sm" className="h-auto min-h-9 whitespace-normal border-blue-200 text-blue-700 hover:bg-blue-50" onClick={() => {
+                <Button key={action} variant="outline" size="sm" className="h-auto min-h-11 whitespace-normal px-2" onClick={() => {
                   const request = createSourceLearningQuestion(notebookId, citation, sourceContent, action);
                   if (request) queueSourceLearningQuestion(request);
                 }}>
@@ -263,23 +256,21 @@ const SourceContentViewer = ({
 
       {/* Source Guide Accordion */}
       {sourceSummary && (
-        <div className="border-b border-gray-200 flex-shrink-0">
+        <div className="border-b border-border flex-shrink-0">
           <Accordion type="single" value={accordionValue} onValueChange={setAccordionValue} collapsible>
             <AccordionItem value="guide" className="border-0">
               <AccordionTrigger 
-                className="px-4 py-3 text-sm font-medium hover:no-underline hover:bg-blue-50" 
-                style={{ color: '#234776' }}
-                chevronColor="#234776"
+                className="min-h-11 px-4 py-3 text-sm font-medium text-foreground hover:bg-muted hover:no-underline" 
               >
                 <div className="flex items-center space-x-2">
-                  <svg xmlns="http://www.w3.org/2000/svg" height="16px" viewBox="0 -960 960 960" width="16px" fill="#234776">
+                  <svg xmlns="http://www.w3.org/2000/svg" height="16px" viewBox="0 -960 960 960" width="16px" fill="currentColor" aria-hidden="true">
                     <path d="M166.67-120.67 120-167.33l317.67-318L254-531l194-121-16.33-228 175 147L818-818.33l-85.67 211.66L880-432l-228.67-16.67-120.66 194L485-438.33 166.67-120.67Zm24.66-536L120-728l72-72 71.33 71.33-72 72Zm366.34 233 58-94.33 111 8.33-72-85 41.66-102.66-102.66 41.66-85-71.66L517-616.67l-94.33 59 108 26.67 27 107.33Zm171 303.67-71.34-72 71.34-71.33 71.33 72L728.67-120ZM575-576Z"/>
                   </svg>
                   <span>Source guide</span>
                 </div>
               </AccordionTrigger>
               <AccordionContent className="px-4 pb-4">
-                <div className="text-sm text-gray-700 space-y-4">
+                <div className="text-sm text-foreground space-y-4">
                   <div>
                     <h4 className="font-medium mb-2">Summary</h4>
                     <p className="leading-relaxed">{sourceSummary}</p>
@@ -293,7 +284,7 @@ const SourceContentViewer = ({
                         href={sourceUrl} 
                         target="_blank" 
                         rel="noopener noreferrer"
-                        className="text-blue-600 hover:text-blue-800 hover:underline break-all text-sm"
+                        className="text-primary underline underline-offset-2 break-all text-sm"
                       >
                         {sourceUrl}
                       </a>
@@ -307,9 +298,9 @@ const SourceContentViewer = ({
       )}
 
       {/* Content */}
-      <ScrollArea className="flex-1 h-full" ref={scrollAreaViewportRef}>
-        <div className="p-4 pb-24 sm:pb-4" role="region" aria-label="Source passage" tabIndex={0}>
-          <div className="prose prose-gray max-w-none space-y-1">
+      <ScrollArea className="min-h-0 flex-1" ref={scrollAreaViewportRef}>
+        <div className="p-3 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring" role="region" aria-label="Source passage" tabIndex={0}>
+          <div className={`prose prose-gray max-w-none space-y-1 ${hasValidCitationLines && !isOpenedFromSourceList ? 'pb-[min(12rem,24dvh)]' : ''}`}>
             {renderHighlightedContent()}
           </div>
         </div>

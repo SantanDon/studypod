@@ -96,7 +96,7 @@ const Notebook = () => {
   }
 
   return (
-    <div className="h-screen bg-background flex flex-col overflow-hidden text-foreground">
+    <div className="h-dvh bg-background flex flex-col overflow-hidden text-foreground">
       <NotebookHeader 
         title={notebook?.title || 'Untitled Notebook'} 
         notebookId={notebookId} 

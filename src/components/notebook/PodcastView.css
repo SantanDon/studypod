@@ -1093,6 +1093,8 @@
 }
 
 .generating-action-btn {
+  min-width: 44px;
+  min-height: 44px;
   width: 32px;
   height: 32px;
   background: rgba(255, 255, 255, 0.05);
@@ -1217,8 +1219,9 @@
 }
 
 .minimized-btn {
-  width: 28px;
-  height: 28px;
+  flex: 0 0 44px;
+  width: 44px;
+  height: 44px;
   background: rgba(255, 255, 255, 0.05);
   border: 1px solid rgba(255, 255, 255, 0.1);
   border-radius: 6px;
@@ -1659,7 +1662,32 @@
   }
 }
 
+.studypod-audio-studio .studypod-audio-card > .studypod-create:first-of-type {
+  border-top: 0;
+  padding-top: 0;
+}
+
+.studypod-audio-studio .studypod-create + .studypod-listen {
+  border-top: 1px solid var(--audio-line);
+  padding-top: 16px;
+}
+
+.audio-lab-overlay [role="tablist"] {
+  min-height: 48px;
+  height: auto;
+}
+
+.audio-lab-overlay [role="tab"],
+.audio-lab-overlay .close-lab {
+  min-height: 44px;
+}
+
+.audio-lab-overlay .close-lab {
+  min-width: 44px;
+}
+
 @media (prefers-reduced-motion: reduce) {
+  .mini-wave,
   .wave-bar,
   .audio-lab-overlay,
   .podcast-generate-btn,

@@ -86,7 +86,7 @@ const LiquidCitation = ({ citation, index, triggerType: _triggerType = 'click', 
         whileHover={{ scale: 1.05 }}
         whileTap={{ scale: 0.95 }}
         onClick={handleToggle}
-        className={`cursor-pointer inline-flex items-center min-h-6 rounded px-2 py-0.5 text-xs font-semibold border transition-all duration-300 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-400 focus-visible:ring-offset-2 ${
+        className={`cursor-pointer inline-flex min-h-11 min-w-11 items-center justify-center rounded-md px-2 py-0.5 text-xs font-semibold border transition-all duration-300 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-400 focus-visible:ring-offset-2 ${
           isOpen
             ? "bg-blue-800 text-white border-blue-800 shadow-sm dark:bg-blue-200 dark:text-blue-950"
             : "bg-blue-50 text-blue-900 border-blue-300 hover:bg-blue-100 dark:bg-slate-900 dark:text-blue-200 dark:border-blue-500"

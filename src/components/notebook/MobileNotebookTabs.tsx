@@ -2,7 +2,7 @@ import { OPEN_STUDIO_AUDIO_EVENT } from '@/lib/audio/studioAudioCommands';
 
 import { lazy, Suspense, useEffect, useRef, useState } from 'react';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
-// import { FileText, MessageCircle, NotebookPen } from 'lucide-react'; // Removed Lucide imports
+import { Files, MessageSquare, Headphones } from 'lucide-react';
 import SourcesSidebar from './SourcesSidebar';
 import ChatArea from './ChatArea';
 import { Citation } from '@/types/message';
@@ -106,31 +106,23 @@ const MobileNotebookTabs = ({
   }, [notebookId]);
   return (
     <Tabs value={activeTab} onValueChange={setActiveTab} className="flex-1 flex flex-col overflow-hidden">
-      <TabsList className="grid w-full grid-cols-3 bg-gray-100 dark:bg-muted p-1 h-12 rounded-none border-b border-gray-200 dark:border-border">
-        <TabsTrigger 
-          value="sources" 
-          className="flex items-center space-x-2 text-sm data-[state=active]:bg-white dark:data-[state=active]:bg-background data-[state=active]:shadow-sm"
-        >
-          <i aria-hidden="true" className="fi fi-rr-file h-4 w-4"></i>
-          <span className="text-[11px] sm:text-sm">Sources</span>
-        </TabsTrigger>
-        <TabsTrigger 
-          ref={chatTabRef}
-          value="chat" 
-          className="flex items-center space-x-2 text-sm data-[state=active]:bg-white dark:data-[state=active]:bg-background data-[state=active]:shadow-sm"
-        >
-          <i aria-hidden="true" className="fi fi-rr-comment h-4 w-4"></i>
-          <span className="text-[11px] sm:text-sm">Chat</span>
-        </TabsTrigger>
-        <TabsTrigger 
-          ref={studioTabRef}
-          value="studio" 
-          className="flex items-center space-x-2 text-sm data-[state=active]:bg-white dark:data-[state=active]:bg-background data-[state=active]:shadow-sm"
-          data-testid="mobile-studio-tab"
-        >
-          <i aria-hidden="true" className="fi fi-rr-notebook h-4 w-4"></i>
-          <span className="text-[11px] sm:text-sm">Studio</span>
-        </TabsTrigger>
+      <TabsList aria-label="Notebook sections" className="grid h-auto w-full shrink-0 grid-cols-3 gap-1 rounded-none border-b border-border bg-muted/50 p-1">
+        {[
+          { value: 'sources', label: 'Sources', Icon: Files },
+          { value: 'chat', label: 'Chat', Icon: MessageSquare },
+          { value: 'studio', label: 'Studio', Icon: Headphones },
+        ].map(({ value, label, Icon }) => (
+          <TabsTrigger
+            key={value}
+            ref={value === 'chat' ? chatTabRef : value === 'studio' ? studioTabRef : undefined}
+            value={value}
+            data-testid={value === 'studio' ? 'mobile-studio-tab' : undefined}
+            className="min-h-11 gap-2 rounded-md text-sm focus-visible:ring-inset data-[state=active]:bg-background data-[state=active]:font-semibold data-[state=active]:text-primary"
+          >
+            <Icon aria-hidden="true" size={16} />
+            {label}
+          </TabsTrigger>
+        ))}
       </TabsList>
 
       <TabsContent value="sources" className="flex-1 overflow-hidden mt-0">

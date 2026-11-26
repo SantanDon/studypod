@@ -17,7 +17,7 @@ import { Analytics, type BeforeSendEvent } from "@vercel/analytics/react";
 
 const queryClient = new QueryClient();
 
-import Dashboard from './pages/Dashboard';
+const Dashboard = lazy(() => import('./pages/Dashboard'));
 const Notebook = lazy(() => import('./pages/Notebook'));
 const Settings = lazy(() => import('./pages/Settings'));
 const NotFound = lazy(() => import('./pages/NotFound'));

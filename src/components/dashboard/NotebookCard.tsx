@@ -3,6 +3,7 @@ import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, 
 import { useNotebookDelete } from '@/hooks/useNotebookDelete';
 import { useToast } from '@/hooks/use-toast';
 import { Share2, Trash2 } from 'lucide-react';
+import StudyGlyph from '@/components/notebook/StudyGlyph';
 import { formatDisplayTitle } from '@/lib/utils/displayTitle';
 
 interface NotebookCardProps {
@@ -93,7 +94,11 @@ const NotebookCard = ({
       )}
       
       <div className="w-10 h-10 rounded-lg flex items-center justify-center mb-3">
-        <span className="text-2xl">{notebook.icon}</span>
+        {['', '📚', '📝'].includes(notebook.icon) ? (
+          <StudyGlyph kind="notebook" className="h-10 w-10" />
+        ) : (
+          <span aria-hidden="true" className="text-2xl">{notebook.icon}</span>
+        )}
       </div>
       
       <h3 className="text-foreground mb-2 pr-6 line-clamp-2 text-lg font-medium flex-grow leading-snug">

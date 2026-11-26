@@ -48,6 +48,7 @@ import {
 } from "@/components/ui/select";
 import {
   getStreamingTTSGenerator,
+  podcastStageLabel,
   StreamingProgress,
   StreamingResult,
 } from "@/lib/tts/streamingTTSGenerator";
@@ -820,23 +821,24 @@ const PodcastView: React.FC<PodcastViewProps> = ({ notebookId, onOpenSource }) =
     return (
       <div className="podcast-card podcast-minimized">
         <div className="minimized-content">
-          <div className="minimized-animation">
+          <div className="minimized-animation" aria-hidden="true">
             <div className="mini-wave"></div>
             <div className="mini-wave"></div>
             <div className="mini-wave"></div>
           </div>
-          <div className="minimized-info">
+          <div className="minimized-info" role="status">
             <span className="minimized-status">
-              {progress?.currentSegment || 0}/{progress?.totalSegments || 0}
+              {podcastStageLabel(progress)}
             </span>
-            <span className="minimized-percent">
-              {progress?.percentage || 0}%
+            <span className="minimized-percent" title="Overall progress">
+              {Math.round(progress?.percentage || 0)}%
             </span>
           </div>
           <div className="minimized-actions">
             <button
               className="minimized-btn"
               onClick={() => setIsMinimized(false)}
+              aria-label="Expand generation progress"
               title="Expand"
             >
               <FontAwesomeIcon icon={faExpand} />
@@ -844,6 +846,7 @@ const PodcastView: React.FC<PodcastViewProps> = ({ notebookId, onOpenSource }) =
             <button
               className="minimized-btn cancel"
               onClick={handleCancel}
+              aria-label="Cancel"
               title="Cancel"
             >
               <FontAwesomeIcon icon={faXmark} />
@@ -887,60 +890,12 @@ const PodcastView: React.FC<PodcastViewProps> = ({ notebookId, onOpenSource }) =
             ) : null}
           </div>
         )}
-        <section className="studypod-listen" aria-labelledby="studypod-listen-heading">
-          <div className="studypod-audio-section-heading">
-            <span className="studypod-audio-eyebrow">Listen</span>
-            <h3 id="studypod-listen-heading">Saved audio overviews</h3>
-            <p>Pick up an episode you created for this notebook.</p>
-          </div>
-          <div className="studypod-listen-history">
-            <PodcastHistory
-              notebookId={safeNotebookId}
-              sources={sources}
-              sourcesLoading={sourcesLoading}
-              sourcesError={sourcesError}
-              sourcesFetching={sourcesFetching}
-              retrySources={() => { void retrySources(); }}
-              onOpenSource={onOpenSource ? openRecordedSource : undefined}
-              onPlay={(url, title, podcastId) => {
-                setShowAudioLab(false);
-                if (
-                  restoredAudioUrlRef.current &&
-                  restoredAudioUrlRef.current !== url
-                ) {
-                  URL.revokeObjectURL(restoredAudioUrlRef.current);
-                }
-                restoredAudioUrlRef.current = url;
-                restoredAudioNotebookRef.current = safeNotebookId;
-                restoredPodcastRef.current = podcastId;
-                setFinalAudio(url, safeNotebookId, title, podcastId);
-              }}
-              onDeleted={handleDeletedPodcast}
-              currentAudioUrl={finalAudioUrl}
-              currentPodcastId={currentPodcastId}
-            />
-          </div>
-        </section>
-
         <section className="studypod-create" aria-labelledby="studypod-create-heading">
           <div className="studypod-audio-section-heading">
-            <span className="studypod-audio-eyebrow">Create</span>
             <h3 id="studypod-create-heading">New audio overview</h3>
             <p>Listen to source readings or explore ideas with a Deep Dive discussion.</p>
             <p id="studypod-audio-source-scope" role="status" aria-live="polite">{sourceScopeMessage}</p>
           </div>
-        <div className="podcast-header">
-          <div className="podcast-icon">
-            <FontAwesomeIcon icon={faMicrophone} />
-          </div>
-          <div className="podcast-title-section">
-            <h3 className="podcast-title">Audio Overview</h3>
-            <p className="podcast-subtitle">
-              Choose a source reading or a discussion grounded in your material.
-            </p>
-          </div>
-        </div>
-
         {showAudioLab ? (
           <div id="studypod-audio-customize" className="audio-lab-overlay glassmorphism">
             <div className="audio-lab-header">
@@ -975,7 +930,7 @@ const PodcastView: React.FC<PodcastViewProps> = ({ notebookId, onOpenSource }) =
                 }
                 className="w-full"
               >
-                <TabsList className="audio-format-tabs-list grid w-full grid-cols-2">
+                <TabsList aria-label="Audio format" className="audio-format-tabs-list grid w-full grid-cols-2">
                   <TabsTrigger value="dialogue">Two hosts</TabsTrigger>
                   <TabsTrigger value="solo">Solo</TabsTrigger>
                 </TabsList>
@@ -991,13 +946,14 @@ const PodcastView: React.FC<PodcastViewProps> = ({ notebookId, onOpenSource }) =
               </Label>
               <Input
                 id="podcastFocus"
+                aria-describedby="podcast-focus-hint"
                 value={podcastFocus}
                 onChange={(event) => setPodcastFocus(event.target.value)}
                 placeholder="e.g. Book VII: the cave, education, and philosopher-rulers"
                 className="lab-input"
                 maxLength={500}
               />
-              <p className="lab-hint">
+              <p className="lab-hint" id="podcast-focus-hint">
                 Optional. Name a book, chapter, concept, or question to help select
                 passages. A long source may be covered only in part.
               </p>
@@ -1014,7 +970,7 @@ const PodcastView: React.FC<PodcastViewProps> = ({ notebookId, onOpenSource }) =
                 }
                 className="w-full"
               >
-                <TabsList className="grid w-full grid-cols-3">
+                <TabsList aria-label="Source coverage" className="grid w-full grid-cols-3">
                   <TabsTrigger value="brief">Brief</TabsTrigger>
                   <TabsTrigger value="standard">Standard</TabsTrigger>
                   <TabsTrigger value="deep-dive">Deep Dive</TabsTrigger>
@@ -1205,6 +1161,38 @@ const PodcastView: React.FC<PodcastViewProps> = ({ notebookId, onOpenSource }) =
           </button>
         </div>
         </section>
+        <section className="studypod-listen" aria-labelledby="studypod-listen-heading">
+          <div className="studypod-audio-section-heading">
+            <h3 id="studypod-listen-heading">Saved audio overviews</h3>
+          </div>
+          <div className="studypod-listen-history">
+            <PodcastHistory
+              notebookId={safeNotebookId}
+              sources={sources}
+              sourcesLoading={sourcesLoading}
+              sourcesError={sourcesError}
+              sourcesFetching={sourcesFetching}
+              retrySources={() => { void retrySources(); }}
+              onOpenSource={onOpenSource ? openRecordedSource : undefined}
+              onPlay={(url, title, podcastId) => {
+                setShowAudioLab(false);
+                if (
+                  restoredAudioUrlRef.current &&
+                  restoredAudioUrlRef.current !== url
+                ) {
+                  URL.revokeObjectURL(restoredAudioUrlRef.current);
+                }
+                restoredAudioUrlRef.current = url;
+                restoredAudioNotebookRef.current = safeNotebookId;
+                restoredPodcastRef.current = podcastId;
+                setFinalAudio(url, safeNotebookId, title, podcastId);
+              }}
+              onDeleted={handleDeletedPodcast}
+              currentAudioUrl={finalAudioUrl}
+              currentPodcastId={currentPodcastId}
+            />
+          </div>
+        </section>
 
         <TTSProviderSettings
           isOpen={isProviderSettingsOpen}
@@ -1228,6 +1216,7 @@ const PodcastView: React.FC<PodcastViewProps> = ({ notebookId, onOpenSource }) =
             <button
               className="generating-action-btn"
               onClick={() => setIsMinimized(true)}
+              aria-label="Minimize generation progress"
               title="Minimize"
             >
               <FontAwesomeIcon icon={faMinimize} />
@@ -1235,6 +1224,7 @@ const PodcastView: React.FC<PodcastViewProps> = ({ notebookId, onOpenSource }) =
             <button
               className="generating-action-btn cancel"
               onClick={handleCancel}
+              aria-label="Cancel"
               title="Cancel"
             >
               <FontAwesomeIcon icon={faXmark} />
@@ -1242,7 +1232,7 @@ const PodcastView: React.FC<PodcastViewProps> = ({ notebookId, onOpenSource }) =
           </div>
         </div>
 
-        <div className="generating-animation">
+        <div className="generating-animation" aria-hidden="true">
           <div className="wave-bar"></div>
           <div className="wave-bar"></div>
           <div className="wave-bar"></div>
@@ -1250,11 +1240,11 @@ const PodcastView: React.FC<PodcastViewProps> = ({ notebookId, onOpenSource }) =
           <div className="wave-bar"></div>
         </div>
 
-        <p className="generating-status">
+        <p className="generating-status" role="status">
           {progress?.message || "Preparing..."}
         </p>
 
-        <div className="generating-progress">
+        <div className="generating-progress" role="progressbar" aria-label="Overall podcast generation" aria-valuenow={Math.round(progress?.percentage || 0)} aria-valuemin={0} aria-valuemax={100}>
           <div
             className="generating-progress-fill"
             style={{ width: `${progress?.percentage || 0}%` }}
@@ -1262,13 +1252,13 @@ const PodcastView: React.FC<PodcastViewProps> = ({ notebookId, onOpenSource }) =
         </div>
 
         <div className="generating-meta">
-          <span className="generating-percent">
-            {progress?.percentage || 0}%
+          <span className="generating-percent" title="Overall progress">
+            {Math.round(progress?.percentage || 0)}%
           </span>
-          {progress?.estimatedTimeRemaining && (
+          {Boolean(progress?.estimatedTimeRemaining) && (
             <span className="generating-eta">
               <FontAwesomeIcon icon={faClock} />{" "}
-              {formatETA(progress.estimatedTimeRemaining)}
+              {formatETA(progress?.estimatedTimeRemaining)}
             </span>
           )}
         </div>
