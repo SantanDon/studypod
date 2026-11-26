@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import { once } from 'node:events';
 import { test } from 'node:test';
+import { JSDOM } from 'jsdom';
 import { server } from './server.mjs';
 
 test('HTTP answers cite the exact revision and line returned by the connector', async t => {
@@ -29,11 +30,12 @@ test('HTTP answers cite the exact revision and line returned by the connector', 
   t.after(() => new Promise(resolve => server.close(resolve)));
   const base = 'http://127.0.0.1:' + server.address().port;
   const home = await request(base);
-  const html = (await home.text()).replace(/\r\n/g, '\n');
-  const scripts = [...html.matchAll(/<script\b([^>]*)>([\s\S]*?)<\/script\s*>/gi)];
+  const page = new JSDOM(await home.text());
+  t.after(() => page.window.close());
+  const scripts = page.window.document.scripts;
   assert.equal(scripts.length, 1);
-  assert.equal(scripts[0][1].trim(), '', 'the demo must serve one plain inline script');
-  const digest = createHash('sha256').update(scripts[0][2]).digest('base64');
+  assert.equal(scripts[0].attributes.length, 0, 'the demo must serve one plain inline script');
+  const digest = createHash('sha256').update(scripts[0].textContent).digest('base64');
   const scriptDirectives = home.headers.get('content-security-policy').split(';')
     .map(value => value.trim()).filter(value => /^script-src(?:\s|$)/i.test(value));
   assert.deepEqual(scriptDirectives, [`script-src 'sha256-${digest}'`]);
