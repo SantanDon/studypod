@@ -1760,3 +1760,16 @@
     padding-bottom: max(1rem, env(safe-area-inset-bottom));
   }
 }
+
+.podcast-settings-dialog .lab-length-selector [role="tab"][data-state="active"] {
+  color: hsl(var(--background));
+  background-color: hsl(var(--foreground));
+  font-weight: 700;
+}
+
+@media (forced-colors: active) {
+  .podcast-settings-dialog .lab-length-selector [role="tab"][data-state="active"] {
+    outline: 2px solid Highlight;
+    outline-offset: -3px;
+  }
+}

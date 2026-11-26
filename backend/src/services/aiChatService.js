@@ -1796,7 +1796,7 @@ After your answer, append a final block headed exactly "CITATIONS:" on its own l
 
 ${styleInstruction}
 
-Caller: ${callerType}${callerType === "mission" ? "\nWrite a research report answering the mission goal. Cite the strongest evidence and identify material contradictions, missing evidence, and source-grounded next steps where relevant." : ""}`;
+Caller: ${callerType}${callerType === "mission" ? "\nAnswer the mission goal directly. For a comparison or multi-part goal, answer each requested part with its own source-supported sentence and marker. Copy a short, complete supporting sentence from each relevant source when it directly answers that part, and use the matching verbatim excerpt in CITATIONS. Keep claims from different sources in separate sentences. Include contradictions, evidence gaps or next steps only when the goal calls for them and the sources support them." : ""}`;
 }
 
 /**
@@ -2284,6 +2284,12 @@ Internal Audit: ${critique}`;
         contextSources,
       );
       answer = parsedCitations.answer;
+      // A provider can attach background excerpts to an explicit non-answer.
+      // Discard the background prose together with its unreferenced citations.
+      if (callerType === "human" && !literalRetry && !/\[\d+\]/.test(answer)
+        && /^\s*(?:the|these|your) (?:notebook|(?:provided |available )?(?:sources?|materials?)) (?:does not|doesn't|do not|don't) (?:establish|specify|identify|mention|state|provide|say|indicate|explain)\b/i.test(answer)) {
+        return { answer: "I couldn't find an answer to that question in your notebook sources.", citations: [] };
+      }
       trace.parsedCitations = parsedCitations.citations;
       const citationIds = new Set(
         parsedCitations.citations.map((citation) => Number(citation.citation_id)),

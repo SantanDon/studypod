@@ -9,7 +9,7 @@ test('guest dashboard: keyboard, open-source link, and missing-route recovery', 
   const verify = await observeBrowser(page, testInfo, true);
   await page.goto('/');
   await expect(page.getByRole('button', { name: 'Create notebook', exact: true })).toBeVisible();
-  await expect(page.getByRole('link', { name: /StudyPod on GitHub/i })).toHaveAttribute('href', 'https://github.com/SantanDon/studypod');
+  await expect(page.getByRole('link', { name: /^(Code|Open source) on GitHub$/i })).toHaveAttribute('href', 'https://github.com/SantanDon/studypod');
   await checkProfileKeyboard(page);
   await checkLayout(page);
   await page.screenshot({ path: testInfo.outputPath('guest-dashboard.png'), fullPage: true });

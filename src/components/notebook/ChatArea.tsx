@@ -659,13 +659,13 @@ const ChatArea = ({
                    </div>
                  </div>
 
-                 {!hasConversation && (
+                 {!hasConversation && (isGenerating || notebook?.description?.trim()) && (
                    <div className="mt-4 rounded-xl border border-border bg-card px-4 py-3 text-sm leading-6 text-muted-foreground shadow-sm">
                      {isGenerating ? (
                        <p>StudyPod is reading your source and preparing an overview.</p>
                      ) : (
                        <MarkdownRenderer
-                         content={notebook?.description || 'Your sources are ready. Ask a question or choose a starting point below.'}
+                         content={notebook?.description ?? ''}
                          className="prose prose-sm max-w-none text-muted-foreground dark:prose-invert"
                        />
                      )}

@@ -524,6 +524,21 @@ describe("AI chat grounding", () => {
     expect(result.citations).toEqual([]);
   });
 
+  it("requests separately supported mission claims and retains both matching excerpts", () => {
+    const prompt = buildSystemPrompt("mission", "dense");
+    expect(prompt).toContain("answer each requested part with its own source-supported sentence and marker");
+    expect(buildSystemPrompt("human", "dense")).not.toContain("Answer the mission goal directly");
+
+    const rain = "A rain gauge measures precipitation.";
+    const wind = "A wind vane measures wind direction.";
+    const refs = [{ index: 1, id: "rain" }, { index: 2, id: "wind" }];
+    const material = [{ id: "rain", content: rain }, { id: "wind", content: wind }];
+    const answer = `A rain gauge measures precipitation[1]. A wind vane measures wind direction[2].\nCITATIONS:\n[1] "${rain}"\n[2] "${wind}"`;
+    const parsed = parseCitationExcerpts(answer, refs, material);
+    expect(parsed.citations.map(({ source_id, excerpt }) => [source_id, excerpt]))
+      .toEqual([["rain", rain], ["wind", wind]]);
+  });
+
   it("uses a direct evidence-first agent prompt", () => {
     const prompt = buildSystemPrompt("agent", "dense");
 

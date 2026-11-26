@@ -187,7 +187,17 @@ export default function HostedChapterReader({ notebookId, sources, token }: Prop
       </label>
       {parts.length > 1 && <div className="flex items-center justify-between gap-2">
         <Button className="min-h-11" variant="outline" disabled={busy || partNumber === 0} onClick={() => choosePart(partNumber - 1)}>Previous</Button>
-        <span className="text-sm">Part {partNumber + 1} of {parts.length}</span>
+        {parts.length > 2 ? (
+          <select
+            aria-label="Jump to audiobook part"
+            className="min-h-11 min-w-0 rounded-md border bg-background px-2 text-sm"
+            disabled={busy}
+            value={partNumber}
+            onChange={event => choosePart(Number(event.target.value))}
+          >
+            {parts.map((_, i) => <option key={i} value={i}>Part {i + 1} of {parts.length}</option>)}
+          </select>
+        ) : <span className="text-sm">Part {partNumber + 1} of {parts.length}</span>}
         <Button className="min-h-11" variant="outline" disabled={busy || partNumber + 1 >= parts.length} onClick={() => choosePart(partNumber + 1)}>Next</Button>
       </div>}
       <blockquote className="rounded-lg border-l-4 border-primary bg-muted/40 p-3 text-sm leading-6 break-words">{passage}</blockquote>

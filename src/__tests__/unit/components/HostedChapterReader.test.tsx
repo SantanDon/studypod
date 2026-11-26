@@ -1,4 +1,4 @@
-import { act, fireEvent, render, screen } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, expect, it, vi } from "vitest";
 import HostedChapterReader from "@/components/notebook/HostedChapterReader";
 import type { Source } from "@/hooks/useSources";
@@ -73,6 +73,18 @@ it("only offers part navigation for a source with more than one part", async () 
   view.unmount();
 });
 
+it("jumps straight to a later audiobook part and remembers it", async () => {
+  const source = { id: "guide", title: "Study guide", content: "Long passage. ".repeat(180), notebook_id: "jump" } as Source;
+  const open = () => render(<HostedChapterReader notebookId="jump" sources={[source]} />);
+  const view = open();
+  const part = screen.getByRole("combobox", { name: "Jump to audiobook part" });
+  fireEvent.change(part, { target: { value: "2" } });
+  expect(part).toHaveValue("2");
+  view.unmount();
+  const reopened = open();
+  await waitFor(() => expect(screen.getByRole("combobox", { name: "Jump to audiobook part" })).toHaveValue("2"));
+  reopened.unmount();
+});
 it("can cancel a pending voice and retry before its callbacks finish", async () => {
   vi.spyOn(URL, "createObjectURL").mockReturnValue("blob:chapter");
   vi.spyOn(URL, "revokeObjectURL").mockImplementation(() => {});
