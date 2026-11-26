@@ -91,9 +91,9 @@ const AudioPlayer = ({
     <Card className="p-4 space-y-4">
       <audio ref={audioRef} src={audioUrl === "webspeech_fallback" ? undefined : audioUrl} preload="metadata" />
 
-      <div className="flex items-center justify-between">
-        <div className="flex-1">
-          <h4 className="font-medium text-foreground">{title}</h4>
+      <div className="flex flex-wrap items-center gap-2">
+        <div className="min-w-32 flex-1">
+          <h4 className="break-words text-lg font-semibold leading-snug text-foreground">{title}</h4>
           {resumedFrom > 0 && (
             <p className="mt-1 text-xs text-muted-foreground" role="status">
               Resumed at {formatTime(resumedFrom)} - progress saves
@@ -101,6 +101,11 @@ const AudioPlayer = ({
             </p>
           )}
         </div>
+        <Button variant="outline" size="sm" className="min-h-11 gap-2" onClick={downloadAudio} disabled={loading || !!audioError || isDownloading}>
+          {isDownloading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Download className="h-4 w-4" />}
+          {isDownloading ? "Downloading..." : "Download"}
+        </Button>
+        {allowDelete && (
         <DropdownMenu>
           <DropdownMenuTrigger asChild>
             <Button variant="ghost" size="sm" className="min-h-11 min-w-11" disabled={isDeleting} aria-label={`${title} audio options`}>
@@ -112,15 +117,6 @@ const AudioPlayer = ({
             </Button>
           </DropdownMenuTrigger>
           <DropdownMenuContent align="end">
-            <DropdownMenuItem className="min-h-11" onClick={downloadAudio} disabled={isDownloading}>
-              {isDownloading ? (
-                <Loader2 className="h-4 w-4 mr-2 animate-spin" />
-              ) : (
-                <Download className="h-4 w-4 mr-2" />
-              )}
-              {isDownloading ? "Downloading..." : "Download"}
-            </DropdownMenuItem>
-            {allowDelete && (
               <DropdownMenuItem
                 onClick={deleteAudio}
                 className="min-h-11 text-red-600 focus:text-red-600"
@@ -129,9 +125,9 @@ const AudioPlayer = ({
                 <Trash2 className="h-4 w-4 mr-2" />
                 Delete
               </DropdownMenuItem>
-            )}
           </DropdownMenuContent>
         </DropdownMenu>
+        )}
       </div>
 
       {/* Auto-refresh indicator */}
@@ -176,7 +172,7 @@ const AudioPlayer = ({
           disabled={loading || !!audioError}
           aria-label={`${title} playback position`}
         />
-        <div className="flex justify-between text-xs text-gray-500">
+        <div className="flex justify-between text-sm tabular-nums text-muted-foreground">
           <span>{formatTime(currentTime)}</span>
           <span>{formatTime(duration)}</span>
         </div>

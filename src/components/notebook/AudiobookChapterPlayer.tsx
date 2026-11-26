@@ -948,7 +948,7 @@ export default function AudiobookChapterPlayer({
               {formatDisplayTitle(title, manifest.title || "Audiobook")}
             </p>
           </div>
-          <div className="text-right text-[11px] text-muted-foreground">
+          <div className="text-right text-xs text-muted-foreground">
             <p className="font-medium text-foreground">
               {manifest.availableChapterCount}/{manifest.totalNarratableChapters}{" "}
               chapters ready
@@ -974,7 +974,7 @@ export default function AudiobookChapterPlayer({
               style={{ width: `${progressPercent}%` }}
             />
           </div>
-          <span className="w-10 text-right text-[11px] font-medium text-muted-foreground">
+          <span className="w-10 text-right text-xs font-medium text-muted-foreground">
             {progressPercent}%
           </span>
         </div>
@@ -984,16 +984,16 @@ export default function AudiobookChapterPlayer({
         <div className="rounded-xl border border-border bg-background p-4">
           <div className="flex min-h-12 items-start justify-between gap-3">
             <div className="min-w-0">
-              <p className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
+              <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
                 {selectedChapter ? "Now playing" : "Waiting for audio"}
               </p>
-              <h3 className="mt-1 line-clamp-2 text-sm font-semibold leading-5">
+              <h3 className="mt-1 break-words text-lg font-semibold leading-snug">
                 {selectedChapter
                   ? formatChapterTitle(selectedChapter.title)
                   : "The first chapter will appear here when it is ready"}
               </h3>
               {selectedChapter?.pageStart ? (
-                <p className="mt-1 text-[11px] text-muted-foreground">
+                <p className="mt-1 text-xs text-muted-foreground">
                   Page {selectedChapter.pageStart}
                   {selectedChapter.pageEnd &&
                   selectedChapter.pageEnd !== selectedChapter.pageStart
@@ -1007,7 +1007,7 @@ export default function AudiobookChapterPlayer({
               onChange={(event) =>
                 changePlaybackRate(Number(event.target.value))
               }
-              className="h-8 rounded-md border border-input bg-background px-2 text-xs text-foreground"
+              className="min-h-11 rounded-md border border-input bg-background px-2 text-sm text-foreground"
               aria-label="Playback speed"
             >
               {[0.75, 1, 1.15, 1.25, 1.5, 1.75, 2].map((rate) => (
@@ -1034,7 +1034,7 @@ export default function AudiobookChapterPlayer({
               }
               aria-label="Chapter position"
             />
-            <div className="mt-1.5 flex justify-between text-[10px] tabular-nums text-muted-foreground">
+            <div className="mt-1.5 flex justify-between text-xs tabular-nums text-muted-foreground">
               <span>{formatTime(currentTime)}</span>
               <span>
                 {formatTime(duration || selectedChapter?.durationSeconds || 0)}
@@ -1046,6 +1046,7 @@ export default function AudiobookChapterPlayer({
             <Button
               variant="ghost"
               size="icon"
+              className="h-11 w-11 shrink-0"
               onClick={() => goToAdjacentChapter(-1)}
               disabled={!selectedChapter}
               aria-label="Previous chapter"
@@ -1055,6 +1056,7 @@ export default function AudiobookChapterPlayer({
             <Button
               variant="ghost"
               size="icon"
+              className="h-11 w-11 shrink-0"
               onClick={() => seekBy(-15)}
               disabled={!audioBlobUrl}
               aria-label="Rewind 15 seconds"
@@ -1079,6 +1081,7 @@ export default function AudiobookChapterPlayer({
             <Button
               variant="ghost"
               size="icon"
+              className="h-11 w-11 shrink-0"
               onClick={() => seekBy(15)}
               disabled={!audioBlobUrl}
               aria-label="Forward 15 seconds"
@@ -1088,6 +1091,7 @@ export default function AudiobookChapterPlayer({
             <Button
               variant="ghost"
               size="icon"
+              className="h-11 w-11 shrink-0"
               onClick={() => goToAdjacentChapter(1)}
               disabled={!selectedChapter}
               aria-label="Next ready chapter"
@@ -1134,7 +1138,7 @@ export default function AudiobookChapterPlayer({
                   <p className="text-xs font-medium">
                     Ask at {formatTime(currentTime)}
                   </p>
-                  <p className="truncate text-[11px] text-muted-foreground">
+                  <p className="truncate text-xs text-muted-foreground">
                     {formatChapterTitle(selectedChapter.title)}
                     {selectedChapter.pageStart
                       ? ` · Page ${selectedChapter.pageStart}${selectedChapter.pageEnd && selectedChapter.pageEnd !== selectedChapter.pageStart ? `–${selectedChapter.pageEnd}` : ""}`
@@ -1173,18 +1177,18 @@ export default function AudiobookChapterPlayer({
           )}
 
           {waitingAfterChapterId && (
-            <p className="mt-3 rounded-lg bg-primary/5 px-3 py-2 text-center text-[11px] leading-5 text-muted-foreground">
+            <p className="mt-3 rounded-lg bg-primary/5 px-3 py-2 text-center text-xs leading-5 text-muted-foreground">
               The next chapter is still generating. Playback will continue
               automatically when it is ready.
             </p>
           )}
           {audiobookBufferingStatus(isBuffering, error) && (
-            <p role="status" className="mt-3 rounded-lg bg-primary/5 px-3 py-2 text-center text-[11px] leading-5 text-muted-foreground">
+            <p role="status" className="mt-3 rounded-lg bg-primary/5 px-3 py-2 text-center text-xs leading-5 text-muted-foreground">
               {audiobookBufferingStatus(isBuffering, error)}
             </p>
           )}
           {error && (
-            <p className="mt-3 rounded-lg bg-destructive/10 px-3 py-2 text-[11px] leading-5 text-destructive">
+            <p className="mt-3 rounded-lg bg-destructive/10 px-3 py-2 text-xs leading-5 text-destructive">
               {error}
             </p>
           )}

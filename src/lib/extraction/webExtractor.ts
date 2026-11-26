@@ -208,25 +208,26 @@ export async function extractMultipleWebContents(
   return results;
 }
 
-/**
- * Sanitizes and cleans web content to remove potential hallucination sources
- */
+/** Return plain source text, preserving the line breaks used by notebook citations. */
 export function sanitizeWebContent(content: string): string {
-  // Remove common web artifacts that might cause hallucinations
-  return (
-    content
-      // Remove script and style tags if present in raw HTML
-      .replace(/<script\b[^<]*(?:(?!<\/script>)<[^<]*)*<\/script>/gi, "")
-      .replace(/<style\b[^<]*(?:(?!<\/style>)<[^<]*)*<\/style>/gi, "")
-      // Remove comments
-      .replace(/<!--[\s\S]*?-->/g, "")
-      // Remove excessive whitespace and normalize line breaks
-      .replace(/\r\n?/g, "\n")
-      .replace(/[^\S\n]+/g, " ")
-      .replace(/ *\n */g, "\n")
-      .replace(/\n{3,}/g, "\n\n")
-      .trim()
-  );
+  let text = content;
+  // Most extracts already contain Markdown. Only interpret recognizable web markup.
+  if (/<(?:!--|\/?(?:script|style|p|div|br|section|article|h[1-6]|li|table|span)\b)/i.test(content)) {
+    const template = document.createElement("template");
+    template.innerHTML = content;
+    const fragment = template.content;
+    fragment.querySelectorAll("script, style, template, noscript").forEach(node => node.remove());
+    fragment.querySelectorAll("br").forEach(node => node.replaceWith("\n"));
+    fragment.querySelectorAll("p, div, section, article, h1, h2, h3, h4, h5, h6, li, tr")
+      .forEach(node => node.append("\n"));
+    text = fragment.textContent ?? "";
+  }
+  return text
+    .replace(/\r\n?/g, "\n")
+    .replace(/[^\S\n]+/g, " ")
+    .split("\n").map(line => line.trim()).join("\n")
+    .replace(/\n{3,}/g, "\n\n")
+    .trim();
 }
 
 /**

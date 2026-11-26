@@ -91,7 +91,7 @@ function formatSourceUrl(value: string): string {
   } catch {
     // Older notebooks may contain a URL saved as plain text.
   }
-  return value.replace(/[\r\n]+/g, ' ').replace(/[&<>\\\[\]`*_]/g, character => `&#${character.charCodeAt(0)};`);
+  return value.replace(/[\r\n]+/g, ' ').replace(/[&<>\\[\]`*_]/g, character => `&#${character.charCodeAt(0)};`);
 }
 
 function generateSourcesSection(sources: LocalSource[], obsidianFormat: boolean): string {
