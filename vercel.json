@@ -1,6 +1,6 @@
 {
   "$schema": "https://openapi.vercel.sh/vercel.json",
-  "installCommand": "npm install",
+  "installCommand": "ONNXRUNTIME_NODE_INSTALL_CUDA=skip npm install",
   "buildCommand": "npm run vercel-build",
   "headers": [
     {
