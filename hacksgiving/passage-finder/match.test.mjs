@@ -9,6 +9,9 @@ const passages = [...guide.matchAll(/^## (\w+)\r?\n([^\r\n]+)/gm)]
 
 for (const [question, expected] of [
   ['What should I do on Friday?', 'Friday'],
+  ["What is Friday's plan?", 'Friday'],
+  ['What is Tuesday’s activity?', 'Tuesday'],
+  ['What is Friday’s weather?', null],
   ['What activity is scheduled for Tuesday?', 'Tuesday'],
   ['When do I revisit mistakes?', 'Wednesday'],
   ['When do I take a practice quiz?', 'Friday'],

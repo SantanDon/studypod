@@ -1,5 +1,5 @@
 const stop = new Set('what when where which should would could the a an do does did i my to on how from me we is in for and of it can you am supposed planned plan scheduled schedule activity activities please guide says say happen happens day'.split(' '));
-const words = text => (text.toLowerCase().match(/[a-z0-9]+/g) || []).filter(word => !stop.has(word));
+const words = text => (text.toLowerCase().replace(/['’]s\b/g, '').match(/[a-z0-9]+/g) || []).filter(word => !stop.has(word));
 const weekdays = new Set('monday tuesday wednesday thursday friday saturday sunday'.split(' '));
 
 export function matchPassage(question, passages) {
