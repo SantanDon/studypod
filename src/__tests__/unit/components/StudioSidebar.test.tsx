@@ -199,9 +199,9 @@ describe('StudioSidebar', () => {
     renderStudioSidebar();
 
     const audioStudio = screen.getByRole('region', { name: 'Audio studio' });
-    expect(within(audioStudio).getByRole('heading', { name: 'Audio Overview' })).toBeVisible();
+    expect(within(audioStudio).getByRole('heading', { name: 'Audio studio' })).toBeVisible();
     expect(screen.getByText('2 of 3 sources ready')).toBeInTheDocument();
-    expect(screen.getByText("Audio Overview uses selected passages from ready sources in this notebook. Sources that aren't ready are skipped.")).toBeInTheDocument();
+    expect(screen.getByText("Only ready sources are included. Sources that aren't ready are skipped.")).toBeInTheDocument();
     expect(screen.getByText('Create from sources')).toBeInTheDocument();
     expect(screen.getByText('Research workflows')).toBeInTheDocument();
     expect(screen.getByText('Study and review')).toBeInTheDocument();
@@ -262,7 +262,7 @@ describe('StudioSidebar', () => {
     sourceType = 'tweet';
     const user = userEvent.setup();
     renderStudioSidebar();
-    expect(screen.getByRole('heading', { name: 'Audio Overview' })).toBeVisible();
+    expect(screen.getByRole('heading', { name: 'Audio studio' })).toBeVisible();
     await user.click(screen.getByRole('button', { name: /Compare Sources/i }));
     expect(screen.getByRole('button', { name: /Open comparison/i })).toBeEnabled();
     await user.click(screen.getByRole('button', { name: /Open comparison/i }));

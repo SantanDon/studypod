@@ -54,10 +54,10 @@ interface StudioSectionHeadingProps {
 
 const StudioSectionHeading = ({ title, description }: StudioSectionHeadingProps) => (
   <div className="px-1">
-    <h3 className="text-xs font-semibold uppercase tracking-[0.14em] text-foreground/75">
+    <h3 className="text-base font-semibold text-foreground">
       {title}
     </h3>
-    <p className="mt-1 text-[11px] leading-5 text-muted-foreground">{description}</p>
+    <p className="mt-1 text-sm leading-5 text-muted-foreground">{description}</p>
   </div>
 );
 
@@ -85,12 +85,12 @@ const StudioToolTrigger = ({
         <div className="flex items-center gap-2">
           <span className="text-sm font-semibold text-foreground">{title}</span>
           {badge && (
-            <span className="rounded-full border border-border bg-background px-2 py-0.5 text-[9px] font-medium text-muted-foreground">
+            <span className="rounded-full border border-border bg-background px-2 py-0.5 text-[11px] font-medium text-muted-foreground">
               {badge}
             </span>
           )}
         </div>
-        <span className="mt-0.5 block text-[10px] leading-4 text-muted-foreground">
+        <span className="mt-0.5 block text-xs leading-5 text-muted-foreground">
           {description}
         </span>
       </div>
@@ -134,16 +134,16 @@ const StudioActionCard = ({
       <div className="flex items-center gap-2">
         <span className="text-sm font-semibold text-foreground">{title}</span>
         {badge && (
-          <span className="rounded-full border border-border bg-background px-2 py-0.5 text-[9px] font-medium text-muted-foreground">
+          <span className="rounded-full border border-border bg-background px-2 py-0.5 text-[11px] font-medium text-muted-foreground">
             {badge}
           </span>
         )}
       </div>
-      <span className="mt-0.5 block text-[10px] leading-4 text-muted-foreground">
+      <span className="mt-0.5 block text-xs leading-5 text-muted-foreground">
         {description}
       </span>
     </div>
-    <span className="shrink-0 text-[10px] font-semibold text-muted-foreground transition-colors group-hover:text-foreground">
+    <span className="shrink-0 text-xs font-semibold text-muted-foreground transition-colors group-hover:text-foreground">
       {actionLabel}
     </span>
   </button>
@@ -196,7 +196,7 @@ const StudioSidebar = ({
     };
     return {
       label,
-      detail: `Audio Overview uses selected passages from ready sources in this notebook.${usableSourceCount < sourceCount ? " Sources that aren't ready are skipped." : ''}`,
+      detail: `Only ready sources are included.${usableSourceCount < sourceCount ? " Sources that aren't ready are skipped." : ''}`,
     };
   })();
   const hasOnlyTweets = sources && sources.length > 0 && sources.every(s => s.type === 'tweet');
@@ -327,9 +327,8 @@ const StudioSidebar = ({
           {notebookId && (
             <section className="studypod-audio-studio space-y-3" aria-label="Audio studio">
               <div className="flex items-center gap-2">
-                <StudyGlyph kind="podcast" className="h-10 w-10 shrink-0" />
                 <StudioSectionHeading
-                  title="Audio Overview"
+                  title="Audio studio"
                   description="Make a podcast from your sources or narrate a book by chapter."
                 />
               </div>
@@ -337,7 +336,7 @@ const StudioSidebar = ({
               <StudioActionCard
                 icon={AudiobookGlyph}
                 title="Audiobook"
-                description="Create chapter-by-chapter audio from books you own or that are public domain."
+                description="Narrate a book chapter by chapter on your computer."
                 onClick={() => setActiveWorkspace('audiobook')}
                 testId="audiobook-studio-card"
                 badge="Local beta"

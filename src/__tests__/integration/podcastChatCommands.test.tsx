@@ -218,7 +218,7 @@ describe('customizing another saved overview', () => {
             podcastId: 'saved-episode', script: script(), isGenerating: false,
         });
         const { rerender } = render(<PodcastView notebookId="notebook-a" />);
-        fireEvent.click(screen.getByRole('button', { name: 'Customize audio' }));
+        fireEvent.click(screen.getByRole('button', { name: 'Set up podcast' }));
         mock.history = [{ id: 'restored-episode' }];
         // Rerender so the history fixture becomes visible in the customization view.
         rerender(<PodcastView notebookId="notebook-a" />);
@@ -232,8 +232,8 @@ describe('customizing another saved overview', () => {
             options.signal.addEventListener('abort', () => reject(new DOMException('Cancelled', 'AbortError')), { once: true });
         }));
         render(<PodcastView notebookId="notebook-a"/>);
-        fireEvent.click(screen.getByRole('button', { name: 'Customize audio' }));
-        fireEvent.click(screen.getByRole('button', { name: 'Create audio overview' }));
+        fireEvent.click(screen.getByRole('button', { name: 'Set up podcast' }));
+        fireEvent.click(screen.getByRole('button', { name: 'Create podcast' }));
         await waitFor(() => expect(mock.script).toHaveBeenCalledTimes(1));
         fireEvent.click(screen.getByRole('button', { name: 'Cancel preparation' }));
         await waitFor(() => expect(mock.script.mock.calls[0][1].signal.aborted).toBe(true));
@@ -251,7 +251,7 @@ describe('customizing another saved overview', () => {
     };
     it('can edit focus and close customization without losing saved playback', async () => {
         restoreSaved();
-        fireEvent.click(screen.getByRole('button', { name: 'Customize audio' }));
+        fireEvent.click(screen.getByRole('button', { name: 'Set up podcast' }));
         fireEvent.change(screen.getByLabelText('Episode Focus'), { target: { value: "Transcriber's Notes" } });
         expect(usePodcastGenerationStore.getState().audioUrl).toBe('blob:saved-overview');
         expect(usePodcastGenerationStore.getState().podcastId).toBe('saved-episode');
@@ -259,17 +259,17 @@ describe('customizing another saved overview', () => {
         fireEvent.click(screen.getByRole('button', { name: 'Close audio customization' }));
         expect(screen.getByRole('heading', { name: 'Current audio overview' })).toBeTruthy();
         expect(usePodcastGenerationStore.getState().audioUrl).toBe('blob:saved-overview');
-        fireEvent.click(screen.getByRole('button', { name: 'Customize audio' }));
+        fireEvent.click(screen.getByRole('button', { name: 'Set up podcast' }));
         expect((screen.getByLabelText('Episode Focus') as HTMLInputElement).value).toBe("Transcriber's Notes");
         expect(mock.save).not.toHaveBeenCalled();
     });
     it('creates the next overview with its edited focus rather than immediately regenerating', async () => {
         restoreSaved();
-        fireEvent.click(screen.getByRole('button', { name: 'Customize audio' }));
+        fireEvent.click(screen.getByRole('button', { name: 'Set up podcast' }));
         fireEvent.change(screen.getByLabelText('Episode Focus'), { target: { value: "Transcriber's Notes" } });
         await userEvent.click(screen.getByRole('tab', { name: 'Deep Dive' }));
         expect((screen.getByLabelText('Episode Focus') as HTMLInputElement).value).toBe("Transcriber's Notes");
-        fireEvent.click(screen.getByRole('button', { name: 'Create audio overview' }));
+        fireEvent.click(screen.getByRole('button', { name: 'Create podcast' }));
         await waitFor(() => expect(mock.script).toHaveBeenCalledTimes(1));
         expect(mock.script.mock.calls[0][1].userNotes).toContain("USER-SELECTED EPISODE FOCUS: Transcriber's Notes");
         expect(mock.script.mock.calls[0][1].type).toBe('deep-dive');
@@ -281,9 +281,9 @@ describe('customizing another saved overview', () => {
             content: '# Introduction\n\nUnrelated introduction.\n\n[SECTION: Transcriber’s Notes]\n\nNew original cover art is granted to the public domain.',
         });
         restoreSaved();
-        fireEvent.click(screen.getByRole('button', { name: 'Customize audio' }));
+        fireEvent.click(screen.getByRole('button', { name: 'Set up podcast' }));
         fireEvent.change(screen.getByLabelText('Episode Focus'), { target: { value: 'Transcriber’s Notes' } });
-        fireEvent.click(screen.getByRole('button', { name: 'Create audio overview' }));
+        fireEvent.click(screen.getByRole('button', { name: 'Create podcast' }));
         if (status === 'pending') {
             await waitFor(() => expect(mock.toast).toHaveBeenCalledWith(expect.objectContaining({ title: 'Requested section is not ready' })));
             expect(mock.script).not.toHaveBeenCalled();

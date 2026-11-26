@@ -1305,8 +1305,7 @@ export default function AudiobookView({
               <h3 className="mt-4 text-base font-semibold">
                 {runtimeCapabilities.localBeta ? "Create an audiobook on your computer" : "Audiobook unavailable"}
               </h3>
-              {runtimeCapabilities.localBeta && (
-                <div className="mx-auto mt-2 max-w-md space-y-3 text-sm leading-6">
+              <div className="mx-auto mt-2 max-w-md space-y-3 text-sm leading-6">
                   <p className="text-muted-foreground">
                     Run StudyPod locally to import your book, preview a chapter,
                     and download the narration.
@@ -1319,8 +1318,7 @@ export default function AudiobookView({
                   >
                     Open the local audiobook guide
                   </a>
-                </div>
-              )}
+              </div>
               <p className="mx-auto mt-3 max-w-md rounded-lg border border-amber-200 bg-background/70 px-3 py-2 text-xs leading-5 text-muted-foreground dark:border-amber-900/70">
                 {runtimeCapabilities?.reason ||
                   "This StudyPod setup does not support full-book narration."}

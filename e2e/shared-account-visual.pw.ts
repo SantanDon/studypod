@@ -87,13 +87,12 @@ test('shared visual: owned Cedar source, original identity and responsive notebo
     await step(prefix + ':studio-heading', async () => {
       await expect(page!.getByRole('heading', { name: 'Studio', exact: true })).toBeVisible();
     });
-    // The section and inner card intentionally both have an Audio Overview heading.
     await step(prefix + ':audio-card-heading', async () => {
-      await expect(card.getByRole('heading', { name: 'Audio Overview', exact: true })).toBeVisible();
+      await expect(card.getByRole('heading', { name: 'Create a podcast', exact: true })).toBeVisible();
     });
     await step(prefix + ':customize-audio', async () => {
-      await expect(card.getByRole('button', { name: 'Customize audio', exact: true })).toBeVisible();
-      await expect(card.getByRole('button', { name: 'Customize audio', exact: true })).toBeEnabled();
+      await expect(card.getByRole('button', { name: 'Set up podcast', exact: true })).toBeVisible();
+      await expect(card.getByRole('button', { name: 'Set up podcast', exact: true })).toBeEnabled();
     });
     await step(prefix + ':voice-settings', async () => {
       await expect(card.getByRole('button', { name: 'Voice and provider settings', exact: true })).toBeVisible();
@@ -188,9 +187,9 @@ test('shared visual: owned Cedar source, original identity and responsive notebo
           sourcesHeadings: await page.getByRole('heading', { name: 'Sources', exact: true }).count(),
           chatHeadings: await page.getByRole('heading', { name: 'Study Chat', exact: true }).count(),
           studioHeadings: await page.getByRole('heading', { name: 'Studio', exact: true }).count(),
-          audioHeadings: await page.getByRole('heading', { name: 'Audio Overview', exact: true }).count(),
-          scopedAudioHeadings: await page.getByTestId('audio-overview-studio-card').getByRole('heading', { name: 'Audio Overview', exact: true }).count(),
-          customizeButtons: await page.getByRole('button', { name: 'Customize audio', exact: true }).count(),
+          audioHeadings: await page.getByRole('heading', { name: 'Create a podcast', exact: true }).count(),
+          scopedAudioHeadings: await page.getByTestId('audio-overview-studio-card').getByRole('heading', { name: 'Create a podcast', exact: true }).count(),
+          customizeButtons: await page.getByRole('button', { name: 'Set up podcast', exact: true }).count(),
         };
       } catch { receipt.failureProbe = { unavailable: true }; }
     }

@@ -12,7 +12,7 @@ import {
   faClock,
   faKeyboard,
   faHourglassHalf,
-  faFlask,
+  faSliders,
 } from "@fortawesome/free-solid-svg-icons";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -23,6 +23,7 @@ import { buildPodcastEvidenceContext, DEEP_DIVE_EVIDENCE_BUDGET } from "@/lib/po
 import { recoverPodcastSources } from "@/lib/audio/recoverPodcastSources";
 import { selectUniquePodcastSection } from "@/lib/audio/podcastEvidencePlan";
 import { useToast } from "@/hooks/use-toast";
+import StudyGlyph from "./StudyGlyph";
 import TTSProviderSettings from "./TTSProviderSettings";
 import TTSSettingsDialog from "./TTSSettingsDialog";
 import {
@@ -892,7 +893,10 @@ const PodcastView: React.FC<PodcastViewProps> = ({ notebookId, onOpenSource }) =
         )}
         <section className="studypod-create" aria-labelledby="studypod-create-heading">
           <div className="studypod-audio-section-heading">
-            <h3 id="studypod-create-heading">Create a podcast</h3>
+            <div className="flex items-center gap-2">
+              <StudyGlyph kind="podcast" className="h-10 w-10 shrink-0" />
+              <h3 id="studypod-create-heading">Create a podcast</h3>
+            </div>
             <p>Turn passages from your notebook into a solo or two-host episode.</p>
             <p id="studypod-audio-source-scope" role="status" aria-live="polite">{sourceScopeMessage}</p>
           </div>
@@ -900,7 +904,7 @@ const PodcastView: React.FC<PodcastViewProps> = ({ notebookId, onOpenSource }) =
           <div id="studypod-audio-customize" className="audio-lab-overlay glassmorphism">
             <div className="audio-lab-header">
               <h4 ref={customizeHeadingRef} tabIndex={-1}>
-                <FontAwesomeIcon icon={faFlask} aria-hidden="true" /> Episode settings
+                <FontAwesomeIcon icon={faSliders} aria-hidden="true" /> Episode settings
               </h4>
               <button
                 type="button"
@@ -932,7 +936,7 @@ const PodcastView: React.FC<PodcastViewProps> = ({ notebookId, onOpenSource }) =
               ) : (
                 <>
                   <FontAwesomeIcon icon={faPlay} />
-                  Create audio overview
+                  Create podcast
                 </>
               )}
             </button>
@@ -1151,7 +1155,7 @@ const PodcastView: React.FC<PodcastViewProps> = ({ notebookId, onOpenSource }) =
             data-testid="btn-generate-podcast"
           >
             <FontAwesomeIcon icon={faPlay} />
-            Customize audio
+            Set up podcast
           </button>
         )}
 
@@ -1366,7 +1370,7 @@ const PodcastView: React.FC<PodcastViewProps> = ({ notebookId, onOpenSource }) =
         </div>
         <div className="player-footer">
           <button ref={customizeAudioRef} type="button" className="footer-btn" onClick={() => setShowAudioLab(true)} disabled={cannotCreateAudio || isStarting} aria-expanded={false} aria-controls="studypod-audio-customize" aria-describedby="studypod-audio-regenerate-scope">
-            <FontAwesomeIcon icon={faFlask} /> Customize audio
+            <FontAwesomeIcon icon={faSliders} /> Set up podcast
           </button>
           <button className="footer-btn" onClick={() => { void handleGenerate(); }} disabled={cannotCreateAudio || isStarting} aria-describedby="studypod-audio-regenerate-scope">
             <FontAwesomeIcon icon={faArrowsRotate} /> {finalAudioUrl === "webspeech_fallback" ? "Retry downloadable audio" : "Regenerate overview"}
