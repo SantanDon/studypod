@@ -12,12 +12,22 @@
  */
 
 import fetch from "node-fetch";
+import * as cheerio from "cheerio";
 import { logger } from "../utils/logger.js";
 
 const TWITTER_BEARER_TOKEN = process.env.TWITTER_BEARER_TOKEN || null;
 
-// URL regex that captures http/https links (excluding twitter.com self-links and t.co tracking)
-const URL_REGEX = /https?:\/\/(?!(?:twitter\.com|x\.com|t\.co))[^\s"'<>]+/g;
+const URL_REGEX = /https?:\/\/[^\s"'<>]+/gi;
+
+function isExternalTweetLink(value) {
+  try {
+    const url = new URL(value);
+    return ["http:", "https:"].includes(url.protocol) &&
+      !["twitter.com", "x.com", "t.co"].some(domain => url.hostname === domain || url.hostname.endsWith("." + domain));
+  } catch {
+    return false;
+  }
+}
 
 /**
  * Parse tweet ID from a twitter/x.com URL
@@ -53,24 +63,20 @@ async function fetchViaOEmbed(tweetId) {
 
   const data = await response.json();
 
-  // Strip HTML tags from the embed HTML to get clean text
-  const rawHtml = data.html || "";
-  const textContent = rawHtml
-    .replace(/<br\s*\/?>/gi, "\n")
-    .replace(/<a[^>]*href="(https?:\/\/[^"]+)"[^>]*>([^<]*)<\/a>/gi, "$2 [$1]")
-    .replace(/<[^>]+>/g, "")
-    .replace(/&amp;/g, "&")
-    .replace(/&lt;/g, "<")
-    .replace(/&gt;/g, ">")
-    .replace(/&quot;/g, '"')
-    .replace(/&#39;/g, "'")
-    .trim();
+  const $ = cheerio.load(data.html || "", {}, false);
+  $("script, style, template, noscript").remove();
+  $("br").replaceWith("\n");
+  $("a[href]").each((_, anchor) => {
+    const link = $(anchor);
+    const href = link.attr("href");
+    if (isExternalTweetLink(href)) link.text(link.text() + " [" + href + "]");
+  });
+  const textContent = $.root().text().trim();
 
   return {
     text: textContent,
     author: data.author_name || "Unknown",
     authorUrl: data.author_url || "",
-    embedHtml: rawHtml,
   };
 }
 
@@ -110,12 +116,8 @@ async function fetchViaTweetAPI(tweetId) {
 
     // Extract URLs from entities
     const entityUrls = (tweet.entities?.urls || [])
-      .filter(
-        (u) =>
-          !u.expanded_url.includes("twitter.com") &&
-          !u.expanded_url.includes("x.com"),
-      )
-      .map((u) => u.expanded_url);
+      .map((u) => u.expanded_url)
+      .filter(isExternalTweetLink);
 
     return {
       text: tweet.text,
@@ -168,13 +170,8 @@ async function fetchReplyLinks(tweetId) {
     const replyLinks = new Set();
     for (const reply of data.data) {
       const urls = (reply.entities?.urls || [])
-        .filter(
-          (u) =>
-            !u.expanded_url.includes("twitter.com") &&
-            !u.expanded_url.includes("x.com") &&
-            !u.expanded_url.includes("t.co"),
-        )
-        .map((u) => u.expanded_url);
+        .map((u) => u.expanded_url)
+        .filter(isExternalTweetLink);
       urls.forEach((u) => replyLinks.add(u));
     }
 
@@ -194,7 +191,7 @@ async function fetchReplyLinks(tweetId) {
 export function extractUrlsFromText(text) {
   const matches = text.match(URL_REGEX) || [];
   // Clean up trailing punctuation that gets caught
-  return [...new Set(matches.map((u) => u.replace(/[.,;:!?)\]"']+$/, "")))];
+  return [...new Set(matches.map((u) => u.replace(/[.,;:!?)\]"']+$/, "")).filter(isExternalTweetLink))];
 }
 
 /**
@@ -210,7 +207,7 @@ export function classifyUrl(url) {
     if (host === "reddit.com") return "reddit";
     if (host === "arxiv.org") return "arxiv";
     if (host === "medium.com" || u.pathname.includes("/p/")) return "article";
-    if (host === "substack.com" || u.hostname.includes(".substack.com"))
+    if (host === "substack.com" || host.endsWith(".substack.com"))
       return "article";
     if (host === "twitter.com" || host === "x.com") return "tweet";
     return "website";
@@ -268,9 +265,7 @@ export async function extractTweet(tweetUrl) {
   const textUrls = extractUrlsFromText(tweetText);
 
   // Combine entity URLs (from API) with text-extracted URLs, deduplicate
-  const bodyLinks = [...new Set([...entityUrls, ...textUrls])].filter(
-    (u) => !u.includes("twitter.com") && !u.includes("x.com"),
-  );
+  const bodyLinks = [...new Set([...entityUrls, ...textUrls])];
 
   // Mine reply threads for links (only with Bearer Token)
   const replyLinks = await fetchReplyLinks(tweetId);

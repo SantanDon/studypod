@@ -27,14 +27,12 @@ export const AuthProvider = ({ children }: AuthProviderProps) => {
   const [mfaToken, setMfaToken] = useState<string | null>(null);
   const authUserIdRef = useRef<string | null>(null);
 
+  const authRevision = useRef(0);
+
   const updateAuthState = useCallback(
     (newUser: LocalUser | null, newSession: LocalSession | null) => {
       if (authUserIdRef.current && authUserIdRef.current !== (newUser?.id ?? null)) clearPersonalProviderConnection();
       authUserIdRef.current = newUser?.id ?? null;
-      console.log(
-        "AuthContext: Updating auth state:",
-        newUser?.email || newUser?.displayName || "No user",
-      );
       setUser(newUser);
       setSession(newSession);
       setError((prev) => (newUser && prev ? null : prev));
@@ -73,7 +71,7 @@ export const AuthProvider = ({ children }: AuthProviderProps) => {
   };
 
   const signInWithCloud = (userData: { id: string; email?: string; displayName?: string; account_type?: string; createdAt: string }) => {
-    console.log("AuthContext: Cloud sign in successful", userData.displayName);
+    authRevision.current++;
     const { setUnlockedOnly } = useEncryptionStore.getState();
     
     try {
@@ -93,8 +91,7 @@ export const AuthProvider = ({ children }: AuthProviderProps) => {
         user: mappedUser
       };
 
-      localStorage.setItem("currentSession", JSON.stringify(mappedSession));
-      localStorageService.setCurrentUser(mappedUser);
+      localStorageService.clearLegacyIdentity();
       setUnlockedOnly(userData.id);
       updateAuthState(mappedUser, mappedSession);
       setMfaRequired(false);
@@ -128,32 +125,19 @@ export const AuthProvider = ({ children }: AuthProviderProps) => {
   };
 
   const signOut = useCallback(async () => {
-    clearPersonalProviderConnection();
-    try {
-      console.log("AuthContext: Starting logout process...");
-
-      // Call backend to clear cookies
-      await ApiService.signout().catch(err => console.warn("Signout request failed, continuing local clear", err));
-
-      // Clear local storage
-      localStorageService.setCurrentUser(null);
-      localStorage.removeItem("currentSession");
-
-      // Clear local state immediately
-      clearAuthState();
-
-      console.log("AuthContext: Logout successful");
-    } catch (err) {
-      console.error("AuthContext: Unexpected logout error:", err);
-      // ... same cleanup
-      localStorageService.setCurrentUser(null);
-      localStorage.removeItem("currentSession");
-      clearAuthState();
-    }
+    authRevision.current++;
+    localStorageService.clearLegacyIdentity();
+    clearAuthState();
+    setMfaRequired(false);
+    setMfaToken(null);
+    await ApiService.signout().catch(() => {
+      setError("This browser could not confirm sign out. Check your connection and try again.");
+    });
   }, [clearAuthState]);
 
   useEffect(() => {
     let mounted = true;
+    const revision = authRevision.current;
 
     const initializeAuth = async () => {
       try {
@@ -163,8 +147,9 @@ export const AuthProvider = ({ children }: AuthProviderProps) => {
         // This is safer than trusting localStorage
         try {
           const profileData = await ApiService.getUser("COOKIE_SESSION", { checkingInitialSession: true });
-          if (mounted && profileData.user) {
-            console.log("AuthContext: Verified session via cookie for", profileData.user.email);
+          if (!mounted || revision !== authRevision.current) return;
+          if (profileData.user) {
+            localStorageService.clearLegacyIdentity();
             
             const mappedUser: LocalUser = {
               id: profileData.user.id,
@@ -185,47 +170,25 @@ export const AuthProvider = ({ children }: AuthProviderProps) => {
             setLoading(false);
             return;
           }
-        } catch (authErr) {
-          if (!mounted) return;
-          if (authUserIdRef.current) {
-            setLoading(false);
-            return;
-          }
-          console.warn("AuthContext: No active cookie session or verification failed", authErr);
-          // If we had a cloud session stored, but verification failed, clear it!
-          const currentUser = localStorageService.getCurrentUser();
-          if (currentUser && currentUser.account_type !== 'guest') {
-            console.log("AuthContext: Clearing stale cloud session from localStorage");
-            localStorageService.setCurrentUser(null);
-            localStorage.removeItem("currentSession");
-          }
+        } catch {
+          if (!mounted || revision !== authRevision.current) return;
         }
 
-        // Fallback for Guest/Local only if no cookie session
-        const currentUser = localStorageService.getCurrentUser();
-        const sessionData = safeGetItem("currentSession");
-
-        if (currentUser && sessionData) {
-          try {
-            const session = safeParseJSON<LocalSession>(sessionData);
-            if (mounted) {
-              console.log("AuthContext: Found existing local/guest session:", currentUser.email);
-              updateAuthState(currentUser, session);
-            }
-          } catch (parseError) {
-            console.error("Error parsing local session data:", parseError);
-          }
-        }
-
-        if (mounted) {
-          setLoading(false);
+        const guest = localStorageService.getLegacyGuestUser();
+        const stored = safeParseJSON<LocalSession>(safeGetItem("currentSession"));
+        if (guest && stored?.user?.id === guest.id && stored.expires_at > Date.now()
+          && typeof stored.access_token === "string" && /^guest_[A-Za-z0-9_-]{12,128}$/.test(stored.access_token)) {
+          updateAuthState(guest, { user: guest, expires_at: stored.expires_at, access_token: stored.access_token });
+        } else {
+          localStorageService.clearLegacyIdentity();
         }
       } catch (err) {
         console.error("AuthContext: Auth initialization error:", err);
         if (mounted) {
           setError(err instanceof Error ? err.message : "Authentication error");
-          setLoading(false);
         }
+      } finally {
+        if (mounted) setLoading(false);
       }
     };
 

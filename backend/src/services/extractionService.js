@@ -122,7 +122,8 @@ export function extractHtmlContent(html, { isReddit = false } = {}) {
  * Phase 1: Cheerio. Fast, static HTML extraction.
  */
 async function extractWithCheerio(url) {
-  const isReddit = url.includes("reddit.com");
+  const { hostname } = new URL(url);
+  const isReddit = hostname === "reddit.com" || hostname.endsWith(".reddit.com");
 
   // Use a stable identity and broadly compatible response formats.
   const headers = {
@@ -319,7 +320,7 @@ async function extractGitHubRepo(url) {
       },
     );
     if (!treeResponse.ok) {
-      if (branch === "main" && !urlObj.pathname.includes("/tree/")) {
+      if (branch === "main" && pathParts[2] !== "tree") {
         logger.info(
           `[GitHub Extractor] Failed with branch 'main', trying 'master'...`,
         );
@@ -489,12 +490,11 @@ async function extractGitHubRepo(url) {
 
 export async function extractWebSource(url) {
   url = await assertSafeExternalHttpsUrl(url);
-  const logHost = new URL(url).hostname;
+  const { hostname: logHost, pathname } = new URL(url);
+  const route = pathname.split("/").filter(Boolean);
   const isGitHubRepo =
     (logHost === "github.com" || logHost === "www.github.com") &&
-    !url.includes("/raw/") &&
-    !url.includes("/blob/") &&
-    !url.includes("/releases/");
+    (route.length === 2 || (route[2] === "tree" && route.length >= 4));
   if (isGitHubRepo) {
     logger.info(
       `[Extraction] GitHub repository detected on ${logHost}. Initiating deep extraction...`,

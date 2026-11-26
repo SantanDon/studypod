@@ -68,9 +68,15 @@ export function detectDocumentType(
 
   // Check URL patterns
   if (metadata?.url) {
-    const url = metadata.url.toLowerCase();
-    if (url.includes('youtube.com') || url.includes('youtu.be')) return 'youtube';
-    if (url.startsWith('http')) return 'web';
+    try {
+      const { protocol, hostname } = new URL(metadata.url);
+      if (protocol === 'https:' || protocol === 'http:') {
+        if (hostname === 'youtube.com' || hostname.endsWith('.youtube.com') || hostname === 'youtu.be') return 'youtube';
+        return 'web';
+      }
+    } catch {
+      // Incomplete URL metadata can still be classified from the document content.
+    }
   }
 
   // Content-based detection

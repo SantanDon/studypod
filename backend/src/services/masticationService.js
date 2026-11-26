@@ -2,7 +2,7 @@ import { dbHelpers } from "../db/database.js";
 import { dispatchToTitan } from "./titanProvider.js";
 import { logger } from "../utils/logger.js";
 import { v4 as uuidv4 } from "uuid";
-import fetch from "node-fetch";
+import { fetchPublicUrl } from "./extractionService.js";
 import * as cheerio from "cheerio";
 
 /**
@@ -32,15 +32,15 @@ async function discoverSuggestedSources(content, notebookId, userId) {
     try {
       const parsed = new URL(url);
       if (
-        parsed.hostname.includes("google.com") ||
-        parsed.hostname.includes("youtube.com") ||
-        parsed.hostname.includes("localhost")
+        ["google.com", "youtube.com", "localhost"].some(domain =>
+          parsed.hostname === domain || parsed.hostname.endsWith("." + domain)
+        )
       ) {
         continue;
       }
       title = `${parsed.hostname}${parsed.pathname.substring(0, 15)}`;
 
-      const res = await fetch(url, {
+      const res = await fetchPublicUrl(url, {
         headers: { "User-Agent": "Mozilla/5.0" },
         timeout: 3000,
       });

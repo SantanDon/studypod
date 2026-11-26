@@ -46,9 +46,7 @@ async function processSingleTweet(tweetInput, notebookId, userId) {
   let tweetData;
   if (tweetInput && typeof tweetInput === 'object' && tweetInput.text && tweetInput.author) {
     logger.info(`[DeepDive] Using pre-parsed tweet data for ${tweetUrl}`);
-    const bodyLinks = extractUrlsFromText(tweetInput.text).filter(
-      u => !u.includes('twitter.com') && !u.includes('x.com')
-    );
+    const bodyLinks = extractUrlsFromText(tweetInput.text);
     const classifiedLinks = bodyLinks.map(url => ({
       url,
       type: classifyUrl(url)

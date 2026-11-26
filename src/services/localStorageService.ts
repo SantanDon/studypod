@@ -141,7 +141,8 @@ class LocalStorageService {
   private getFromStorage<T>(key: string): T[] {
     try {
       const data = storageManager.safeGetItem(key);
-      return data ? JSON.parse(data) : [];
+      const records = data ? JSON.parse(data) : [];
+      return Array.isArray(records) ? records : [];
     } catch {
       return [];
     }
@@ -279,16 +280,22 @@ class LocalStorageService {
   }
 
   // User and Session Management
-  getCurrentUser(): LocalUser | null {
-    const user = localStorage.getItem("currentUser");
-    return user ? JSON.parse(user) : null;
+  getLegacyGuestUser(): LocalUser | null {
+    try {
+      const user = JSON.parse(localStorage.getItem("currentUser") || "null");
+      return user?.account_type === "guest" && typeof user.id === "string" && user.id
+        ? user : null;
+    } catch {
+      return null;
+    }
   }
 
-  setCurrentUser(user: LocalUser | null): void {
-    if (user) {
-      localStorage.setItem("currentUser", JSON.stringify(user));
-    } else {
+  clearLegacyIdentity(): void {
+    try {
       localStorage.removeItem("currentUser");
+      localStorage.removeItem("currentSession");
+    } catch {
+      // Browsers may disable storage. Cloud authentication still uses its cookie.
     }
   }
 
@@ -653,7 +660,6 @@ class LocalStorageService {
       sources: this.getFromStorage<LocalSource>("sources"),
       notes: this.getFromStorage<LocalNote>("notes"),
       chat_messages: this.getFromStorage<LocalChatMessage>("chat_messages"),
-      currentUser: this.getCurrentUser(),
       _metadata: {
         exportedAt: new Date().toISOString(),
         storageStats: {
@@ -689,7 +695,6 @@ class LocalStorageService {
       if (data.notes) this.saveToStorage("notes", data.notes);
       if (data.chat_messages)
         this.saveToStorage("chat_messages", data.chat_messages);
-      if (data.currentUser) this.setCurrentUser(data.currentUser);
     } catch (error) {
       console.error("Failed to import data:", error);
       throw error instanceof Error ? error : new Error("Invalid data format");
