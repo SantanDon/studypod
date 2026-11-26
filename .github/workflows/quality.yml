@@ -70,10 +70,11 @@ jobs:
         run: npm run test:e2e
 
       - name: Real isolated authenticated desktop and mobile gate
+        id: auth_local
         run: npm run test:auth:local
 
       - name: Preserve sanitized authenticated receipts
-        if: always()
+        if: always() && (steps.auth_local.outcome == 'success' || steps.auth_local.outcome == 'failure')
         uses: actions/upload-artifact@v4
         with:
           include-hidden-files: true

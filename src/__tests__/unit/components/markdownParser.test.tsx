@@ -125,7 +125,7 @@ describe('processMarkdownWithCitations', () => {
     const onCitationClick = vi.fn();
     const elements = processMarkdownWithCitations([{ text: '- A supported point', citation_id: 8 }], [citation], onCitationClick);
     const { getByRole } = render(<>{elements}</>);
-    fireEvent.click(getByRole('button', { name: '4' }));
+    fireEvent.click(getByRole('button', { name: 'Citation 4, open source passage' }));
     expect(onCitationClick).toHaveBeenCalledWith(citation);
   });
 
