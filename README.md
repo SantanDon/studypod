@@ -28,44 +28,23 @@ StudyPod lets you ask questions about your sources, check the passage behind an 
 
 ---
 
-## 🌟 The Vision: Collaborative Memory Loop
+## How a notebook works
 
-Traditionally, AI assistants operate in transient chat sessions. Once closed, the context is lost. **StudyPodLM** turns human-agent collaboration into a permanent relationship by storing all findings, notes, and agent research inside a shared, semantic knowledge bank.
+Study Chat uses the selected notebook sources to answer questions. A citation opens the supporting passage. Studio uses the same material to make a podcast or narrate a chapter. In the hosted app, keep the tab open during recording.
 
 ```mermaid
-graph LR
-    Human["👤 Human User"] <-->|React Workspace| UI["StudyPodLM Web Interface"]
-    Agent["🤖 CLI Agent"] <-->|REST API + Scoped API Key| API["Express API Server"]
-    UI <-->|REST Endpoint / Real-time Sync| API
-    
-    subgraph Collaborative Core
-        API --> Memory["Memory Sync Engine"]
-        API --> Audio["Podcast Builder Kokoro TTS"]
-    end
-    
-    subgraph Persistent Storage
-        LocalDB["SQLite Local DB"]
-        VectorDB["Local Vector Embeddings"]
-        Memory --> LocalDB
-        Memory --> VectorDB
-    end
+flowchart LR
+    Reader["Reader"] --> UI["StudyPod in the browser"]
+    Agent["Paired agent"] -->|Scoped key| API["StudyPod API"]
+    UI -->|Signed-in session| API
+    API --> Store["Notebook sources, notes and chat history"]
+    UI --> Voice["Browser audio generation"]
+    Voice -->|Save recording| API
 ```
 
-> [!IMPORTANT]
-> **Human-Agent Provenance:** StudyPodLM clearly distinguishes between human edits and agent-sourced research notes. This preserves authorship, builds trust, and allows external agent workflows to supplement human studies asynchronously.
+## Working with an agent
 
----
-
-## 🚀 Key Highlights
-
-| Feature | For Humans | For Autonomous Agents |
-| :--- | :--- | :--- |
-| **Workspace Sync** | 📚 Read files, capture notes, compile resources | 🤖 Fetch real-time notebook snapshots and read sources |
-| **Audio Overviews** | 🎧 Generate multi-speaker podcasts via Kokoro TTS | 📻 Schedule podcast generation runs asynchronously |
-| **Interactive Study** | 🧩 Take flashcards & quizzes derived from your context | 🧠 Populate notes and study material from agent findings |
-| **Decentralized Auth** | 🔑 Key Pair and Scoped Identity Primitives | 🛰️ Exchange pairing PINs for scoped API keys |
-
----
+Open **Profile → Agent Pairing** to create a short-lived pairing code. A paired agent can read permitted notebook sources, ask questions, or save a note when its permissions allow it. You can restrict access to one notebook. The [MCP setup guide](mcp-server/README.md) walks through a first question and how to check which account is connected.
 
 ## 📂 Project Architecture
 

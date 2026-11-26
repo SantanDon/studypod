@@ -1766,22 +1766,12 @@ router.post("/:id/chat", requireScope("chat:all"), withPersonalProvider, async (
     }
 
     if (interceptedResponse) {
-      await dbHelpers.createChatMessage(
-        userMsgId,
-        notebookId,
-        userId,
-        callerIsAgent ? "agent" : "user",
-        message,
-      );
       const aiMsgId = uuidv4();
-      await dbHelpers.createChatMessage(
-        aiMsgId,
-        notebookId,
-        userId,
-        "assistant",
-        interceptedResponse,
-        null,
-      );
+      await dbHelpers.createChatTurn(notebookId, userId, {
+        questionId: userMsgId, answerId: aiMsgId,
+        role: callerIsAgent ? "agent" : "user", question: message,
+        answer: interceptedResponse, groundedSources: null,
+      });
 
       let noteId = null;
       if (saveAsNote) {
@@ -1832,22 +1822,12 @@ router.post("/:id/chat", requireScope("chat:all"), withPersonalProvider, async (
       }));
 
       // Persist the complete turn only after a response was generated.
-      await dbHelpers.createChatMessage(
-        userMsgId,
-        notebookId,
-        userId,
-        callerIsAgent ? "agent" : "user",
-        message,
-      );
       const aiMsgId = uuidv4();
-      await dbHelpers.createChatMessage(
-        aiMsgId,
-        notebookId,
-        userId,
-        "assistant",
-        chatResult.answer,
-        { version: 1, sourceIds: chatResult.groundedSources || [], citations: chatResult.citations || [] },
-      );
+      await dbHelpers.createChatTurn(notebookId, userId, {
+        questionId: userMsgId, answerId: aiMsgId,
+        role: callerIsAgent ? "agent" : "user", question: message,
+        answer: chatResult.answer, groundedSources: { version: 1, sourceIds: chatResult.groundedSources || [], citations: chatResult.citations || [] },
+      });
 
       let noteId = null;
       // Optionally save the interaction as a persistent note

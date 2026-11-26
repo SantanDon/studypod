@@ -7,12 +7,12 @@ import type { TTSWorkerManager } from "@/lib/tts/ttsWorker";
 import StudyGlyph from "./StudyGlyph";
 
 // Keep each inference short enough to run in a typical browser. Never omit a word.
-function narrationParts(content: string): string[] {
+function narrationParts(content: string, limit = 650): string[] {
   const words = content.match(/\S+/gu) || [];
   const parts: string[] = [];
   let part = "";
   for (const word of words) {
-    if (part && part.length + word.length + 1 > 650) {
+    if (part && part.length + word.length + 1 > limit) {
       parts.push(part);
       part = "";
     }
@@ -123,9 +123,22 @@ export default function HostedChapterReader({ notebookId, sources, token }: Prop
         if (!active()) return;
         setDownloadAmount("");
         setStatus("Reading this passage aloud…");
-        const speech = await voice.synthesize(passage, "af_heart", 1);
-        URL.revokeObjectURL(speech.audioUrl);
-        if (!active()) return;
+        const chunks = narrationParts(passage, 150);
+        const audioChunks: Blob[] = [];
+        for (const [index, chunk] of chunks.entries()) {
+          if (chunks.length > 1) setStatus('Reading passage section ' + (index + 1) + ' of ' + chunks.length + '…');
+          const speech = await voice.synthesize(chunk, "af_heart", 1);
+          URL.revokeObjectURL(speech.audioUrl);
+          if (!active()) return;
+          audioChunks.push(speech.audioBlob);
+        }
+        let recording = audioChunks[0];
+        if (audioChunks.length > 1) {
+          const { concatenatePcmWav } = await import("@/lib/tts/pcmWav");
+          const wavParts = await Promise.all(audioChunks.map(async blob => ({ buffer: await blob.arrayBuffer() })));
+          if (!active()) return;
+          recording = new Blob([concatenatePcmWav(wavParts)], { type: "audio/wav" });
+        }
         canCancel.current = false;
         setCancellable(false);
         setStatus("Saving this chapter to your notebook…");
@@ -133,7 +146,7 @@ export default function HostedChapterReader({ notebookId, sources, token }: Prop
         const id = stableIds.current.get(key) || crypto.randomUUID();
         stableIds.current.set(key, id);
         record = await api.save({
-          id, title, blob: speech.audioBlob, sourceIds: [source.id],
+          id, title, blob: recording, sourceIds: [source.id],
           script: { title, recordingKind: "audiobook-chapter", segments: [{ speaker: "Narrator", text: passage }] },
         });
         if (!active()) return;

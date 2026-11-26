@@ -15,7 +15,7 @@ const mocks = vi.hoisted(() => ({
     getSourcesByNotebookId: vi.fn(),
     getNotesByNotebookId: vi.fn().mockResolvedValue([]),
     getChatMessagesByNotebookId: vi.fn().mockResolvedValue([]),
-    createChatMessage: vi.fn(),
+    createChatTurn: vi.fn(),
   },
 }));
 vi.mock("../db/database.js", () => ({ dbHelpers: mocks.db }));
@@ -38,8 +38,11 @@ describe("standalone chat during a provider outage", () => {
     expect(res.json).toHaveBeenCalledWith(expect.objectContaining({ groundedSources: ["inventory"], sourceScope: ["inventory"] }));
     const citation = res.json.mock.calls[0][0].citations[0];
     expect(citation).toMatchObject({ source_id: "inventory", excerpt: quote, chunk_lines_from: 4, chunk_lines_to: 4 });
-    expect(mocks.db.createChatMessage).toHaveBeenCalledTimes(2);
-    expect(mocks.db.createChatMessage.mock.calls[1][5]).toEqual({ version: 1, sourceIds: ["inventory"], citations: [citation] });
+    expect(mocks.db.createChatTurn).toHaveBeenCalledTimes(1);
+    expect(mocks.db.createChatTurn).toHaveBeenCalledWith("book", "owner", expect.objectContaining({
+      role: "user", question, answer: res.json.mock.calls[0][0].answer,
+      groundedSources: { version: 1, sourceIds: ["inventory"], citations: [citation] },
+    }));
   });
   it("discloses the outage and returns one exact source line with persisted citation fields", () => {
     const result = recoverStandalonePassage(error, question, [source]);

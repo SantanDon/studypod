@@ -58,18 +58,15 @@ Once connected, just say:
 
 ## Available Tools
 
-| Tool                | Description                |
-| ------------------- | -------------------------- |
-| `list_notebooks`    | List all notebooks         |
-| `get_notebook`      | Get notebook details by ID |
-| `list_sources`      | List sources in a notebook |
-| `list_notes`        | List notes in a notebook   |
-| `create_note`       | Create a new note          |
-| `get_note`          | Read a specific note       |
-| `delete_note`       | Delete a note              |
-| `list_chat_history` | Get chat messages          |
-| `create_notebook`   | Create a new notebook      |
-
+| What you want to do | Tools |
+| --- | --- |
+| Connect and confirm the account | `pair`, `whoami` |
+| Find or create a notebook | `list_notebooks`, `get_notebook`, `create_notebook` |
+| Inspect a notebook and its sources | `notebook_context`, `list_sources` |
+| Ask about sources or read past questions | `chat`, `list_chat_history` |
+| Search notebook memory | `memory_search` |
+| Import study material | `add_source_from_text`, `add_source_from_url`, `add_source_from_arxiv`, `add_source_from_github` |
+| Read or edit notes | `list_notes`, `get_note`, `create_note`, `update_note`, `delete_note` |
 
 ## First notebook question
 

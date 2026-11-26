@@ -13,6 +13,7 @@ import { logger } from "../utils/logger.js";
 import { recoverNotebookIfAbsent } from "./notebookRecovery.js";
 import { createSingleFlight } from "../utils/singleFlight.js";
 import { withDatabaseRetry } from "../utils/databaseRetry.js";
+import { insertChatTurn } from "./insertChatTurn.js";
 import { sortChatMessages } from "../utils/chatMessageOrdering.js";
 
 const __filename = fileURLToPath(import.meta.url);
@@ -1033,6 +1034,12 @@ export const dbHelpers = {
     return await db
       .delete(schema.chatMessages)
       .where(eq(schema.chatMessages.notebookId, notebookId));
+  },
+
+  async createChatTurn(notebookId, userId, turn) {
+    const access = await this.getNotebookById(notebookId, userId);
+    if (!access) throw new Error("ACCESS_DENIED");
+    return insertChatTurn(await getDatabase(), notebookId, userId, turn);
   },
 
   async createChatMessage(
