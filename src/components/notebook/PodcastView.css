@@ -1636,7 +1636,7 @@
 .light .audio-lab-overlay [data-slot="tabs-trigger"],
 :root:not(.dark) .audio-lab-overlay [role="tab"],
 .light .audio-lab-overlay [role="tab"] {
-  color: #64748b !important;
+  color: #334155 !important;
 }
 
 :root:not(.dark) .audio-lab-overlay [data-slot="tabs-trigger"][data-state="active"],

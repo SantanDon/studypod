@@ -44,6 +44,35 @@ describe('podcast authenticated HTTP boundary', () => {
     expect(await dispatch(router, { method: 'POST', token: session(), headers: { 'content-type': 'multipart/form-data; boundary=deliberately-invalid' } })).toEqual({ status: 404, body: { error: 'Podcast not found or access denied.', code: 'PODCAST_NOT_FOUND' } });
     expect(assertOwner).toHaveBeenCalledWith('book', 'owner'); expect(create).not.toHaveBeenCalled();
   });
+  it('denies foreign notebook reads, downloads, and chunked saves before their handlers', async () => {
+    const assertOwner = vi.fn().mockRejectedValue(Object.assign(new Error('Not found'), { code: 'PODCAST_NOT_FOUND' }));
+    const repository = { assertOwner, list: vi.fn(), get: vi.fn(), create: vi.fn() };
+    const transfers = { start: vi.fn(), put: vi.fn(), complete: vi.fn(), read: vi.fn(), audio: vi.fn() };
+    const router = createPodcastRouter(repository, transfers);
+    for (const [method, url] of [
+      ['GET', '/book/studio/podcasts?kind=audiobook-chapter'],
+      ['GET', '/book/studio/podcasts/episode'],
+      ['GET', '/book/studio/podcasts/episode/audio'],
+      ['GET', '/book/studio/podcasts/episode/audio/chunks/0'],
+      ['POST', '/book/studio/podcasts/uploads'],
+      ['PUT', '/book/studio/podcasts/uploads/upload/chunks/0'],
+      ['POST', '/book/studio/podcasts'],
+    ]) {
+      expect((await dispatch(router, { method, url, token: session() })).status).toBe(404);
+    }
+    expect(assertOwner).toHaveBeenCalledTimes(7);
+    for (const fn of [...Object.values(repository).slice(1), ...Object.values(transfers)]) expect(fn).not.toHaveBeenCalled();
+  });
+  it('rejects absent and non-session credentials on chapter metadata and audio reads', async () => {
+    const assertOwner = vi.fn();
+    const router = createPodcastRouter({ assertOwner }, {});
+    for (const url of ['/book/studio/podcasts/episode', '/book/studio/podcasts/episode/audio/chunks/0']) {
+      for (const token of [undefined, 'guest_abcdefghijklmnop', session({ type: 'refresh' })]) {
+        expect((await dispatch(router, { url, token })).status).toBe(token ? 403 : 401);
+      }
+    }
+    expect(assertOwner).not.toHaveBeenCalled();
+  });
   it('uses cookie identity for list, metadata, private audio and delete', async () => {
     const record = { id: 'episode', persistence: 'account' }, bytes = Buffer.from('validated by repository');
     const repository = { assertOwner: vi.fn().mockResolvedValue(undefined), list: vi.fn().mockResolvedValue([record]), get: vi.fn().mockResolvedValue(record), audio: vi.fn().mockResolvedValue({ bytes, hash: 'verified-hash' }), delete: vi.fn().mockResolvedValue({ success: true }) };

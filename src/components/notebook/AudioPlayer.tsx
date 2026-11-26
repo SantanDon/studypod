@@ -103,7 +103,7 @@ const AudioPlayer = ({
         </div>
         <DropdownMenu>
           <DropdownMenuTrigger asChild>
-            <Button variant="ghost" size="sm" disabled={isDeleting} aria-label={`${title} audio options`}>
+            <Button variant="ghost" size="sm" className="min-h-11 min-w-11" disabled={isDeleting} aria-label={`${title} audio options`}>
               {isDeleting ? (
                 <Loader2 className="h-4 w-4 animate-spin" />
               ) : (
@@ -112,7 +112,7 @@ const AudioPlayer = ({
             </Button>
           </DropdownMenuTrigger>
           <DropdownMenuContent align="end">
-            <DropdownMenuItem onClick={downloadAudio} disabled={isDownloading}>
+            <DropdownMenuItem className="min-h-11" onClick={downloadAudio} disabled={isDownloading}>
               {isDownloading ? (
                 <Loader2 className="h-4 w-4 mr-2 animate-spin" />
               ) : (
@@ -123,7 +123,7 @@ const AudioPlayer = ({
             {allowDelete && (
               <DropdownMenuItem
                 onClick={deleteAudio}
-                className="text-red-600 focus:text-red-600"
+                className="min-h-11 text-red-600 focus:text-red-600"
                 disabled={isDeleting}
               >
                 <Trash2 className="h-4 w-4 mr-2" />
@@ -157,7 +157,7 @@ const AudioPlayer = ({
             variant="outline"
             size="sm"
             onClick={onRetry || retryLoad}
-            className="text-red-600 border-red-300 hover:bg-red-50"
+            className="min-h-11 text-red-600 border-red-300 hover:bg-red-50"
           >
             <RefreshCw className="h-4 w-4 mr-1" />
             Retry
@@ -172,7 +172,7 @@ const AudioPlayer = ({
           max={duration || 100}
           step={1}
           onValueChange={handleSeek}
-          className="w-full"
+          className="min-h-11 w-full"
           disabled={loading || !!audioError}
           aria-label={`${title} playback position`}
         />
@@ -183,11 +183,12 @@ const AudioPlayer = ({
       </div>
 
       {/* Controls */}
-      <div className="flex items-center justify-between">
+      <div className="flex flex-wrap items-center justify-between gap-x-3">
         <div className="flex items-center space-x-2">
           <Button
             variant="ghost"
             size="sm"
+            className="min-h-11 min-w-11"
             onClick={restart}
             disabled={loading || !!audioError}
             aria-label="Restart from the beginning"
@@ -200,7 +201,7 @@ const AudioPlayer = ({
             size="sm"
             onClick={togglePlayPause}
             disabled={loading || !!audioError}
-            className="w-12"
+            className="min-h-11 w-12"
             aria-label={isPlaying ? "Pause" : "Play"}
           >
             {loading ? (
@@ -217,7 +218,8 @@ const AudioPlayer = ({
               <Button
                 variant="ghost"
                 size="sm"
-                className="w-16 px-1 text-xs font-mono"
+                aria-description="Change playback speed" title="Playback speed"
+                className="min-h-11 w-16 px-1 text-xs font-mono"
               >
                 {playbackRate}x
               </Button>
@@ -227,7 +229,7 @@ const AudioPlayer = ({
                 <DropdownMenuItem
                   key={rate}
                   onClick={() => handlePlaybackRateChange(rate)}
-                  className={playbackRate === rate ? "bg-accent" : ""}
+                  className={playbackRate === rate ? "min-h-11 bg-accent" : "min-h-11"}
                 >
                   {rate}x
                 </DropdownMenuItem>
@@ -244,7 +246,7 @@ const AudioPlayer = ({
             max={1}
             step={0.1}
             onValueChange={handleVolumeChange}
-            className="flex-1"
+            className="min-h-11 flex-1"
             aria-label="Volume"
           />
         </div>

@@ -16,7 +16,7 @@ import {
 } from "@fortawesome/free-solid-svg-icons";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { useSources } from "@/hooks/useSources";
 import { generatePodcastScript, type PodcastScript } from "@/lib/podcastGenerator";
 import { buildPodcastEvidenceContext, DEEP_DIVE_EVIDENCE_BUDGET } from "@/lib/podcastGenerator";
@@ -945,6 +945,8 @@ const PodcastView: React.FC<PodcastViewProps> = ({ notebookId, onOpenSource }) =
                   <TabsTrigger value="dialogue">Two hosts</TabsTrigger>
                   <TabsTrigger value="solo">Solo</TabsTrigger>
                 </TabsList>
+                <TabsContent value="dialogue" className="lab-hint">Two voices discuss the selected passages.</TabsContent>
+                <TabsContent value="solo" className="lab-hint">One narrator guides you through the selected passages.</TabsContent>
               </Tabs>
             </div>
 
@@ -986,15 +988,10 @@ const PodcastView: React.FC<PodcastViewProps> = ({ notebookId, onOpenSource }) =
                   <TabsTrigger value="standard">Standard</TabsTrigger>
                   <TabsTrigger value="deep-dive">Deep Dive</TabsTrigger>
                 </TabsList>
+                <TabsContent value="brief" className="lab-hint">Fewer complete passages from your sources.</TabsContent>
+                <TabsContent value="standard" className="lab-hint">A standard selection of complete passages. Length depends on your sources.</TabsContent>
+                <TabsContent value="deep-dive" className="lab-hint">Explores the main ideas, reasoning, examples and limitations across your selected text. Substantial chapters aim for about 20–30 minutes.</TabsContent>
               </Tabs>
-              <p className="lab-hint">
-                {podcastType === "brief" &&
-                  "Fewer complete passages from your sources."}
-                {podcastType === "standard" &&
-                  "A standard selection of complete passages. Length depends on your sources."}
-                {podcastType === "deep-dive" &&
-                  "Explores the main ideas, reasoning, examples and limitations across your selected text. Substantial chapters aim for about 20â€“30 minutes; shorter sources stay concise, without filler."}
-              </p>
             </div>
 
             <details className="audio-voice-disclosure">
