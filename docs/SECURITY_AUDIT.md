@@ -1,6 +1,23 @@
 # StudyPod Security Audit
 
-**Last updated:** 2026-08-03
+## CodeQL review, November 26, 2026
+
+GitHub reported six open alerts for the [reviewed revision](https://github.com/SantanDon/studypod/commit/b199f16b92796a6eee15c6c2bc0b3afd92a9efc7) on the hosted-audio review branch. The table records the affected paths, controls exercised locally, and limits of those checks. All six alerts remained open at that revision.
+
+| Alert and location | Control and regression coverage | Remaining exposure or assumption |
+|---|---|---|
+| [28](https://github.com/SantanDon/studypod/security/code-scanning/28) · resource exhaustion · `personalProviderService.js` | The personal provider has a fixed base URL. Its deadline defaults to 30 seconds and is bounded to 1–60 seconds. Cancellation stays active while reading the reply. [Deadline tests](../backend/src/__tests__/providerDeadlineBounds.test.js) | Concurrent requests can each consume their own allowance. |
+| [29](https://github.com/SantanDon/studypod/security/code-scanning/29) · resource exhaustion · `titanProvider.js` | Retries, waits and response reads share a maximum 55-second dispatch budget. The JSON reader limits decoded responses to 2 MiB and bounds error reads. [Deadline tests](../backend/src/__tests__/providerDeadlineBounds.test.js) · [Response tests](../backend/src/__tests__/providerResponse.test.js) | The per-dispatch bounds do not measure deployment-wide memory use or provider capacity under load. |
+| [87](https://github.com/SantanDon/studypod/security/code-scanning/87) · request forgery · `extractionService.js` | The importer accepts public HTTPS on port 443, rejects credentials and nonpublic addresses, checks all DNS answers, and pins the approved addresses for the connection. Each redirect is revalidated. The importer limits redirects to four and decoded content to 8 MiB. Its deadline includes DNS resolution. [URL checks](../backend/src/__tests__/externalUrlSafety.test.js) · [Destination tests](../backend/src/__tests__/extractionProviderDestinations.test.js) | An OS resolver operation can finish after the application stops waiting. Hosting egress and proxy configuration require independent verification. |
+| [88](https://github.com/SantanDon/studypod/security/code-scanning/88) · missing token validation · `server.js` | The browser-write guard runs after cookie parsing and before protected routes. For cookie-backed writes and session changes it checks Origin or Referer, then Fetch Metadata. When browser origin signals are absent it requires JSON or the XHR header. [Browser-write tests](../backend/src/__tests__/browserWrites.test.js) | This relies on correct trusted origins, proxy settings, browser preflight enforcement and read-only safe HTTP methods. |
+| [89](https://github.com/SantanDon/studypod/security/code-scanning/89) · missing token validation · `authRoutes.test.js` | The loopback auth test server installs the browser-write guard before the auth router. [Auth route tests](../backend/src/__tests__/authRoutes.test.js) | This test harness does not exercise the production reverse proxy. |
+| [90](https://github.com/SantanDon/studypod/security/code-scanning/90) · missing token validation · `documentAgentCompatibility.test.js` | The loopback document test server installs the same guard. Its cases exercise scoped agent access through the document routes. [Document access tests](../backend/src/__tests__/documentAgentCompatibility.test.js) | These agent cases cover the tested scopes and routes. Browser-origin coverage lives in the separate browser-write suite. |
+
+When the provider budgets, importer, middleware order, trusted origins or proxy settings change, rerun the linked suites and check the [branch alert list](https://github.com/SantanDon/studypod/security/code-scanning?query=is%3Aopen+branch%3Acodex%2Fhosted-audio-review-20261126) against the new revision. Record changes in alert status separately from passing regression tests.
+
+## August 2026 release record
+
+**Historical assessment date:** 2026-08-03
 **Release:** Agent Missions, MCP/OAuth, grounded study workflows, document workspace, podcast hardening, and Audiobook Studio v2
 **Scope:** `backend/`, `src/`, `api/`, `mcp-server/`, deployment configuration, and production dependencies
 
@@ -62,6 +79,6 @@ This release passed the complete automated, browser, API, storage, and deploymen
 4. Never commit environment files, generated uploads, databases, local model caches, audio outputs, Vercel state, or QA artifacts.
 5. Rotate signing secrets and provider credentials after any suspected exposure and remove compatibility aliases once migrations are complete.
 
-## Review branch update, November 26, 2026
+## Earlier review of PDF attachment names
 
-CodeQL alert #84 flags separator normalization in PDF.js 5.4.394 when it reads an embedded attachment filename. The checked-in worker matches the installed upstream worker byte for byte (SHA-256 `cee92175925a2a7a43f3450a99e583fcbecc2685509e1dc270a03a186861592f`). StudyPod's extractor loads the package worker and reads page text. A source search found no call to `getAttachments()` in the frontend or backend. The review found no filesystem write from this filename. The alert remains open. Revisit this path before adding PDF attachment downloads or server-side attachment extraction.
+The earlier review of CodeQL alert #84 traced separator normalization in PDF.js 5.4.394 to embedded attachment filenames. At that review the checked-in worker matched the installed upstream worker byte for byte (SHA-256 `cee92175925a2a7a43f3450a99e583fcbecc2685509e1dc270a03a186861592f`). StudyPod's extractor read page text. The review found no frontend or backend call to `getAttachments()` and no filesystem write from the filename. Alert #84 was absent from the six open alerts at the November revision above. Revisit this path before adding PDF attachment downloads or server-side attachment extraction.

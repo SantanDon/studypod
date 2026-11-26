@@ -1643,9 +1643,19 @@
 .light .audio-lab-overlay [data-slot="tabs-trigger"][data-state="active"],
 :root:not(.dark) .audio-lab-overlay [role="tab"][data-state="active"],
 .light .audio-lab-overlay [role="tab"][data-state="active"] {
-  background-color: #ffffff !important;
-  color: hsl(var(--primary)) !important;
+  background-color: #303d86 !important;
+  color: #ffffff !important;
   box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1) !important;
+}
+
+.podcast-settings-dialog [role="tab"][data-state="active"] {
+  text-decoration: underline;
+  text-underline-offset: 0.23em;
+}
+
+.podcast-settings-dialog .podcast-settings-footer [role="status"] {
+  margin: 0 0 0.5rem;
+  font-size: 0.875rem;
 }
 
 

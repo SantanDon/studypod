@@ -255,6 +255,8 @@ describe('customizing another saved overview', () => {
         fireEvent.click(screen.getByRole('button', { name: 'Cancel preparation' }));
         await waitFor(() => expect(mock.script.mock.calls[0][1].signal.aborted).toBe(true));
         await waitFor(() => expect(screen.queryByRole('button', { name: 'Cancel preparation' })).toBeNull());
+        expect(screen.getByText('Podcast cancelled. Your settings are ready for another try.')).toBeVisible();
+        expect(screen.getByRole('button', { name: 'Create podcast' })).toBeEnabled();
         expect(mock.start).not.toHaveBeenCalled();
         expect(mock.toast.mock.calls.some(([message]) => message.title === 'Generation Failed')).toBe(false);
     });

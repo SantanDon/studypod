@@ -2,7 +2,8 @@ import React, { useRef } from 'react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { useToast } from '@/hooks/use-toast';
-import { Loader2, Send } from 'lucide-react';
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from '@/components/ui/dropdown-menu';
+import { ChevronUp, Loader2, Send } from 'lucide-react';
 
 /**
  * ChatInput Component
@@ -142,7 +143,24 @@ const ChatInput: React.FC<ChatInputProps> = ({
         </div>
 
         {shouldShowExamples && (
-          <section aria-label="Suggested learning questions" className="mt-3 flex max-h-32 flex-wrap gap-2 overflow-y-auto p-1">
+          <>
+          <div className="mt-1 sm:hidden">
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <Button type="button" variant="ghost" size="sm" className="min-h-11 gap-2">
+                  Suggested questions <ChevronUp className="size-4" aria-hidden="true" />
+                </Button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent side="top" align="start" collisionPadding={12} aria-label="Suggested questions" className="max-h-[var(--radix-dropdown-menu-content-available-height)] w-[min(22rem,calc(100vw-2rem))] overflow-y-auto">
+                {exampleQuestions.map((question) => (
+                  <DropdownMenuItem key={question} className="min-h-11 break-words" onSelect={() => onExampleQuestionClick?.(question)}>
+                    {getExampleQuestionLabel(question)}
+                  </DropdownMenuItem>
+                ))}
+              </DropdownMenuContent>
+            </DropdownMenu>
+          </div>
+          <section aria-label="Suggested learning questions" className="mt-3 hidden max-h-32 flex-wrap gap-2 overflow-y-auto p-1 sm:flex">
             {exampleQuestions.map((question) => (
               <Button
                 key={question}
@@ -157,6 +175,7 @@ const ChatInput: React.FC<ChatInputProps> = ({
               </Button>
             ))}
           </section>
+          </>
         )}
       </div>
     </div>

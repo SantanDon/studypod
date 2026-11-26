@@ -114,6 +114,15 @@ describe('ChatInput Component', () => {
     expect(input).toBeDisabled();
   });
 
+  it('opens every mobile suggestion with the keyboard and sends the selected question', async () => {
+    const user = userEvent.setup();
+    const questions = ['Which source?', 'Why this source?', 'What is the evidence?'];
+    render(<ChatInput {...defaultProps} exampleQuestions={questions} />);
+    screen.getByRole('button', { name: 'Suggested questions' }).focus();
+    await user.keyboard('{Enter}{End}{Enter}');
+    expect(mockOnExampleQuestionClick).toHaveBeenCalledWith(questions[2]);
+  });
+
   it('wraps suggested questions so each label is readable', () => {
     const questions = ['What is AI?', 'How does ML work?', 'What is deep learning?'];
     render(

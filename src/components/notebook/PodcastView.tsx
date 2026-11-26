@@ -134,6 +134,7 @@ const PodcastView: React.FC<PodcastViewProps> = ({ notebookId, onOpenSource }) =
   const [isProviderSettingsOpen, setIsProviderSettingsOpen] = useState(false);
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const [showAudioLab, setShowAudioLab] = useState(false);
+  const [cancelledNotebook, setCancelledNotebook] = useState<string | null>(null);
   const customizeAudioRef = useRef<HTMLButtonElement>(null);
   const customizeHeadingRef = useRef<HTMLHeadingElement>(null);
 
@@ -620,6 +621,7 @@ const PodcastView: React.FC<PodcastViewProps> = ({ notebookId, onOpenSource }) =
     }
 
     const preparation = { notebookId: safeNotebookId, cancelled: false, controller: new AbortController() };
+    setCancelledNotebook(null);
     podcastPreparation = preparation;
     setIsStarting(true);
     usePodcastGenerationStore.setState((state) =>
@@ -764,8 +766,8 @@ const PodcastView: React.FC<PodcastViewProps> = ({ notebookId, onOpenSource }) =
     setIsStarting(false);
     if (usePodcastGenerationStore.getState().notebookId === safeNotebookId) cancelGeneration();
     if (typeof speechSynthesis !== 'undefined') speechSynthesis.cancel();
-    toast({ title: "Cancelled", description: "Generation was cancelled" });
-  }, [safeNotebookId, cancelGeneration, toast, setIsStarting]);
+    setCancelledNotebook(safeNotebookId);
+  }, [safeNotebookId, cancelGeneration, setIsStarting]);
 
   useEffect(() => {
     if (audioCommand?.kind !== 'podcast' || audioCommand.phase !== 'queued' || !sources) return;
@@ -868,7 +870,10 @@ const PodcastView: React.FC<PodcastViewProps> = ({ notebookId, onOpenSource }) =
   if ((!finalAudioUrl || showAudioLab || isStarting) && !isGenerating) {
     return (
       <div className="podcast-card studypod-audio-card">
-        {isStarting && (
+        {cancelledNotebook === safeNotebookId && !showAudioLab && (
+          <p role="status">Podcast cancelled. Open episode settings to try again.</p>
+        )}
+        {isStarting && !showAudioLab && (
           <div className="rounded-xl border border-border bg-muted/40 p-4 space-y-3" data-testid="podcast-preparation">
             <div role="status" aria-live="polite" aria-atomic="true">
               <p className="font-medium"><FontAwesomeIcon icon={faArrowsRotate} spin aria-hidden="true" /> {preparationStatus?.message}</p>
@@ -1125,6 +1130,13 @@ const PodcastView: React.FC<PodcastViewProps> = ({ notebookId, onOpenSource }) =
 
             </fieldset>
             <div className="podcast-settings-footer">
+            {isStarting && <>
+              <p role="status">{preparationStatus?.message}</p>
+              <button type="button" className="podcast-settings-btn" onClick={handleCancel}>Cancel preparation</button>
+            </>}
+            {cancelledNotebook === safeNotebookId && (
+              <p role="status">Podcast cancelled. Your settings are ready for another try.</p>
+            )}
             <button
               className={`podcast-generate-btn ${isStarting ? "loading" : ""}`}
               onClick={() => { void handleGenerate(); }}
