@@ -299,7 +299,7 @@ export const ApiService = {
     return handleResponse(response);
   },
 
-  async getUser(token: string) {
+  async getUser(token: string, { checkingInitialSession = false } = {}) {
     const requestProfile = () =>
       fetch(`${API_BASE_URL}/user/profile`, {
         headers: { Authorization: `Bearer ${token}` },
@@ -315,6 +315,9 @@ export const ApiService = {
       response = await requestProfile();
     }
 
+    if (checkingInitialSession && response.status === 401) {
+      throw new Error("No active cookie session");
+    }
     return handleResponse(response);
   },
 

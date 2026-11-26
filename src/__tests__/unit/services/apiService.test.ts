@@ -69,6 +69,17 @@ describe("ApiService browser session handling", () => {
     expect(dispatchSpy).not.toHaveBeenCalled();
   });
 
+  it("does not signal logout when checking whether a visitor has signed in", async () => {
+    fetchMock
+      .mockResolvedValueOnce(jsonResponse({ error: "Missing session" }, 401))
+      .mockResolvedValueOnce(jsonResponse({ error: "Missing refresh cookie" }, 401));
+
+    await expect(ApiService.getUser("COOKIE_SESSION", { checkingInitialSession: true }))
+      .rejects.toThrow("No active cookie session");
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(dispatchSpy).not.toHaveBeenCalled();
+  });
+
   it("signals logout only after cookie refresh fails", async () => {
     fetchMock
       .mockResolvedValueOnce(jsonResponse({ error: "Expired" }, 401))

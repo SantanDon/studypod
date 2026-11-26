@@ -162,7 +162,7 @@ export const AuthProvider = ({ children }: AuthProviderProps) => {
         // In cookie mode, we verify by calling /api/user/profile
         // This is safer than trusting localStorage
         try {
-          const profileData = await ApiService.getUser("COOKIE_SESSION");
+          const profileData = await ApiService.getUser("COOKIE_SESSION", { checkingInitialSession: true });
           if (mounted && profileData.user) {
             console.log("AuthContext: Verified session via cookie for", profileData.user.email);
             
@@ -186,6 +186,11 @@ export const AuthProvider = ({ children }: AuthProviderProps) => {
             return;
           }
         } catch (authErr) {
+          if (!mounted) return;
+          if (authUserIdRef.current) {
+            setLoading(false);
+            return;
+          }
           console.warn("AuthContext: No active cookie session or verification failed", authErr);
           // If we had a cloud session stored, but verification failed, clear it!
           const currentUser = localStorageService.getCurrentUser();
