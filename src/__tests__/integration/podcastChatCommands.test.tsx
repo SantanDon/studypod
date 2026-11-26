@@ -212,7 +212,7 @@ describe('completed audio publication gate (mocked providers, real view and stor
 });
 
 describe('customizing another saved overview', () => {
-    it('returns to the player when a saved episode is selected during customization', () => {
+    it('returns to the saved episodes after dismissing customization', () => {
         usePodcastGenerationStore.setState({
             notebookId: 'notebook-a', audioUrl: 'blob:saved-overview',
             podcastId: 'saved-episode', script: script(), isGenerating: false,
@@ -220,7 +220,7 @@ describe('customizing another saved overview', () => {
         const { rerender } = render(<PodcastView notebookId="notebook-a" />);
         fireEvent.click(screen.getByRole('button', { name: 'Set up podcast' }));
         mock.history = [{ id: 'restored-episode' }];
-        // Rerender so the history fixture becomes visible in the customization view.
+        fireEvent.click(screen.getByRole('button', { name: 'Close audio customization' }));
         rerender(<PodcastView notebookId="notebook-a" />);
         fireEvent.click(screen.getByRole('button', { name: 'Play saved fixture' }));
         expect((screen.getByTestId('audio-player') as HTMLAudioElement).src).toContain('blob:restored-overview');
@@ -257,7 +257,7 @@ describe('customizing another saved overview', () => {
         expect(usePodcastGenerationStore.getState().podcastId).toBe('saved-episode');
         expect(mock.start).not.toHaveBeenCalled();
         fireEvent.click(screen.getByRole('button', { name: 'Close audio customization' }));
-        expect(screen.getByRole('heading', { name: 'Current audio overview' })).toBeTruthy();
+        expect(screen.getByRole('heading', { name: 'Current episode' })).toBeTruthy();
         expect(usePodcastGenerationStore.getState().audioUrl).toBe('blob:saved-overview');
         fireEvent.click(screen.getByRole('button', { name: 'Set up podcast' }));
         expect((screen.getByLabelText('Episode Focus') as HTMLInputElement).value).toBe("Transcriber's Notes");

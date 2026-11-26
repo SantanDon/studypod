@@ -510,9 +510,14 @@ for (const scenario of [
       }, { timeout: 65_000, message: 'Persisted assistant answer must retain the source fact' }).toBe(true);
       const citation = page.getByRole('button', { name: /^Citation 1/ }).first();
       await expect(citation).toBeVisible({ timeout: 65_000 });
+      const evidenceId = await citation.getAttribute('aria-controls');
+      expect(evidenceId).toBeTruthy();
       await citation.click();
-      const evidenceId = await citation.getAttribute('aria-controls'); expect(evidenceId).toBeTruthy();
-      await expect(page.locator(`[id="${evidenceId}"]`)).toContainText(fact);
+      if (info.project.name === 'mobile') {
+        await expect(page.locator('[data-cited-line]').first()).toContainText(fact);
+      } else {
+        await expect(page.locator(`[id="${evidenceId}"]`)).toContainText(fact);
+      }
       if (uploadedSource) {
         const response = await context.request.get(`/api/notebooks/${id}/messages`);
         expect(response.status()).toBe(200);
@@ -868,7 +873,7 @@ for (const scenario of [
             node.readyState >= 2 && node.paused)).toBe(true);
           await freshPage.goto(`/notebook/${id}`);
           await tab(freshPage, 'Studio');
-          await expect(freshPage.getByRole('heading', { name: 'Saved audio overviews', exact: true })).toBeVisible();
+          await expect(freshPage.getByRole('heading', { name: 'Saved episodes', exact: true })).toBeVisible();
           await freshPage.getByRole('button', { name: `Play ${savedPodcast.title}`, exact: true }).click();
           const freshPlayer = freshPage.locator('.podcast-player-container');
           const freshMedia = await playback(freshPlayer);
@@ -1096,10 +1101,14 @@ for (const scenario of [
             }, { timeout: 65_000, message: 'New listening answer must retain the actual source fact' }).toBe(true);
             const listeningCitation = freshPage.getByRole('button', { name: /^Citation 1/ }).last();
             await expect(listeningCitation).toBeVisible();
-            await listeningCitation.click();
             const evidenceId = await listeningCitation.getAttribute('aria-controls');
             expect(evidenceId).toBeTruthy();
-            await expect(freshPage.locator(`[id="${evidenceId}"]`)).toContainText(fact);
+            await listeningCitation.click();
+            if (info.project.name === 'mobile') {
+              await expect(freshPage.locator('[data-cited-line]').first()).toContainText(fact);
+            } else {
+              await expect(freshPage.locator(`[id="${evidenceId}"]`)).toContainText(fact);
+            }
             await tab(freshPage, 'Studio');
             await freshPage.getByTestId('audiobook-studio-card').click();
             await expect(freshPlayer).toBeVisible();

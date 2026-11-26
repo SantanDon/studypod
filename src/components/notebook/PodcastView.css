@@ -1546,7 +1546,7 @@
 
 :root:not(.dark) .audio-lab-overlay,
 .light .audio-lab-overlay {
-  background: rgba(255, 255, 255, 0.95);
+  background: #fff;
   border-color: rgba(0, 0, 0, 0.1);
   box-shadow: 
     0 10px 30px rgba(0, 0, 0, 0.08),
@@ -1617,7 +1617,7 @@
 
 :root:not(.dark) .glassmorphism,
 .light .glassmorphism {
-  background: rgba(255, 255, 255, 0.95);
+  background: #fff;
   border-color: rgba(0, 0, 0, 0.1);
   box-shadow: 0 8px 20px rgba(0, 0, 0, 0.08);
 }
@@ -1689,7 +1689,7 @@
 @media (prefers-reduced-motion: reduce) {
   .mini-wave,
   .wave-bar,
-  .audio-lab-overlay,
+  .audio-lab-overlay:not(.podcast-settings-dialog),
   .podcast-generate-btn,
   .play-btn,
   .player-progress-fill,
@@ -1697,5 +1697,56 @@
     animation: none !important;
     transition: none !important;
     transform: none !important;
+  }
+}
+
+.audio-lab-overlay.podcast-settings-dialog {
+  position: fixed;
+  inset: 50% auto auto 50%;
+  transform: translate(-50%, -50%);
+  animation: none;
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr) auto;
+  width: min(32rem, calc(100vw - 2rem));
+  max-height: min(50rem, calc(100dvh - 3rem));
+  min-height: 0;
+  margin: 0;
+  padding: 0;
+  overflow: hidden;
+  background: hsl(var(--background));
+  color: hsl(var(--foreground));
+}
+.podcast-settings-dialog .audio-lab-header,
+.podcast-settings-dialog .podcast-settings-footer {
+  margin: 0;
+  padding: 1rem 1.25rem;
+  background: hsl(var(--background));
+}
+.podcast-settings-dialog .audio-lab-header {
+  border-bottom: 1px solid hsl(var(--border));
+}
+.podcast-settings-dialog .podcast-settings-fields {
+  overflow: auto;
+  overscroll-behavior: contain;
+  padding: 1rem 1.25rem;
+  scrollbar-gutter: stable;
+}
+.podcast-settings-dialog .podcast-settings-footer {
+  border-top: 1px solid hsl(var(--border));
+}
+.podcast-settings-dialog .podcast-settings-footer button {
+  margin-top: 0;
+}
+@media (max-width: 640px) {
+  .audio-lab-overlay.podcast-settings-dialog {
+    inset: 0;
+    width: 100%;
+    height: 100dvh;
+    max-height: none;
+    transform: none;
+    border-radius: 0;
+  }
+  .podcast-settings-dialog .podcast-settings-footer {
+    padding-bottom: max(1rem, env(safe-area-inset-bottom));
   }
 }

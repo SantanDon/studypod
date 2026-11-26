@@ -23,6 +23,7 @@ import { buildPodcastEvidenceContext, DEEP_DIVE_EVIDENCE_BUDGET } from "@/lib/po
 import { recoverPodcastSources } from "@/lib/audio/recoverPodcastSources";
 import { selectUniquePodcastSection } from "@/lib/audio/podcastEvidencePlan";
 import { useToast } from "@/hooks/use-toast";
+import * as DialogPrimitive from "@radix-ui/react-dialog";
 import StudyGlyph from "./StudyGlyph";
 import TTSProviderSettings from "./TTSProviderSettings";
 import TTSSettingsDialog from "./TTSSettingsDialog";
@@ -134,9 +135,7 @@ const PodcastView: React.FC<PodcastViewProps> = ({ notebookId, onOpenSource }) =
   const [showAudioLab, setShowAudioLab] = useState(false);
   const customizeAudioRef = useRef<HTMLButtonElement>(null);
   const customizeHeadingRef = useRef<HTMLHeadingElement>(null);
-  useEffect(() => {
-    if (showAudioLab) requestAnimationFrame(() => customizeHeadingRef.current?.focus());
-  }, [showAudioLab]);
+
   const preparationStatus = usePodcastGenerationStore(state => state.preparation);
   const isStarting = preparationStatus?.notebookId === safeNotebookId;
   const setIsStarting = useCallback((starting: boolean) => {
@@ -796,7 +795,7 @@ const PodcastView: React.FC<PodcastViewProps> = ({ notebookId, onOpenSource }) =
       <section className="studypod-listen" aria-labelledby="studypod-unsaved-listen-heading">
         <div className="studypod-audio-section-heading">
           <span className="studypod-audio-eyebrow">Listen</span>
-          <h3 id="studypod-unsaved-listen-heading">Current audio overview</h3>
+          <h3 id="studypod-unsaved-listen-heading">Current episode</h3>
           <p>Listen or download while this page remains open. Save before closing or reloading.</p>
         </div>
         <AudioPlayer audioUrl={pendingSave.url} title={pendingSave.input.title} allowDelete={false} />
@@ -901,46 +900,33 @@ const PodcastView: React.FC<PodcastViewProps> = ({ notebookId, onOpenSource }) =
             <p id="studypod-audio-source-scope" role="status" aria-live="polite">{sourceScopeMessage}</p>
           </div>
         {showAudioLab ? (
-          <div id="studypod-audio-customize" className="audio-lab-overlay glassmorphism">
-            <div className="audio-lab-header">
-              <h4 ref={customizeHeadingRef} tabIndex={-1}>
-                <FontAwesomeIcon icon={faSliders} aria-hidden="true" /> Episode settings
-              </h4>
-              <button
-                type="button"
-                className="close-lab"
-                aria-label="Close audio customization"
-                onClick={() => {
-                  setShowAudioLab(false);
-                  requestAnimationFrame(() => customizeAudioRef.current?.focus());
-                }}
+          <DialogPrimitive.Root open={showAudioLab} onOpenChange={setShowAudioLab}>
+            <DialogPrimitive.Portal>
+              <DialogPrimitive.Overlay className="fixed inset-0 z-50 bg-black/50" />
+              <DialogPrimitive.Content
+                id="studypod-audio-customize"
+                className="audio-lab-overlay podcast-settings-dialog"
+                aria-describedby="podcast-settings-summary"
+                onOpenAutoFocus={event => { event.preventDefault(); customizeHeadingRef.current?.focus(); }}
+                onCloseAutoFocus={event => { event.preventDefault(); requestAnimationFrame(() => customizeAudioRef.current?.focus()); }}
               >
-                <FontAwesomeIcon icon={faXmark} />
-              </button>
-            </div>
-
-            <fieldset disabled={isStarting} className="min-w-0 border-0 p-0 m-0 disabled:opacity-60">
-            <div className="mb-4">
-            <button
-              className={`podcast-generate-btn ${isStarting ? "loading" : ""}`}
-              onClick={() => { void handleGenerate(); }}
-              disabled={cannotCreateAudio || isStarting}
-              aria-describedby="studypod-audio-source-scope"
-              data-testid="btn-start-production"
-            >
-              {isStarting ? (
-                <>
-                  <FontAwesomeIcon icon={faArrowsRotate} spin />
-                  Preparing script...
-                </>
-              ) : (
-                <>
-                  <FontAwesomeIcon icon={faPlay} />
-                  Create podcast
-                </>
-              )}
-            </button>
-            </div>
+                <div className="audio-lab-header">
+                  <div className="flex min-w-0 items-center gap-3">
+                    <StudyGlyph kind="podcast" className="h-12 w-12 shrink-0" />
+                    <div>
+                      <DialogPrimitive.Title asChild>
+                        <h4 ref={customizeHeadingRef} tabIndex={-1}>Episode settings</h4>
+                      </DialogPrimitive.Title>
+                      <DialogPrimitive.Description id="podcast-settings-summary" className="mt-1 text-sm text-muted-foreground">
+                        Choose how your podcast sounds.
+                      </DialogPrimitive.Description>
+                    </div>
+                  </div>
+                  <DialogPrimitive.Close className="close-lab" aria-label="Close audio customization">
+                    <FontAwesomeIcon icon={faXmark} />
+                  </DialogPrimitive.Close>
+                </div>
+            <fieldset disabled={isStarting} className="podcast-settings-fields min-w-0 border-0 m-0 disabled:opacity-60">
             <div
               className="lab-length-selector"
               style={{ marginBottom: "16px" }}
@@ -1141,8 +1127,30 @@ const PodcastView: React.FC<PodcastViewProps> = ({ notebookId, onOpenSource }) =
 
 
             </fieldset>
-
-          </div>
+            <div className="podcast-settings-footer">
+            <button
+              className={`podcast-generate-btn ${isStarting ? "loading" : ""}`}
+              onClick={() => { void handleGenerate(); }}
+              disabled={cannotCreateAudio || isStarting}
+              aria-describedby="studypod-audio-source-scope"
+              data-testid="btn-start-production"
+            >
+              {isStarting ? (
+                <>
+                  <FontAwesomeIcon icon={faArrowsRotate} spin />
+                  Preparing script...
+                </>
+              ) : (
+                <>
+                  <FontAwesomeIcon icon={faPlay} />
+                  Create podcast
+                </>
+              )}
+            </button>
+            </div>
+              </DialogPrimitive.Content>
+            </DialogPrimitive.Portal>
+          </DialogPrimitive.Root>
         ) : (
           <button
             ref={customizeAudioRef}
@@ -1170,7 +1178,7 @@ const PodcastView: React.FC<PodcastViewProps> = ({ notebookId, onOpenSource }) =
         </section>
         <section className="studypod-listen" aria-labelledby="studypod-listen-heading">
           <div className="studypod-audio-section-heading">
-            <h3 id="studypod-listen-heading">Saved audio overviews</h3>
+            <h3 id="studypod-listen-heading">Saved episodes</h3>
           </div>
           <div className="studypod-listen-history">
             <PodcastHistory
@@ -1287,7 +1295,7 @@ const PodcastView: React.FC<PodcastViewProps> = ({ notebookId, onOpenSource }) =
       <section className="studypod-listen" aria-labelledby="studypod-current-listen-heading">
         <div className="studypod-audio-section-heading">
           <span className="studypod-audio-eyebrow">Listen</span>
-          <h3 id="studypod-current-listen-heading">Current audio overview</h3>
+          <h3 id="studypod-current-listen-heading">Current episode</h3>
           <p>
             {finalAudioUrl === "webspeech_fallback"
               ? "Browser speech can play this episode here, but it is not a downloadable audio file. Regenerate the overview to retry audio generation."
