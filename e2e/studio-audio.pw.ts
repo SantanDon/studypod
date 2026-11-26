@@ -627,7 +627,7 @@ for (const scenario of [
         writeFileSync(resolve(directory, 'podcast-segments.json'), JSON.stringify(script.segments, null, 2));
         // Require the actual positive result for this generated player. The
         // production validator still fails closed before durable publication.
-        await expect(player.locator('.podcast-validation-ok .validation-text')).toHaveText(/^Audio signal detected \(\d+s, [\d.]+kHz\)$/);
+        await expect(player.locator('.podcast-validation-ok .validation-text')).toHaveText('Ready to play');
         await expect(player.locator('.podcast-validation-warning')).toHaveCount(0);
       } else {
         const capabilitiesResponse = page.waitForResponse(response => response.request().method() === 'GET' && new URL(response.url()).pathname.endsWith('/api/audiobook/voices'), { timeout: 30_000 });

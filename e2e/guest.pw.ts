@@ -40,7 +40,7 @@ test('guest notebook persists and exposes sources, chat, studio, and honest audi
     await expect(page.getByRole('heading', { name: 'Sources', exact: true })).toBeVisible();
   }
   await expect(page.getByRole('heading', { name: 'Studio', exact: true })).toBeVisible();
-  await page.getByRole('button', { name: /^Audiobook Local beta/ }).click();
+  await page.getByRole('button', { name: /^Audiobook\b/ }).click();
   await expect(page.getByTestId('audiobook-workspace')).toBeVisible();
   await expect(page.getByTestId('audiobook-local-beta')).toBeVisible();
   for (const id of ['audiobook-add-book', 'audiobook-create-full', 'audiobook-book-upload']) {

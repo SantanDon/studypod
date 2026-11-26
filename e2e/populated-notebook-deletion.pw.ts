@@ -141,7 +141,7 @@ test('populated-notebook-deletion: source citation deck and saved podcast remain
     const saveFailure = page.getByRole('alert').filter({ hasText: 'Episode needs saving' });
     await expect(player.or(saveFailure).first()).toBeVisible({ timeout: podcastGenerationBudget(script.segments.length).timeoutMs });
     await expect(saveFailure).toHaveCount(0); await expect(player).toBeVisible();
-    await expect(player.locator('.podcast-validation-ok .validation-text')).toHaveText(/^Audio signal detected \(\d+s, [\d.]+kHz\)$/);
+    await expect(player.locator('.podcast-validation-ok .validation-text')).toHaveText('Ready to play');
     await expect(player.locator('.podcast-validation-warning')).toHaveCount(0);
     let podcast: { id: string; notebook_id: string; persistence: string; source_ids: string[]; audio_sha256: string; byte_length: number };
     await expect.poll(async () => {

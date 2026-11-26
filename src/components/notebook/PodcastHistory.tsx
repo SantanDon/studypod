@@ -32,7 +32,7 @@ interface PodcastHistoryProps {
   onOpenSource?: (source: Source) => void;
 }
 
-const formatResumeTime = (seconds: number) => {
+const formatPlaybackTime = (seconds: number) => {
   const minutes = Math.floor(seconds / 60);
   return `${minutes}:${Math.floor(seconds % 60)
     .toString()
@@ -187,7 +187,7 @@ export const PodcastHistory: React.FC<PodcastHistoryProps> = ({
                       className="min-h-11 min-w-11 rounded-full focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-600"
                       aria-label={
                         resumeAt > 0
-                          ? `Resume ${podcast.title} at ${formatResumeTime(resumeAt)}`
+                          ? `Resume ${podcast.title} at ${formatPlaybackTime(resumeAt)}`
                           : `Play ${podcast.title}`
                       }
                     >
@@ -209,13 +209,13 @@ export const PodcastHistory: React.FC<PodcastHistoryProps> = ({
                       "MMM d, yyyy • h:mm a",
                     )}
                     {podcast.duration
-                      ? ` • ${Math.max(1, Math.round(podcast.duration / 60))} min`
+                      ? ` • ${formatPlaybackTime(podcast.duration)}`
                       : ""}
                   </p>
                   {resumeAt > 0 && (
                     <>
                       <p className="mt-1 text-xs font-medium text-indigo-800 dark:text-indigo-300">
-                        Resume at {formatResumeTime(resumeAt)}
+                        Resume at {formatPlaybackTime(resumeAt)}
                       </p>
                       <div
                         className="mt-1 h-1 overflow-hidden rounded-full bg-gray-200 dark:bg-zinc-800"

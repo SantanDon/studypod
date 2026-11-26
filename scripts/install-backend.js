@@ -7,7 +7,7 @@ if (process.env.VERCEL || process.env.CI) {
 
 try {
   console.log('Installing backend dependencies...');
-  execSync('npm install --prefix backend', { stdio: 'inherit' });
+  execSync('npm ci', { cwd: new URL('../backend/', import.meta.url), stdio: 'inherit' });
 } catch (error) {
   console.error('Failed to install backend dependencies:', error.message);
   process.exit(1);

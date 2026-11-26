@@ -7,6 +7,7 @@ import {
   type StorageCleanupResult,
 } from "@/lib/storage/storageManager";
 
+import { blobStorageService } from "./blobStorageService";
 import { encryptionService } from "./encryptionService";
 import { getSyncManager } from "@/lib/sync/syncManager";
 import type { SourceProcessingStatus } from "@/lib/sources/sourceProcessing";
@@ -418,10 +419,8 @@ class LocalStorageService {
 
     // Clean up audio blob from IndexedDB
     // We don't await this to keep the method synchronous-compatible, but it will run in background
-    import('./blobStorageService').then(({ blobStorageService }) => {
-      blobStorageService.deletePodcastAudio(id).catch(err => 
-        console.error('Failed to cleanup audio blob:', err)
-      );
+    void blobStorageService.deletePodcastAudio(id).catch((error) => {
+      console.error("Failed to cleanup audio blob:", error);
     });
 
     // Trigger sync for deleted notebook

@@ -1299,7 +1299,7 @@ const PodcastView: React.FC<PodcastViewProps> = ({ notebookId, onOpenSource }) =
           <p>
             {finalAudioUrl === "webspeech_fallback"
               ? "Browser speech can play this episode here, but it is not a downloadable audio file. Regenerate the overview to retry audio generation."
-              : "Listen here, then return to another saved episode below."}
+              : "Play your episode or download it to listen offline."}
           </p>
         </div>
       <AudioPlayer
@@ -1324,8 +1324,7 @@ const PodcastView: React.FC<PodcastViewProps> = ({ notebookId, onOpenSource }) =
             !
           </span>
           <span className="validation-text">
-            Audio may be silent ({audioValidation.issues[0] || "unknown issue"}
-            ). Try regenerating with different voices or speed.
+            This recording may be silent. Create another episode to try again.
           </span>
         </div>
       )}
@@ -1335,8 +1334,7 @@ const PodcastView: React.FC<PodcastViewProps> = ({ notebookId, onOpenSource }) =
             ✓
           </span>
           <span className="validation-text">
-            Audio signal detected ({audioValidation.duration.toFixed(0)}s,{" "}
-            {audioValidation.sampleRate / 1000}kHz)
+            Ready to play
           </span>
         </div>
       )}

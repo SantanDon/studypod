@@ -23,7 +23,7 @@ describe("saved podcast download", () => {
     vi.useFakeTimers({ shouldAdvanceTime: true });
     mocked.podcasts = [{
       id: "episode-1", notebook_id: "book-1", title: "Guided source discussion",
-      created_at: "2026-11-01T10:00:00Z", duration: 60, source_ids: [],
+      created_at: "2026-11-01T10:00:00Z", duration: 24, source_ids: [],
     }];
     vi.spyOn(URL, "createObjectURL").mockReturnValue("blob:saved-episode");
     const revoke = vi.spyOn(URL, "revokeObjectURL").mockImplementation(() => {});
@@ -36,6 +36,7 @@ describe("saved podcast download", () => {
     const pendingLoad = new Promise<Blob>((resolve) => { resolveLoad = resolve; });
     mocked.loadAudio.mockReturnValue(pendingLoad);
     render(<PodcastHistory notebookId="book-1" onPlay={vi.fn()} sources={[]} sourcesLoading={false} sourcesError={null} sourcesFetching={false} retrySources={vi.fn()} />);
+    expect(screen.getByText(/0:24$/)).toBeVisible();
     fireEvent.click(screen.getByRole("button", { name: "Prepare download for Guided source discussion" }));
 
     expect(mocked.loadAudio).toHaveBeenCalledTimes(1);

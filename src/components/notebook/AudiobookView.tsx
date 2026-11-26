@@ -1242,16 +1242,11 @@ export default function AudiobookView({
           <div className="min-w-0">
             <h2 className="truncate text-base font-semibold">Audiobook</h2>
             <p className="text-xs leading-5 text-muted-foreground">
-              Turn a book into chaptered, downloadable audio
+              Listen to your reading one chapter at a time
             </p>
           </div>
         </div>
         <div className="flex items-center gap-2">
-          {runtimeCapabilities?.localBeta && (
-            <span className="rounded-full border border-amber-300 bg-amber-50 px-2 py-1 text-[10px] font-semibold text-amber-800 dark:border-amber-800 dark:bg-amber-950/40 dark:text-amber-300">
-              {user?.id ? "Chapter narration" : "Local beta"}
-            </span>
-          )}
           {audiobookRuntimeAvailable && ebooks.length > 0 && (
             <Button
               variant="outline"
@@ -1308,26 +1303,35 @@ export default function AudiobookView({
             >
               <StudyGlyph kind="audiobook" className="mx-auto h-20 w-20" />
               <h3 className="mt-4 text-base font-semibold">
-                {runtimeCapabilities.localBeta ? "Create an audiobook on your computer" : "Audiobook unavailable"}
+                {runtimeCapabilities.localBeta
+                  ? user?.id ? "Import a whole book" : "Listen to a notebook source"
+                  : "Audiobook connection unavailable"}
               </h3>
-              <div className="mx-auto mt-2 max-w-md space-y-3 text-sm leading-6">
+              {runtimeCapabilities.localBeta ? (
+                <div className="mx-auto mt-2 max-w-md space-y-3 text-sm leading-6">
                   <p className="text-muted-foreground">
-                    Run StudyPod locally to import your book, preview a chapter,
-                    and download the narration.
+                    {user?.id ? "Use StudyPod on your computer to import a full book and download its narration."
+                      : "Sign in to create and save chapter recordings from a notebook source."}
                   </p>
-                  <a
-                    className="inline-flex min-h-11 items-center justify-center rounded-md bg-primary px-4 py-2 text-sm font-semibold text-primary-foreground hover:opacity-90 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring"
+                  {!user?.id && (
+                    <Button asChild>
+                      <a href={`/auth?returnTo=${encodeURIComponent(window.location.pathname + window.location.search)}`}>Sign in for chapter audio</a>
+                    </Button>
+                  )}
+                  <div><a
+                    className="inline-flex min-h-11 items-center rounded-md px-2 font-semibold text-primary underline underline-offset-4 focus-visible:outline focus-visible:outline-2 focus-visible:outline-ring"
                     href="https://github.com/SantanDon/studypod/blob/HEAD/docs/audiobook-studio-local.md"
                     target="_blank"
                     rel="noopener noreferrer"
                   >
-                    Open the local audiobook guide
-                  </a>
-              </div>
-              <p className="mx-auto mt-3 max-w-md rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm leading-5 text-amber-950 dark:border-amber-900/70 dark:bg-amber-950/30 dark:text-amber-100">
-                {runtimeCapabilities.localBeta && user?.id ? "Full-book imports and background rendering require the local StudyPod app." : runtimeCapabilities?.reason ||
-                  "This StudyPod setup does not support full-book narration."}
-              </p>
+                    Read the full-book import guide
+                  </a></div>
+                </div>
+              ) : (
+                <p className="mt-2 text-sm leading-6 text-muted-foreground">
+                  We couldn’t connect to the narration service. Try again in a moment.
+                </p>
+              )}
               {!runtimeCapabilities.localBeta && (
                 <Button className="mt-4" onClick={() => {
                   setRuntimeCapabilities(null);
