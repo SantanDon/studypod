@@ -82,7 +82,6 @@ Object.assign(env, {
 });
 applyAcceptanceTransportSettings(env, transportSettings);
 await writeFile(resolve(directory, 'youtube-transport-policy.json'), JSON.stringify({ diagnostics: transportSettings.diagnostics, trust: transportSettings.system ? 'system-trial' : 'default', certificateVerificationForced: transportSettings.system }));
-await writeFile(resolve(directory, 'credentials.private.json'), JSON.stringify({ ...credentials, secondEmail: env.STUDYPOD_AUTH_SECOND_EMAIL, secondPassword: env.STUDYPOD_AUTH_SECOND_PASSWORD }));
 await writeFile(resolve(directory, 'empty.env'), '');
 env.DOTENV_CONFIG_PATH = resolve(directory, 'empty.env');
 env.STUDYPOD_FULL_FIXTURES = resolve(directory, 'fixtures');

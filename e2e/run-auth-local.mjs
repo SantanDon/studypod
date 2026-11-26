@@ -31,7 +31,6 @@ Object.assign(env, {
   STUDYPOD_AUTH_SECOND_EMAIL: `qa-${randomBytes(8).toString('hex')}@studypod.invalid`,
   STUDYPOD_AUTH_SECOND_PASSWORD: `QA-${randomBytes(24).toString('hex')}`,
 });
-await writeFile(resolve(directory, 'credentials.private.json'), JSON.stringify({ ...credentials, secondEmail: env.STUDYPOD_AUTH_SECOND_EMAIL, secondPassword: env.STUDYPOD_AUTH_SECOND_PASSWORD }));
 await writeFile(resolve(directory, 'empty.env'), '');
 env.DOTENV_CONFIG_PATH = resolve(directory, 'empty.env');
 const children = [];
