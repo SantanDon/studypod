@@ -4,7 +4,7 @@ const { request, lookup } = vi.hoisted(() => ({ request: vi.fn(), lookup: vi.fn(
 vi.mock("node-fetch", () => ({ default: request }));
 vi.mock("node:dns/promises", () => ({ lookup, default: { lookup } }));
 const { fetchPublicUrl, extractWebSource } = await import("../services/extractionService.js");
-const { parseTweetId, extractTweet } = await import("../services/tweetExtractionService.js");
+const { parseTwitterBookmarksExport, parseTweetId, extractTweet, classifyUrl, extractUrlsFromText } = await import("../services/tweetExtractionService.js");
 
 describe("source extraction destinations", () => {
   beforeEach(() => {
@@ -61,8 +61,23 @@ describe("source extraction destinations", () => {
       if (url.hostname === "api.twitter.com") return { ok: false, status: 403 };
       expect(url.origin).toBe("https://publish.twitter.com");
       expect(url.searchParams.get("url")).toBe("https://twitter.com/i/web/status/123");
-      return { ok: true, json: async () => ({ html: "<p>Hello</p>" }) };
+      return { ok: true, json: async () => ({ html: "<p>Hello &amp; welcome<br><a href='https://example.com/guide'><strong>Study</strong></a></p>" }) };
     });
-    expect((await extractTweet("https://x.com/student/status/123?ref=study")).text).toBe("Hello");
+    expect((await extractTweet("https://x.com/student/status/123?ref=study")).text).toBe("Hello & welcome\nStudy [https://example.com/guide]");
   });
+});
+
+it("classifies bookmark links by their destination host", () => {
+  const article = "https://example.com/lesson?source=x.com";
+  expect(extractUrlsFromText(article + " https://mobile.twitter.com/study https://t.co/short")).toEqual([article]);
+  expect(classifyUrl("https://study.substack.com/guide")).toBe("article");
+  expect(classifyUrl("https://notes.example.com/guide?source=substack.com")).toBe("website");
+});
+
+it("reads bookmark archives even when the text contains assignment characters", () => {
+  const json = JSON.stringify([{ id: "123", text: "value = [answer]" }]);
+  const records = parseTwitterBookmarksExport(json);
+  expect(records[0].text).toBe("value = [answer]");
+  expect(parseTwitterBookmarksExport("window.YTD.bookmark.part0 = " + json + ";")).toEqual(records);
+  expect(extractUrlsFromText("https://example.com/note...!")).toEqual(["https://example.com/note"]);
 });

@@ -190,8 +190,12 @@ async function fetchReplyLinks(tweetId) {
  */
 export function extractUrlsFromText(text) {
   const matches = text.match(URL_REGEX) || [];
-  // Clean up trailing punctuation that gets caught
-  return [...new Set(matches.map((u) => u.replace(/[.,;:!?)\]"']+$/, "")).filter(isExternalTweetLink))];
+  const links = matches.map((url) => {
+    let end = url.length;
+    while (end > 0 && /[.,;:!?)\]"']/.test(url[end - 1])) end--;
+    return url.slice(0, end);
+  });
+  return [...new Set(links.filter(isExternalTweetLink))];
 }
 
 /**
@@ -302,15 +306,14 @@ export async function extractTweet(tweetUrl) {
  */
 export function parseTwitterBookmarksExport(fileContent) {
   try {
-    let data;
-
-    // Handle the JS-wrapped format: window.YTD.bookmarks.part0 = [...]
-    const jsMatch = fileContent.match(/=\s*(\[[\s\S]+\])/);
-    if (jsMatch) {
-      data = JSON.parse(jsMatch[1]);
-    } else {
-      data = JSON.parse(fileContent);
+    let payload = fileContent.trim();
+    if (payload.startsWith("window.")) {
+      const assignment = payload.indexOf("=");
+      if (assignment === -1) throw new Error("Missing archive assignment");
+      payload = payload.slice(assignment + 1).trim();
+      if (payload.endsWith(";")) payload = payload.slice(0, -1);
     }
+    const data = JSON.parse(payload);
 
     // Extract tweet URLs from the archive format
     const urls = [];
