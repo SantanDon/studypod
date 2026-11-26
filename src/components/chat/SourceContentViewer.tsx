@@ -260,7 +260,7 @@ const SourceContentViewer = ({
           <Accordion type="single" value={accordionValue} onValueChange={setAccordionValue} collapsible>
             <AccordionItem value="guide" className="border-0">
               <AccordionTrigger 
-                className="min-h-11 px-4 py-3 text-sm font-medium text-foreground hover:bg-muted hover:no-underline" 
+                className="min-h-11 px-4 py-3 text-sm font-medium text-foreground hover:bg-muted hover:no-underline"
               >
                 <div className="flex items-center space-x-2">
                   <svg xmlns="http://www.w3.org/2000/svg" height="16px" viewBox="0 -960 960 960" width="16px" fill="currentColor" aria-hidden="true">

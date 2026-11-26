@@ -128,6 +128,7 @@ app.use(
           "https://*.supabase.co",
           "wss://*.supabase.co",
         ],
+        mediaSrc: ["'self'", "blob:"],
         imgSrc: [
           "'self'",
           "data:",

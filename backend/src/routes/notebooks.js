@@ -1,3 +1,4 @@
+import { locateCitationLines } from "../services/citationLines.js";
 import express from "express";
 import { withPersonalProvider, sendPersonalProviderError } from '../services/personalProviderService.js';
 import { v4 as uuidv4 } from "uuid";
@@ -1297,16 +1298,13 @@ router.post("/:id/local-chat/turn", requireScope("chat:all"), async (req, res) =
         return res.status(400).json({ error: "Citation excerpt must be a bounded passage from its selected source" });
       }
       const excerpt = item.excerpt || sourceText.trim().slice(0, 1200);
-      const excerptStart = item.excerpt ? sourceText.indexOf(item.excerpt) : -1;
-      const startLine = excerptStart >= 0 ? sourceText.slice(0, excerptStart).split("\n").length : undefined;
-      const endLine = excerptStart >= 0 ? startLine + item.excerpt.split("\n").length - 1 : undefined;
       citations.push({
         citation_id: item.citationId,
         source_id: source.id,
         source_title: source.title,
         source_type: source.type,
         ...(excerpt ? { excerpt } : {}),
-        ...(startLine ? { chunk_lines_from: startLine, chunk_lines_to: endLine } : {}),
+        ...locateCitationLines(sourceText, item.excerpt),
       });
     }
     if ([...answerCitationIds].some((citationId) => !seenCitationIds.has(citationId))) {

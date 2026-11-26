@@ -1,3 +1,4 @@
+import { locateCitationLines } from "./citationLines.js";
 /**
  * AI Chat Service — StudyPodLM
  *
@@ -2398,7 +2399,11 @@ ${JSON.stringify(evidenceWindows.map(({ evidenceId, sourceIndex, startSentenceIn
       }
     }
     answer = finalizeSourceAwareAnswer(grounded.answer);
-    const citations = grounded.citations;
+    // Context may be scoped to a chapter. Locate the final evidence in the stored source.
+    const citations = grounded.citations.map(citation => ({
+      ...citation,
+      ...locateCitationLines(sources.find(source => source.id === citation.source_id)?.content, citation.excerpt),
+    }));
 
     const citedNumbers = new Set(
       citations.map((citation) => Number(citation.citation_id)),

@@ -755,11 +755,11 @@ const ChatArea = ({
     <div className="flex-1 flex flex-col items-center justify-center p-4 sm:p-8 overflow-hidden bg-background dark:bg-background">
           <div className="text-center mb-8">
             <div className="w-16 h-16 rounded-full mx-auto mb-4 flex items-center justify-center bg-gray-100 dark:bg-muted">
-              <i className="fi fi-rr-upload h-8 w-8 text-slate-600 dark:text-slate-400"></i>
+              <i aria-hidden="true" className="fi fi-rr-upload h-8 w-8 text-slate-600 dark:text-slate-400"></i>
             </div>
             <h2 className="text-xl font-medium text-gray-900 dark:text-foreground mb-2">Add a source to get started</h2>
             <p className="mb-4 text-sm text-muted-foreground">Add a file, paste text, or share a link, then ask questions about it.</p>
-            <Button onClick={() => setShowAddSourcesDialog(true)}>
+            <Button aria-label="Add a source" className="min-h-11" onClick={() => setShowAddSourcesDialog(true)}>
               <i className="fi fi-rr-upload h-4 w-4 mr-2"></i>
               Add a source
             </Button>

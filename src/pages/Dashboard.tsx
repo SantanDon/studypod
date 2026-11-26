@@ -116,7 +116,7 @@ const Dashboard = () => {
     <div className="min-h-screen bg-white dark:bg-background">
       <DashboardHeader userEmail={user?.email} />
 
-      <main className="max-w-7xl mx-auto px-4 sm:px-6 py-8">
+      <main className={`max-w-7xl mx-auto px-4 sm:px-6 py-8 ${hasNotebooks ? '' : 'min-h-[calc(100dvh-8rem)] flex items-center justify-center'}`}>
         {hasNotebooks ? (
           <>
             <h1 className={`mb-6 text-3xl font-semibold tracking-tight text-foreground ${useCustomFonts ? 'font-heading' : ''}`}>Your research workspace</h1>
@@ -148,7 +148,7 @@ const Dashboard = () => {
             </div>
           </>
         ) : (
-          <EmptyDashboard />
+          <div className="w-full max-w-5xl"><EmptyDashboard /></div>
         )}
       </main>
     </div>

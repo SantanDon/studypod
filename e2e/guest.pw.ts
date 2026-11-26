@@ -118,3 +118,41 @@ test('revision planner answers and opens the exact saved passage after reload', 
   await expect(page.getByText(/couldn't find a matching passage/).first()).toBeVisible();
   await verify();
 });
+
+test('custom field notebook opens its saved passage after reload', async ({ page }, testInfo) => {
+  const verify = await observeBrowser(page, testInfo, true);
+  await page.addInitScript(() => localStorage.setItem('studypod.localInference.enabled', 'false'));
+  // The upload also requests optional notebook metadata. Only fixture that
+  // background job so the actual passage lookup must succeed on the user's text.
+  await page.route('**/api/ai/generate', async route => {
+    const payload = route.request().postDataJSON();
+    if (!payload?.messages?.[0]?.content?.startsWith('Create concise study-notebook metadata')) {
+      return route.fallback();
+    }
+    await route.fulfill({ json: { answer: JSON.stringify({
+      title: 'Field equipment inventory',
+      description: 'Storage locations for field equipment.',
+      questions: ['Where is the spare spectrometer stored?'],
+    }) } });
+  });
+  await page.goto('/');
+  await page.getByRole('button', { name: 'Create notebook', exact: true }).click();
+  await page.getByRole('button', { name: 'Add a source', exact: true }).last().click();
+  await page.getByRole('button', { name: /Pasted Content/ }).click();
+  const dialog = page.getByRole('dialog').last();
+  await dialog.getByLabel('Title', { exact: true }).fill('Field equipment inventory');
+  const passage = 'The spare spectrometer is stored in the amber cabinet.';
+  await dialog.getByLabel('Content', { exact: true }).fill(['Field equipment inventory', '', 'Bench supplies are stored in the blue cupboard.', passage, 'Sign equipment out before collecting it.'].join('\n'));
+  await dialog.getByRole('button', { name: 'Add Copied Text', exact: true }).click();
+  const chat = page.getByRole('textbox', { name: 'Chat message' });
+  if (testInfo.project.name === 'mobile-390') await page.getByRole('tab', { name: 'Chat', exact: true }).click();
+  await chat.fill('Find passage: Where is the spare spectrometer stored?');
+  await chat.press('Enter');
+  const citation = page.getByRole('button', { name: 'Citation 1', exact: true });
+  await expect(citation).toBeVisible();
+  await page.reload();
+  await citation.click();
+  await expect(page.locator('[data-cited-line="4"]:visible')).toHaveText(new RegExp(passage));
+  await page.screenshot({ path: testInfo.outputPath('field-equipment-passage.png') });
+  await verify();
+});
