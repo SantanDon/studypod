@@ -1,14 +1,14 @@
 import { createServer } from 'node:http';
 import { readFile } from 'node:fs/promises';
 
+import { matchPassage } from './match.mjs';
+
 const repository = 'SantanDon/studypod';
 const branch = 'codex/studypod-audiobook-breakthrough-july-2026';
 const path = 'hacksgiving/passage-finder/guide.md';
 const gateway = process.argv.includes('--public-preview') ? 'https://api.github.com' : 'https://api.sprites.dev/v1/gateway/github';
 const base = gateway + '/repos/' + repository;
 const html = await readFile(new URL('./index.html', import.meta.url));
-const stop = new Set('what when where which should would could the a an do does did i my to on how from me we is in for and of it can you'.split(' '));
-const words = text => (text.toLowerCase().match(/[a-z0-9]+/g) || []).filter(word => !stop.has(word));
 let cached;
 let loading;
 
@@ -39,16 +39,7 @@ async function answer(question) {
     loading ??= loadGuide().finally(() => { loading = undefined; });
     await loading;
   }
-  const query = [...new Set(words(question))];
-  let best = null;
-  let high = 0;
-  for (const passage of cached.passages) {
-    const terms = new Set(words(passage.heading + ' ' + passage.quote));
-    const score = query.filter(word => terms.has(word)).length;
-    if (score > high && score >= Math.ceil(query.length / 2)) { high = score; best = passage; }
-    else if (score && score === high) best = null;
-  }
-  return best;
+  return matchPassage(question, cached.passages);
 }
 
 createServer(async (req, res) => {
