@@ -132,9 +132,9 @@ To plug in a custom command-line assistant (e.g., Qwen, Gemini, Llama):
 
 ## 🛡️ Security & Privacy First
 
-StudyPodLM respects your privacy. All user state is handled in-browser and stored securely on your local device:
-* **Incognito Warning:** Browser-side IndexedDB and localStorage keys will be cleared if you close an Incognito window. Export your notebooks often.
-* **Zero Secret Policy:** Clean repository history. Sensitive API configurations and keys have been fully sanitized.
+StudyPod uses browser storage for local notebook data. Signed-in features also use the StudyPod backend to store and retrieve notebook records. When you select a hosted AI provider, it receives the inputs needed for that request, which may include source excerpts.
+
+Closing a private browsing session can erase its local data. Export any notebooks you want to keep before closing the window. Keep provider keys and agent credentials out of shared notebooks, exports, and Git commits.
 
 ---
 

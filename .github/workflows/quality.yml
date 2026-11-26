@@ -44,6 +44,9 @@ jobs:
       - name: Acceptance gate decision and audio contracts
         run: npm run test:gate:unit
 
+      - name: Verify Passage Finder answers and source links
+        run: node --test hacksgiving/passage-finder/match.test.mjs hacksgiving/passage-finder/server.test.mjs
+
       - name: Podcast completion command acceptance
         run: npx vitest run --config vitest.config.ts src/__tests__/integration/podcastChatCommands.test.tsx
 
@@ -67,7 +70,7 @@ jobs:
           path: |
             .ai-bridge/studypod-renewal-20261012/release-gate/auth-local/*/desktop/report.json
             .ai-bridge/studypod-renewal-20261012/release-gate/auth-local/*/mobile/report.json
-          if-no-files-found: ignore
+          if-no-files-found: error
           retention-days: 14
 
       - name: Preserve browser acceptance evidence
