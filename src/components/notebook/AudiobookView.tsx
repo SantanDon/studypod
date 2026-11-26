@@ -1,3 +1,4 @@
+import "./AudioTitles.css";
 import StudyGlyph from "./StudyGlyph";
 import HostedChapterReader from "./HostedChapterReader";
 import { prepareSourceNarration, sourceMetadata } from '@/lib/audio/sourceNarration';
@@ -1240,8 +1241,8 @@ export default function AudiobookView({
             <Headphones className="h-4 w-4" />
           </div>
           <div className="min-w-0">
-            <h2 className="truncate text-base font-semibold">Audiobook</h2>
-            <p className="text-xs leading-5 text-muted-foreground">
+            <h2 className="studio-audio-title">Audiobook</h2>
+            <p className="mt-1 text-sm leading-5 text-muted-foreground">
               Listen to your reading one chapter at a time
             </p>
           </div>

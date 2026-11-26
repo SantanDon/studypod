@@ -58,15 +58,34 @@ function selectLocalChapterEvidence(content, message, limit, title) {
     .replace(/\n\n\[\.\.\. relevant excerpt continues \.\.\.\]\n\n/g, "\n\n");
 }
 
+const AUDIO_CONTEXT_PREFIX = "\n\n[Audio listening context:\n";
+const READER_CONTEXT_PREFIX = "\n\n[Reader position: ";
+const READER_CONTEXT_NOTE = "This is navigation metadata, not source evidence.";
+
+function getReaderContext(message) {
+  const text = String(message);
+  if (!text.endsWith("]")) return null;
+  const start = text.lastIndexOf(READER_CONTEXT_PREFIX);
+  if (start < 0) return null;
+  const context = text.slice(start + READER_CONTEXT_PREFIX.length, -1);
+  return context.includes(READER_CONTEXT_NOTE) ? { start, context } : null;
+}
+
 function getAudioChapterTitle(message) {
-  const audioContext = String(message).match(/\n\n\[Audio listening context:\n([\s\S]*?)\n\]/)?.[1];
+  const text = String(message);
+  const start = text.lastIndexOf(AUDIO_CONTEXT_PREFIX);
+  if (start < 0) return null;
+  const contentStart = start + AUDIO_CONTEXT_PREFIX.length;
+  const end = text.indexOf("\n]", contentStart);
+  if (end < 0) return null;
+  const audioContext = text.slice(contentStart, end);
   const position = audioContext?.match(/^Position: chapter "([^"]{1,160})"(?:,|$)/mi)?.[1];
   return position?.trim() || null;
 }
 
 function getReaderChapterTitle(message) {
-  const readerContext = String(message).match(/\n\n\[Reader position: ([\s\S]*?)\]$/)?.[1];
-  if (!readerContext?.includes("This is navigation metadata, not source evidence.")) return null;
+  const readerContext = getReaderContext(message)?.context;
+  if (!readerContext) return null;
   const encodedTitle = readerContext.match(/^Audiobook section title \(encoded\): ([^\r\n]{1,480})$/mi)?.[1];
   if (!encodedTitle) return null;
   try {
@@ -78,8 +97,8 @@ function getReaderChapterTitle(message) {
 }
 
 function getReaderSourceId(message) {
-  const readerContext = String(message).match(/\n\n\[Reader position: ([\s\S]*?)\]$/)?.[1];
-  if (!readerContext?.includes("This is navigation metadata, not source evidence.")) return null;
+  const readerContext = getReaderContext(message)?.context;
+  if (!readerContext) return null;
   const encodedId = readerContext.match(/^Audiobook source id \(encoded\): ([^\r\n]{1,600})$/mi)?.[1];
   if (!encodedId) return null;
   try {
@@ -91,12 +110,16 @@ function getReaderSourceId(message) {
 }
 
 function stripGeneratedAudioMetadata(message) {
-  return String(message)
-    .replace(/\n\n\[Reader position: ([\s\S]*?)\]$/, (block, metadata) =>
-      metadata.includes("This is navigation metadata, not source evidence.") ? "" : block)
-    .replace(/\n\n\[Audio listening context:\n([\s\S]*?)\n\]$/, (block, metadata) =>
-      metadata.includes("Answer from this source and cite the relevant passage.") ? "" : block)
-    .trim();
+  let text = String(message);
+  const reader = getReaderContext(text);
+  if (reader) text = text.slice(0, reader.start);
+  if (text.endsWith("\n]")) {
+    const start = text.lastIndexOf(AUDIO_CONTEXT_PREFIX);
+    if (start >= 0 && text.includes("Answer from this source and cite the relevant passage.", start + AUDIO_CONTEXT_PREFIX.length)) {
+      text = text.slice(0, start);
+    }
+  }
+  return text.trim();
 }
 
 function extractTitledChapter(content, title) {

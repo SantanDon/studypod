@@ -161,12 +161,24 @@
 }
 
 /* Responsive */
-@media (max-width: 480px) {
+@media (max-width: 1023px) {
   .podcast-generation-indicator {
-    left: 20px;
-    right: 20px;
-    min-width: auto;
+    position: relative;
+    inset: auto;
+    flex: none;
+    width: 100%;
+    min-width: 0;
+    max-width: none;
+    padding: 4px 12px;
+    border-radius: 0;
+    box-shadow: none;
+    z-index: auto;
   }
+
+  .indicator-content { gap: 8px; }
+  .indicator-actions .indicator-btn { min-width: 44px; min-height: 44px; }
+  .indicator-progress-bar { margin-top: 2px; }
+
 }
 
 

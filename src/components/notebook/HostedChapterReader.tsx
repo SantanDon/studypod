@@ -124,9 +124,9 @@ export default function HostedChapterReader({ notebookId, sources, token }: Prop
   }
 
   return <Card className="space-y-4 p-5 sm:p-6" data-testid="hosted-chapter-reader">
-    <div className="flex items-center gap-3"><StudyGlyph kind="audiobook" className="h-12 w-12" />
-      <div><h3 className="text-lg font-semibold">Narrate a notebook source</h3>
-        <p className="text-sm leading-6 text-muted-foreground">Turn the original words into a saved audiobook, one short part at a time. Keep this tab open while each part records.</p></div>
+    <div className="flex items-start gap-3"><StudyGlyph kind="audiobook" className="h-12 w-12 shrink-0" />
+      <div className="min-w-0"><h3 className="studio-audio-title">Narrate a notebook source</h3>
+        <p className="mt-2 max-w-prose text-sm leading-6 text-muted-foreground">Turn the original words into a saved audiobook, one short part at a time. Keep this tab open while each part records.</p></div>
     </div>
     {source ? <>
       <label className="block text-sm font-medium">Source
@@ -140,13 +140,13 @@ export default function HostedChapterReader({ notebookId, sources, token }: Prop
         <Button variant="outline" disabled={busy || partNumber + 1 >= parts.length} onClick={() => choosePart(partNumber + 1)}>Next</Button>
       </div>
       <blockquote className="rounded-lg border-l-4 border-primary bg-muted/40 p-3 text-sm leading-6 break-words">{passage}</blockquote>
-      <Button disabled={busy || !loaded} onClick={listen}>{busy ? "Working…" : saved ? "Open saved recording" : "Generate chapter audio"}</Button>
-      {player && player.id === saved?.id && <div className="space-y-2"><audio className="w-full" aria-label={title} controls src={player.url}
+      {(!player || player.id !== saved?.id) && <Button disabled={busy || !loaded} onClick={listen}>{busy ? "Working…" : saved ? "Open saved recording" : "Generate chapter audio"}</Button>}
+      {player && player.id === saved?.id && <div className="flex flex-wrap items-center gap-2 rounded-xl border bg-muted/30 p-3"><audio className="min-w-0 basis-48 flex-1" aria-label={title} controls src={player.url}
         onLoadedMetadata={e => { const time = storedPosition("studypod:chapter-time:" + player.id); if (time < e.currentTarget.duration) e.currentTarget.currentTime = time; }}
         onPause={e => rememberPosition("studypod:chapter-time:" + player.id, e.currentTarget.currentTime)}
         onSeeked={e => rememberPosition("studypod:chapter-time:" + player.id, e.currentTarget.currentTime)}
         onEnded={() => rememberPosition("studypod:chapter-time:" + player.id, 0)}
-      /><a className="inline-block py-2 text-sm font-medium underline" href={player.url} download={title + ".wav"}>Download chapter audio</a></div>}
+      /><a className="inline-flex min-h-11 items-center rounded-md px-3 text-sm font-semibold underline underline-offset-4 hover:bg-muted" href={player.url} download={title + ".wav"}>Download chapter audio</a></div>}
     </> : <p className="text-sm">Add a text source to this notebook to start a recording.</p>}
     <p className="text-sm text-muted-foreground" role="status">{status}</p>
     {!loaded && status && <Button variant="outline" onClick={() => setAttempt(n => n + 1)}>Retry saved chapters</Button>}

@@ -24,6 +24,10 @@ describe('YouTube understanding service', () => {
     expect(extractYouTubeVideoId('https://www.youtube.com/shorts/xw-9mwZxl-0')).toBe('xw-9mwZxl-0');
     expect(extractYouTubeVideoId('xw-9mwZxl-0')).toBe('xw-9mwZxl-0');
     expect(extractYouTubeVideoId('not-a-youtube-url')).toBeNull();
+    expect(extractYouTubeVideoId('m.youtube.com/watch?t=30&v=xw-9mwZxl-0')).toBe('xw-9mwZxl-0');
+    expect(extractYouTubeVideoId('//www.youtube.com/embed/xw-9mwZxl-0')).toBe('xw-9mwZxl-0');
+    expect(extractYouTubeVideoId('https://example.com/youtube.com/live/xw-9mwZxl-0')).toBeNull();
+    expect(extractYouTubeVideoId('https://youtu.be/xw-9mwZxl-0x')).toBeNull();
   });
 
   it('honors the requested language before preferring manual captions', () => {

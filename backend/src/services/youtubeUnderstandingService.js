@@ -3,8 +3,20 @@ const VIDEO_ID_RE = /^[A-Za-z0-9_-]{11}$/;
 export function extractYouTubeVideoId(input) {
   const value = String(input || '').trim();
   if (VIDEO_ID_RE.test(value)) return value;
-  const match = value.match(/(?:youtube\.com\/(?:watch\?(?:[^#]*&)?v=|embed\/|shorts\/|live\/)|youtu\.be\/)([A-Za-z0-9_-]{11})/i);
-  return match?.[1] || null;
+  try {
+    const url = new URL(value.includes('://') ? value : 'https://' + value.replace(/^\/\//, ''));
+    if (!['https:', 'http:'].includes(url.protocol)) return null;
+    const [, route, pathId] = url.pathname.split('/');
+    let id;
+    if (url.hostname === 'youtu.be') id = route;
+    else if (url.hostname === 'youtube.com' || url.hostname.endsWith('.youtube.com')) {
+      if (route === 'watch') id = url.searchParams.get('v');
+      else if (['embed', 'shorts', 'live'].includes(route)) id = pathId;
+    }
+    return id && VIDEO_ID_RE.test(id) ? id : null;
+  } catch {
+    return null;
+  }
 }
 
 export function formatYouTubeTimestamp(seconds = 0) {

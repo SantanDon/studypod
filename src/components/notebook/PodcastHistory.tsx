@@ -199,9 +199,9 @@ export const PodcastHistory: React.FC<PodcastHistoryProps> = ({
                   )}
                 </div>
                 <div className="min-w-0">
-                  {index === 0 && <p className="mb-1 text-[11px] font-semibold uppercase tracking-[0.14em] text-indigo-800 dark:text-indigo-300">{resumeAt > 0 ? "Continue listening" : "Latest saved audio"}</p>}
-                  <p className="font-medium text-gray-900 dark:text-gray-100 text-sm truncate">
-                    {podcast.title}
+                  {!isCurrent && index === 0 && <p className="mb-1 text-[11px] font-semibold uppercase tracking-[0.14em] text-indigo-800 dark:text-indigo-300">{resumeAt > 0 ? "Continue listening" : "Latest saved audio"}</p>}
+                  <p className="font-medium text-gray-900 dark:text-gray-100 text-sm break-words">
+                    {isCurrent ? "Selected episode" : podcast.title}
                   </p>
                   <p className="text-xs text-gray-500 dark:text-gray-400">
                     {format(
@@ -275,7 +275,7 @@ export const PodcastHistory: React.FC<PodcastHistoryProps> = ({
                 )}
               </details>
 
-              <div className="flex items-center space-x-1 opacity-100 transition-opacity sm:opacity-0 sm:group-hover:opacity-100 sm:group-focus-within:opacity-100">
+              <div className="mt-2 flex flex-wrap items-start gap-x-2">
                 <div className="flex flex-col items-start">
                   <button
                     type="button"
@@ -313,7 +313,7 @@ export const PodcastHistory: React.FC<PodcastHistoryProps> = ({
                   aria-label={`Delete ${podcast.title}`}
                   title="Delete"
                 >
-                  <FontAwesomeIcon icon={faTrash} className="text-xs" />
+                  <FontAwesomeIcon icon={faTrash} className="text-xs" /><span className="ml-2">Delete</span>
                 </button>
               </div>
             </div>

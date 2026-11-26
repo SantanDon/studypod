@@ -60,6 +60,7 @@ import {
 } from "@/lib/tts/audioValidator";
 import AudioPlayer from "./AudioPlayer";
 import "./PodcastView.css";
+import "./AudioTitles.css";
 import { PodcastHistory } from "./PodcastHistory";
 import { usePodcastHistory } from "@/hooks/usePodcastHistory";
 import { useNotes } from "@/hooks/useNotes";

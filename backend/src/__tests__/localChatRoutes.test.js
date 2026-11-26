@@ -201,6 +201,20 @@ describe('authenticated browser-local chat contract', () => {
     expect(result.body.sources[0].content).not.toContain('APPENDIX');
   });
 
+  it('uses the current chapter when the question quotes an earlier audio position', async () => {
+    state.helpers.getSourcesByNotebookId.mockResolvedValue([{
+      id: 'source-1', title: 'Field notes', type: 'text',
+      content: '--- Chapter One ---\nOld material.\n\n--- Chapter Two ---\nCurrent observations about the river.',
+    }]);
+    const message = 'I previously saw this position.\n\n[Audio listening context:\nPosition: chapter "Chapter One", paused\n]\nWhat are the current observations?\n\n[Audio listening context:\nPosition: chapter "Chapter Two", paused\nAnswer from this source and cite the relevant passage.\n]';
+    const result = await dispatch({
+      url: '/book/local-chat/context', token: session(), body: { sourceIds: ['source-1'], message },
+    });
+    expect(result.status).toBe(200);
+    expect(result.body.sectionScope.requestedSection.title).toBe('Chapter Two');
+    expect(result.body.sources[0].content).toContain('Current observations about the river.');
+  });
+
   it('matches the Republic source heading for Persons of the Dialogue', async () => {
     state.helpers.getSourcesByNotebookId.mockResolvedValue([{
       id: 'source-1', title: 'The Republic', type: 'pdf',
