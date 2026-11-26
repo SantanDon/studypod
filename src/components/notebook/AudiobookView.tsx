@@ -1,4 +1,5 @@
 import StudyGlyph from "./StudyGlyph";
+import HostedChapterReader from "./HostedChapterReader";
 import { prepareSourceNarration, sourceMetadata } from '@/lib/audio/sourceNarration';
 import { hasNarrationManifest, useStudioAudioCommands } from '@/lib/audio/studioAudioCommands';
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
@@ -1248,7 +1249,7 @@ export default function AudiobookView({
         <div className="flex items-center gap-2">
           {runtimeCapabilities?.localBeta && (
             <span className="rounded-full border border-amber-300 bg-amber-50 px-2 py-1 text-[10px] font-semibold text-amber-800 dark:border-amber-800 dark:bg-amber-950/40 dark:text-amber-300">
-              Local beta
+              {user?.id ? "Chapter narration" : "Local beta"}
             </span>
           )}
           {audiobookRuntimeAvailable && ebooks.length > 0 && (
@@ -1292,6 +1293,10 @@ export default function AudiobookView({
             </div>
           )}
 
+          {user?.id && runtimeCapabilities?.localBeta && !audiobookRuntimeAvailable && (
+            <HostedChapterReader key={user.id + notebookId} notebookId={notebookId} sources={sources} token={session?.access_token} />
+          )}
+
           {runtimeCapabilities === null ? (
             <Card className="p-6 text-center shadow-none" role="status">
               Checking audiobook availability…
@@ -1320,7 +1325,7 @@ export default function AudiobookView({
                   </a>
               </div>
               <p className="mx-auto mt-3 max-w-md rounded-lg border border-amber-200 bg-background/70 px-3 py-2 text-xs leading-5 text-muted-foreground dark:border-amber-900/70">
-                {runtimeCapabilities?.reason ||
+                {runtimeCapabilities.localBeta && user?.id ? "Full-book imports and background rendering require the local StudyPod app." : runtimeCapabilities?.reason ||
                   "This StudyPod setup does not support full-book narration."}
               </p>
               {!runtimeCapabilities.localBeta && (

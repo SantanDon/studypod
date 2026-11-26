@@ -36,6 +36,7 @@ test('HTTP answers cite the exact revision and line returned by the connector', 
   const { passage } = await response.json();
   const citation = new URL(passage.url);
   assert.equal(citation.origin, 'https://github.com');
+  assert.equal(citation.searchParams.get('plain'), '1');
   assert.equal(citation.pathname, '/SantanDon/studypod/blob/' + sha + '/hacksgiving/passage-finder/guide.md');
   assert.match(citation.hash, /^#L\d+$/);
   assert.equal(passage.quote, guide.split(/\r?\n/)[Number(citation.hash.slice(2)) - 1]);

@@ -169,6 +169,7 @@ export interface PodcastSegment {
 }
 
 export interface PodcastScript {
+  recordingKind?: "audiobook-chapter";
   title: string;
   segments: PodcastSegment[];
   estimatedDuration?: number; // in seconds

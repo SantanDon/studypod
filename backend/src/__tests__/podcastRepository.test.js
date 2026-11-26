@@ -32,6 +32,17 @@ describe('atomic account podcast persistence', () => {
     expect(await fresh.list('book', 'owner')).toEqual([saved]);
     expect(saved).not.toHaveProperty('audio_bytes');
   });
+  it('keeps chapter recordings separate from podcast history and resume', async () => {
+    const data = payload();
+    data.script.recordingKind = 'audiobook-chapter';
+    const chapter = await repo.create('book', 'owner', data, wav());
+    expect(await repo.recent('owner')).toBeNull();
+    const episode = await repo.create('book', 'owner', payload(), wav());
+    expect(await repo.list('book', 'owner')).toEqual([episode]);
+    expect(await repo.list('book', 'owner', {kind: 'audiobook-chapter'})).toEqual([chapter]);
+    expect((await repo.recent('owner')).id).toBe(episode.id);
+    expect((await repo.audio('book', 'owner', chapter.id)).bytes).toEqual(wav());
+  });
   it('uniformly denies members and foreign owners before parsing payloads', async () => {
     const saved = await repo.create('book', 'owner', payload(), wav());
     for (const user of ['member', 'foreign']) {

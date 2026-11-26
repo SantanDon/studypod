@@ -23,7 +23,7 @@ Traditionally, AI assistants operate in transient chat sessions. Once closed, th
 ```mermaid
 graph LR
     Human["👤 Human User"] <-->|React Workspace| UI["StudyPodLM Web Interface"]
-    Agent["🤖 CLI Agent"] <-->|REST API + Scoped JWT| API["Express API Server"]
+    Agent["🤖 CLI Agent"] <-->|REST API + Scoped API Key| API["Express API Server"]
     UI <-->|REST Endpoint / Real-time Sync| API
     
     subgraph Collaborative Core
@@ -51,7 +51,7 @@ graph LR
 | **Workspace Sync** | 📚 Read files, capture notes, compile resources | 🤖 Fetch real-time notebook snapshots and read sources |
 | **Audio Overviews** | 🎧 Generate multi-speaker podcasts via Kokoro TTS | 📻 Schedule podcast generation runs asynchronously |
 | **Interactive Study** | 🧩 Take flashcards & quizzes derived from your context | 🧠 Populate notes and study material from agent findings |
-| **Decentralized Auth** | 🔑 Key Pair and Scoped Identity Primitives | 🛰️ Trade pairing PINs for permanent scoped API tokens |
+| **Decentralized Auth** | 🔑 Key Pair and Scoped Identity Primitives | 🛰️ Exchange pairing PINs for scoped API keys |
 
 ---
 

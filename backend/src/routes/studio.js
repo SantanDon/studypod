@@ -5,7 +5,7 @@ import { logger } from '../utils/logger.js';
 
 export function createStudioRouter(repository = studioRepository) {
   const router = express.Router();
-  router.use(authenticateToken, requireSessionCredential);
+  router.use('/:id/studio', authenticateToken, requireSessionCredential);
   const run = (operation, key, status = 200) => async (req, res) => {
     try {
       const value = await operation(req);

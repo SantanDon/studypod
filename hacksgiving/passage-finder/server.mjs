@@ -35,7 +35,7 @@ async function loadGuide() {
   const passages = [];
   for (const [i, line] of lines.entries()) {
     if (line.startsWith('#')) heading = line.replace(/^#+\s*/, '');
-    else if (line.trim()) passages.push({ heading, quote: line, url: 'https://github.com/' + repository + '/blob/' + commit.sha + '/' + path + '#L' + (i + 1) });
+    else if (line.trim()) passages.push({ heading, quote: line, url: 'https://github.com/' + repository + '/blob/' + commit.sha + '/' + path + '?plain=1#L' + (i + 1) });
   }
   cached = { passages, expires: Date.now() + 60000 };
   return cached;

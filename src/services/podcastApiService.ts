@@ -71,12 +71,15 @@ export function podcastApi(notebookId: string, token?: string) {
   }
  }
  return {
-  list: async (): Promise<PodcastRecord[]> => {
+  list: async (kind?: "audiobook-chapter"): Promise<PodcastRecord[]> => {
    const records = new Map<string,PodcastRecord>();
    const cursors = new Set<string>();
    let cursor: string | undefined;
    do {
-    const page = await (await request(cursor ? '?cursor=' + encodeURIComponent(cursor) : '')).json();
+    const params = new URLSearchParams();
+    if (kind) params.set('kind', kind);
+    if (cursor) params.set('cursor', cursor);
+    const page = await (await request(params.size ? '?' + params : '')).json();
     if (!Array.isArray(page.podcasts)) throw invalidTransfer();
     for (const record of page.podcasts) records.set(record.id,record);
     cursor = page.nextCursor;

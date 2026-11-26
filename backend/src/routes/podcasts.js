@@ -42,10 +42,9 @@ export function createPodcastRouter(repository = podcastRepository, transfers = 
     return res.status(status).json({ error: status === 500 ? 'Podcast operation failed.' : status === 422 && error instanceof multer.MulterError ? 'Podcast upload exceeds supported limits.' : error.message, code: status === 500 ? 'PODCAST_OPERATION_FAILED' : error instanceof multer.MulterError ? 'PODCAST_INVALID_PAYLOAD' : error.code });
   };
   const run = operation => async (req, res) => { try { await operation(req, res); } catch (error) { errorResponse(error, res); } };
-  router.use(authenticateToken, requireSessionCredential);
-  router.get('/studio/podcasts/recent', run(async (req, res) => res.json({ podcast: await repository.recent(req.user.userId || req.user.id) })));
+  router.get('/studio/podcasts/recent', authenticateToken, requireSessionCredential, run(async (req, res) => res.json({ podcast: await repository.recent(req.user.userId || req.user.id) })));
   // Explicit owner middleware completes before multer reads any untrusted audio.
-  router.use('/:id/studio/podcasts', async (req, res, next) => { try { await repository.assertOwner(...args(req)); next(); } catch (error) {
+  router.use('/:id/studio/podcasts', authenticateToken, requireSessionCredential, async (req, res, next) => { try { await repository.assertOwner(...args(req)); next(); } catch (error) {
     await discardRejectedUpload(req);
     errorResponse(error, res);
   } });
@@ -63,7 +62,7 @@ export function createPodcastRouter(repository = podcastRepository, transfers = 
         if (!Array.isArray(cursor) || cursor.length !== 2 || typeof cursor[0] !== 'string' || cursor[0].length > 64 || !Number.isFinite(Date.parse(cursor[0])) || typeof cursor[1] !== 'string' || !/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(cursor[1])) throw new Error();
       } catch { throw Object.assign(new Error('Invalid podcast history cursor.'), {code:'PODCAST_INVALID_PAYLOAD'}); }
     }
-    const records = await repository.list(...args(req), {cursor});
+    const records = await repository.list(...args(req), {cursor, ...(req.query.kind === 'audiobook-chapter' ? {kind: 'audiobook-chapter'} : {})});
     const podcasts = records.slice(0,4);
     const last = podcasts.at(-1);
     res.json({podcasts, ...(records.length > 4 ? {nextCursor:Buffer.from(JSON.stringify([last.created_at,last.id])).toString('base64url')} : {})});
