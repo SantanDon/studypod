@@ -244,6 +244,25 @@ describe('customizing another saved overview', () => {
         expect(screen.queryByLabelText('Episode Focus')).toBeNull();
         mock.history = [];
     });
+    it('can retry immediately while the cancelled script request is still settling', async () => {
+        let finishCancelled!: (value: ReturnType<typeof script>) => void;
+        let finishRetry!: (value: ReturnType<typeof script>) => void;
+        mock.script
+            .mockReturnValueOnce(new Promise(resolve => { finishCancelled = resolve; }))
+            .mockReturnValueOnce(new Promise(resolve => { finishRetry = resolve; }));
+        render(<PodcastView notebookId="notebook-a"/>);
+        fireEvent.click(screen.getByRole('button', { name: 'Set up podcast' }));
+        fireEvent.click(screen.getByRole('button', { name: 'Create podcast' }));
+        await waitFor(() => expect(mock.script).toHaveBeenCalledTimes(1));
+        fireEvent.click(screen.getByRole('button', { name: 'Cancel preparation' }));
+        fireEvent.click(screen.getByRole('button', { name: 'Create podcast' }));
+        await waitFor(() => expect(mock.script).toHaveBeenCalledTimes(2));
+        await act(async () => { finishCancelled(script()); });
+        expect(screen.getByRole('button', { name: 'Cancel preparation' })).toBeEnabled();
+        expect(mock.start).not.toHaveBeenCalled();
+        await act(async () => { finishRetry(script()); });
+        expect(mock.start).toHaveBeenCalledTimes(1);
+    });
     it('lets the user cancel script preparation before speech starts', async () => {
         mock.script.mockImplementationOnce((_content, options) => new Promise((_resolve, reject) => {
             options.signal.addEventListener('abort', () => reject(new DOMException('Cancelled', 'AbortError')), { once: true });

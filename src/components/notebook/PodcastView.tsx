@@ -753,15 +753,19 @@ const PodcastView: React.FC<PodcastViewProps> = ({ notebookId, onOpenSource }) =
       });
       return false;
     } finally {
-      setIsStarting(false);
-      if (podcastPreparation === preparation) podcastPreparation = null;
+      if (podcastPreparation === preparation) {
+        podcastPreparation = null;
+        setIsStarting(false);
+      }
     }
   }, [safeNotebookId, toast, sources, usableSources, podcastFocus, host1Voice, host2Voice, notes, host1, host2, podcastType, podcastFormat, setIsStarting, startRecording]);
 
   const handleCancel = useCallback(() => {
     if (podcastPreparation?.notebookId === safeNotebookId) {
-      podcastPreparation.cancelled = true;
-      podcastPreparation.controller.abort();
+      const cancelled = podcastPreparation;
+      podcastPreparation = null;
+      cancelled.cancelled = true;
+      cancelled.controller.abort();
     }
     setIsStarting(false);
     if (usePodcastGenerationStore.getState().notebookId === safeNotebookId) cancelGeneration();
@@ -993,8 +997,8 @@ const PodcastView: React.FC<PodcastViewProps> = ({ notebookId, onOpenSource }) =
                   <TabsTrigger value="standard">Standard</TabsTrigger>
                   <TabsTrigger value="deep-dive">Deep Dive</TabsTrigger>
                 </TabsList>
-                <TabsContent value="brief" className="lab-hint">Fewer complete passages from your sources.</TabsContent>
-                <TabsContent value="standard" className="lab-hint">A standard selection of complete passages. Length depends on your sources.</TabsContent>
+                <TabsContent value="brief" className="lab-hint">A short reading of up to 350 words. At a typical reading pace, that’s about 2 minutes for the full script.</TabsContent>
+                <TabsContent value="standard" className="lab-hint">Selected passages followed by a discussion question. A full 1,200-word script runs about 8 minutes. Short sources finish sooner.</TabsContent>
                 <TabsContent value="deep-dive" className="lab-hint">Explores the main ideas, reasoning, examples and limitations across your selected text. Substantial chapters aim for about 20 to 30 minutes.</TabsContent>
               </Tabs>
             </div>
