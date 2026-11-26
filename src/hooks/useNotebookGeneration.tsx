@@ -3,6 +3,7 @@ import {
   localStorageService,
   LocalSource,
 } from "@/services/localStorageService";
+import { isCompatibleLocalModelSelected } from "@/config/localModelConfig";
 import { useToast } from "@/hooks/use-toast";
 import { useAuth } from "@/hooks/useAuth";
 import { ApiService } from "@/services/apiService";
@@ -190,8 +191,9 @@ export const useNotebookGeneration = () => {
           await import("@/lib/ai/ollamaService");
         const { isOllamaEnabled } = await import("@/config/ollamaConfig");
 
-        const isHealthy = await checkOllamaHealth();
-        const canUseAI = isHealthy || !isOllamaEnabled();
+        const canUseAI = isCompatibleLocalModelSelected() || (isOllamaEnabled()
+          ? await checkOllamaHealth()
+          : Boolean(session?.access_token));
         const content = source?.content || "";
         const hasExtractionError = [
           "extraction failed",
@@ -204,6 +206,7 @@ export const useNotebookGeneration = () => {
 
         if (canUseAI && content && !hasExtractionError) {
           const response = await chatCompletion({
+            localOnly: !session?.access_token,
             messages: [
               {
                 role: "system",

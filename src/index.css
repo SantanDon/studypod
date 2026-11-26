@@ -196,7 +196,7 @@
   --audio-paper: #ffffff;
   --audio-ink: #0f172a;
   --audio-accent: #4f46e5;
-  --audio-action: #4f46e5;
+  --audio-action: hsl(var(--primary));
   --audio-line: #e2e8f0;
 }
 
@@ -204,7 +204,7 @@
   --audio-paper: #0f172a;
   --audio-ink: #f8fafc;
   --audio-accent: #a5b4fc;
-  --audio-action: #4f46e5;
+  --audio-action: hsl(var(--primary));
   --audio-line: #334155;
 }
 
@@ -261,9 +261,9 @@
 
 .studypod-audio-studio .studypod-audio-section-heading p {
   margin-top: 4px;
-  font-size: 12px;
+  font-size: 14px;
   line-height: 1.5;
-  opacity: 0.75;
+  color: hsl(var(--foreground) / 0.8);
 }
 
 .studypod-audio-studio .studypod-listen-history > div {
@@ -290,6 +290,7 @@
 
 .studypod-audio-studio .studypod-create .podcast-generate-btn {
   min-height: 44px;
+  color: hsl(var(--primary-foreground));
 }
 
 .studypod-audio-studio .studypod-create .player-footer {

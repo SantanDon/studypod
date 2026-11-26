@@ -122,19 +122,6 @@ test('revision planner answers and opens the exact saved passage after reload', 
 test('custom field notebook opens its saved passage after reload', async ({ page }, testInfo) => {
   const verify = await observeBrowser(page, testInfo, true);
   await page.addInitScript(() => localStorage.setItem('studypod.localInference.enabled', 'false'));
-  // The upload also requests optional notebook metadata. Only fixture that
-  // background job so the actual passage lookup must succeed on the user's text.
-  await page.route('**/api/ai/generate', async route => {
-    const payload = route.request().postDataJSON();
-    if (!payload?.messages?.[0]?.content?.startsWith('Create concise study-notebook metadata')) {
-      return route.fallback();
-    }
-    await route.fulfill({ json: { answer: JSON.stringify({
-      title: 'Field equipment inventory',
-      description: 'Storage locations for field equipment.',
-      questions: ['Where is the spare spectrometer stored?'],
-    }) } });
-  });
   await page.goto('/');
   await page.getByRole('button', { name: 'Create notebook', exact: true }).click();
   await page.getByRole('button', { name: 'Add a source', exact: true }).last().click();

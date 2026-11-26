@@ -1324,7 +1324,7 @@ export default function AudiobookView({
                     Open the local audiobook guide
                   </a>
               </div>
-              <p className="mx-auto mt-3 max-w-md rounded-lg border border-amber-200 bg-background/70 px-3 py-2 text-xs leading-5 text-muted-foreground dark:border-amber-900/70">
+              <p className="mx-auto mt-3 max-w-md rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm leading-5 text-amber-950 dark:border-amber-900/70 dark:bg-amber-950/30 dark:text-amber-100">
                 {runtimeCapabilities.localBeta && user?.id ? "Full-book imports and background rendering require the local StudyPod app." : runtimeCapabilities?.reason ||
                   "This StudyPod setup does not support full-book narration."}
               </p>

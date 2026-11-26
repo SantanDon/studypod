@@ -1,5 +1,6 @@
 import React, { useState, useMemo } from 'react';
 import { Button } from '@/components/ui/button';
+import { Check, ChevronDown, ListChecks, Plus, X } from 'lucide-react';
 import NotebookCard from './NotebookCard';
 import { useNotebooks } from '@/hooks/useNotebooks';
 import { useNavigate } from 'react-router-dom';
@@ -149,8 +150,9 @@ const NotebookGrid = () => {
         <div className="flex items-center space-x-3">
           {!isSelectionMode ? (
             <div className="flex items-center space-x-3">
-              <Button className="bg-black hover:bg-gray-800 text-white rounded-lg px-5" onClick={handleCreateNotebook} disabled={isCreating}>
-                {isCreating ? 'Creating...' : '+ Create new'}
+              <Button className="min-h-11 gap-2 rounded-lg bg-foreground px-4 text-background hover:bg-foreground/90" onClick={handleCreateNotebook} disabled={isCreating}>
+                <Plus aria-hidden="true" className="size-4" />
+                {isCreating ? 'Creating...' : 'Create notebook'}
               </Button>
               {!isGuest && (
                 <Button variant="outline" className="border-gray-300 dark:border-border text-foreground hover:bg-muted rounded-lg px-5" onClick={() => setIsJoinOpen(true)} disabled={isJoining}>
@@ -173,44 +175,45 @@ const NotebookGrid = () => {
           )}
         </div>
         
-        <div className="flex items-center gap-2 self-end sm:self-auto">
+        <div className="flex items-center flex-wrap gap-2">
           <Button 
             variant="outline" 
-            className={`rounded-lg ${isSelectionMode ? 'bg-blue-50 border-blue-200 text-blue-700' : ''}`}
+            aria-pressed={isSelectionMode}
+            className={`min-h-11 gap-2 rounded-lg ${isSelectionMode ? 'bg-blue-50 border-blue-200 text-blue-700' : ''}`}
             onClick={() => {
               setIsSelectionMode(!isSelectionMode);
               if (isSelectionMode) setSelectedIds([]);
             }}
           >
-            <i className={`fi ${isSelectionMode ? 'fi-rr-cross-small' : 'fi-rr-list-check'} mr-2`}></i>
+            <span aria-hidden="true">{isSelectionMode ? <X className="size-4" /> : <ListChecks className="size-4" />}</span>
             {isSelectionMode ? 'Exit Selection' : 'Select'}
           </Button>
 
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
-              <button type="button" aria-label={`Sort notebooks: ${sortBy}`} className="flex items-center space-x-2 bg-white rounded-lg border px-3 py-2 cursor-pointer hover:bg-gray-50 transition-colors">
-                <span className="text-sm text-gray-600">{sortBy}</span>
-                <i className="fi fi-rr-angle-down h-4 w-4 text-gray-400"></i>
+              <button type="button" aria-label={`Sort notebooks: ${sortBy}`} className="flex min-h-11 items-center gap-2 rounded-lg border border-input bg-background px-3 py-2 text-foreground hover:bg-muted">
+                <span className="text-sm">{sortBy}</span>
+                <ChevronDown aria-hidden="true" className="size-4 text-muted-foreground" />
               </button>
             </DropdownMenuTrigger>
             <DropdownMenuContent align="end" className="w-48">
               <DropdownMenuItem onClick={() => setSortBy('Most recent')} className="flex items-center justify-between">
                 Most recent
-                {sortBy === 'Most recent' && <i className="fi fi-rr-check h-4 w-4"></i>}
+                {sortBy === 'Most recent' && <Check aria-hidden="true" className="size-4" />}
               </DropdownMenuItem>
               <DropdownMenuItem onClick={() => setSortBy('Title')} className="flex items-center justify-between">
                 Title
-                {sortBy === 'Title' && <i className="fi fi-rr-check h-4 w-4"></i>}
+                {sortBy === 'Title' && <Check aria-hidden="true" className="size-4" />}
               </DropdownMenuItem>
             </DropdownMenuContent>
           </DropdownMenu>
         </div>
       </div>
 
-      <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4 pb-24">
+      <div className={`grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-3 ${isSelectionMode && selectedIds.length ? 'pb-24' : ''}`}>
         {sortedNotebooks.map(notebook => (
           <div key={notebook.id} className="relative group">
-            <button type="button" onClick={() => handleNotebookClick(notebook.id)} aria-label={`${isSelectionMode ? 'Select' : 'Open'} ${notebook.title || 'Untitled'}`} aria-pressed={isSelectionMode ? selectedIds.includes(notebook.id) : undefined} className="absolute inset-0 z-10 w-full rounded-lg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-2" />
+            <button type="button" onClick={() => handleNotebookClick(notebook.id)} aria-label={`${isSelectionMode ? 'Select' : 'Open'} ${notebook.title || 'Untitled'}`} aria-pressed={isSelectionMode ? selectedIds.includes(notebook.id) : undefined} className="absolute inset-0 z-10 w-full rounded-xl focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-2" />
             <NotebookCard notebook={{
               id: notebook.id,
               title: notebook.title || 'Untitled',
@@ -227,14 +230,14 @@ const NotebookGrid = () => {
             isSelectionMode={isSelectionMode} />
             
             {isSelectionMode && (
-              <div className="absolute inset-0 bg-blue-500/10 rounded-lg pointer-events-none border-2 border-transparent transition-all group-hover:border-blue-400">
-                <div className={`absolute top-3 left-3 w-6 h-6 rounded-full border-2 flex items-center justify-center transition-colors ${
+              <div className="absolute inset-0 bg-blue-500/10 rounded-xl pointer-events-none border-2 border-transparent transition-all group-hover:border-blue-400">
+                <div className={`absolute top-3 right-3 w-6 h-6 rounded-full border-2 flex items-center justify-center transition-colors ${
                   selectedIds.includes(notebook.id) 
                     ? 'bg-blue-600 border-blue-600' 
                     : 'bg-white border-gray-300'
                 }`}>
                   {selectedIds.includes(notebook.id) && (
-                    <i className="fi fi-rr-check text-white text-xs"></i>
+                    <Check aria-hidden="true" className="size-4 text-white" />
                   )}
                 </div>
               </div>

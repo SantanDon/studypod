@@ -60,18 +60,18 @@ const NotebookCard = ({
   };
 
   return <div 
-      className="rounded-lg border border-border bg-card p-4 hover:border-muted-foreground/30 hover:shadow-sm transition-all cursor-pointer relative h-40 flex flex-col"
+      className="relative flex min-h-44 flex-col rounded-xl border border-border bg-card p-5 transition-colors group-hover:border-primary/50 group-focus-within:border-primary"
     >
       {!isSelectionMode && (
         <div className="absolute z-20 top-3 right-3 flex items-center space-x-1" data-delete-action="true">
           {notebook.joinCode && (
-            <button onClick={handleShareClick} className="p-1 hover:bg-black/5 dark:hover:bg-white/10 rounded text-gray-400 hover:text-foreground transition-colors" title="Copy share join code" data-delete-action="true">
+            <button onClick={handleShareClick} className="inline-flex size-11 items-center justify-center rounded-lg text-muted-foreground hover:bg-muted hover:text-foreground" title="Copy share join code" data-delete-action="true">
               <Share2 className="h-4 w-4" />
             </button>
           )}
           <AlertDialog open={showDeleteDialog} onOpenChange={setShowDeleteDialog}>
             <AlertDialogTrigger asChild>
-              <button onClick={handleDeleteClick} className="p-1 hover:bg-red-50 rounded text-gray-400 hover:text-red-500 transition-colors delete-button" disabled={isDeleting} data-delete-action="true" aria-label={`Delete ${displayTitle}`}>
+              <button onClick={handleDeleteClick} className="delete-button inline-flex size-11 items-center justify-center rounded-lg text-muted-foreground hover:bg-destructive/10 hover:text-destructive" disabled={isDeleting} data-delete-action="true" aria-label={`Delete ${displayTitle}`}>
                 <Trash2 className="h-4 w-4" />
               </button>
             </AlertDialogTrigger>
@@ -93,20 +93,22 @@ const NotebookCard = ({
         </div>
       )}
       
-      <div className="w-10 h-10 rounded-lg flex items-center justify-center mb-3">
+      <div className="mb-3 flex size-14 items-center justify-center">
         {['', '📚', '📝'].includes(notebook.icon) ? (
-          <StudyGlyph kind="notebook" className="h-10 w-10" />
+          <StudyGlyph kind="notebook" className="size-14" />
         ) : (
           <span aria-hidden="true" className="text-2xl">{notebook.icon}</span>
         )}
       </div>
       
-      <h3 className="text-foreground mb-2 pr-6 line-clamp-2 text-lg font-medium flex-grow leading-snug">
+      <h3 className="mb-3 line-clamp-2 break-words text-xl font-semibold leading-tight tracking-tight text-foreground">
         {displayTitle}
       </h3>
       
-      <div className="flex items-center justify-between text-xs text-muted-foreground mt-auto">
-        <span>{notebook.date} • {notebook.sources} source{notebook.sources !== 1 ? 's' : ''}</span>
+      <div className="mt-auto flex flex-wrap items-center gap-x-2 text-sm leading-5 text-muted-foreground">
+        <span>{notebook.sources} source{notebook.sources !== 1 ? 's' : ''}</span>
+        <span aria-hidden="true">&middot;</span>
+        <span>{notebook.date}</span>
       </div>
     </div>;
 };

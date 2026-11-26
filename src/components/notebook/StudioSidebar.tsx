@@ -85,12 +85,12 @@ const StudioToolTrigger = ({
         <div className="flex items-center gap-2">
           <span className="text-sm font-semibold text-foreground">{title}</span>
           {badge && (
-            <span className="rounded-full border border-border bg-background px-2 py-0.5 text-[11px] font-medium text-muted-foreground">
+            <span className="rounded-full border border-border bg-background px-2 py-0.5 text-xs font-medium text-foreground/80">
               {badge}
             </span>
           )}
         </div>
-        <span className="mt-0.5 block text-xs leading-5 text-muted-foreground">
+        <span className="mt-0.5 block text-sm leading-5 text-foreground/80">
           {description}
         </span>
       </div>
@@ -134,12 +134,12 @@ const StudioActionCard = ({
       <div className="flex items-center gap-2">
         <span className="text-sm font-semibold text-foreground">{title}</span>
         {badge && (
-          <span className="rounded-full border border-border bg-background px-2 py-0.5 text-[11px] font-medium text-muted-foreground">
+          <span className="rounded-full border border-border bg-background px-2 py-0.5 text-xs font-medium text-foreground/80">
             {badge}
           </span>
         )}
       </div>
-      <span className="mt-0.5 block text-xs leading-5 text-muted-foreground">
+      <span className="mt-0.5 block text-sm leading-5 text-foreground/80">
         {description}
       </span>
     </div>
@@ -303,7 +303,7 @@ const StudioSidebar = ({
           <p className="mt-1 text-xs font-medium leading-5 text-foreground">
             {sourceReadiness.label}
           </p>
-          <p className="text-xs leading-5 text-muted-foreground">
+          <p className="text-sm leading-5 text-foreground/80">
             {sourceReadiness.detail}
           </p>
         </div>
@@ -336,10 +336,9 @@ const StudioSidebar = ({
               <StudioActionCard
                 icon={AudiobookGlyph}
                 title="Audiobook"
-                description="Narrate a book chapter by chapter on your computer."
+                description="Listen to a source by chapter, or import a full book locally."
                 onClick={() => setActiveWorkspace('audiobook')}
                 testId="audiobook-studio-card"
-                badge="Local beta"
               />
             )}
               <div data-testid="audio-overview-studio-card">
