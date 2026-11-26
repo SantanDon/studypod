@@ -29,6 +29,7 @@
         "test:flow:local": "node e2e/run-full-flow-local.mjs"
     },
     "dependencies": {
+        "@xmldom/xmldom": "0.8.15",
         "@danielxceron/youtube-transcript": "^1.2.6",
         "@fortawesome/fontawesome-svg-core": "^7.1.0",
         "@fortawesome/free-solid-svg-icons": "^7.1.0",

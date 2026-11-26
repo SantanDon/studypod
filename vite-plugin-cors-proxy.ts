@@ -1,3 +1,4 @@
+import { parseTimedCaptionXml } from './backend/src/services/timedCaptionXml.js';
 import { Plugin } from 'vite';
 import http from 'http';
 import https from 'https';
@@ -103,66 +104,6 @@ function postJson(
     req.write(bodyBuf);
     req.end();
   });
-}
-
-// Decode HTML entities from caption text
-function decodeHtmlEntities(text: string): string {
-  return text
-    .replace(/&amp;/g, '&')
-    .replace(/&lt;/g, '<')
-    .replace(/&gt;/g, '>')
-    .replace(/&#39;/g, "'")
-    .replace(/&apos;/g, "'")
-    .replace(/&quot;/g, '"')
-    .replace(/\n/g, ' ')
-    .trim();
-}
-
-// Parse XML caption format into transcript segments.
-// Handles two YouTube formats:
-//   1. Standard timedtext: <text start="s" dur="s">...</text>
-//   2. Innertube format-3: <p t="ms" d="ms">...</p>
-function parseXmlCaptions(xmlText: string): Array<{ text: string; duration: number; offset: number }> {
-  const result: Array<{ text: string; duration: number; offset: number }> = [];
-
-  // Format 1: <text start="..." dur="...">...</text>
-  const textMatches = xmlText.match(/<text[^>]*>[\s\S]*?<\/text>/g);
-  if (textMatches && textMatches.length > 0) {
-    for (let idx = 0; idx < textMatches.length; idx++) {
-      const match = textMatches[idx];
-      const text = decodeHtmlEntities(match.replace(/<[^>]+>/g, ''));
-      const startMatch = match.match(/start="([\d.]+)"/);
-      const durMatch = match.match(/dur="([\d.]+)"/);
-      if (text.length > 0) {
-        result.push({
-          text,
-          offset: startMatch ? parseFloat(startMatch[1]) * 1000 : idx * 3000,
-          duration: durMatch ? parseFloat(durMatch[1]) * 1000 : 3000,
-        });
-      }
-    }
-    if (result.length > 0) return result;
-  }
-
-  // Format 2: <p t="ms" d="ms">...</p>  (YouTube timedtext format="3" from Innertube)
-  const pMatches = xmlText.match(/<p\s[^>]*t="\d+[^>]*>[\s\S]*?<\/p>/g);
-  if (pMatches && pMatches.length > 0) {
-    for (let idx = 0; idx < pMatches.length; idx++) {
-      const match = pMatches[idx];
-      const text = decodeHtmlEntities(match.replace(/<[^>]+>/g, ''));
-      const tMatch = match.match(/\bt="(\d+)"/);   // t is offset in ms
-      const dMatch = match.match(/\bd="(\d+)"/);   // d is duration in ms
-      if (text.length > 0) {
-        result.push({
-          text,
-          offset: tMatch ? parseInt(tMatch[1], 10) : idx * 3000,
-          duration: dMatch ? parseInt(dMatch[1], 10) : 3000,
-        });
-      }
-    }
-  }
-
-  return result;
 }
 
 export function corsProxyPlugin(): Plugin {
@@ -302,7 +243,7 @@ export function corsProxyPlugin(): Plugin {
                 `preview="${captionText.substring(0, 100).replace(/\n/g, '\\n')}"`
               );
 
-              const xmlParsed = parseXmlCaptions(captionText);
+              const xmlParsed = parseTimedCaptionXml(captionText);
               if (xmlParsed.length > 0) {
                 transcript = xmlParsed;
                 console.log(`[YouTube API] ✅ Strategy 1 Innertube XML SUCCESS: ${transcript.length} segments`);
@@ -356,7 +297,7 @@ export function corsProxyPlugin(): Plugin {
                     const subResult = await fetchWithRedirects(subtitleTrack.url);
                     const subText = subResult.body.toString('utf-8');
 
-                    const xmlParsed = parseXmlCaptions(subText);
+                    const xmlParsed = parseTimedCaptionXml(subText);
                     if (xmlParsed.length > 0) {
                       transcript = xmlParsed;
                       console.log(`[YouTube API] ✅ Strategy 2 XML SUCCESS via ${baseUrl}: ${transcript.length} segments`);

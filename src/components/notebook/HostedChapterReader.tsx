@@ -59,13 +59,19 @@ export default function HostedChapterReader({ notebookId, sources, token }: Prop
   const alive = useRef(false);
   const locked = useRef(false);
   const worker = useRef<TTSWorkerManager | null>(null);
+  const idleTimer = useRef<ReturnType<typeof setTimeout>>();
+  function releaseVoice() {
+    clearTimeout(idleTimer.current);
+    worker.current?.terminate();
+    worker.current = null;
+  }
   const stableIds = useRef(new Map<string, string>());
   const title = source ? source.title.slice(0, 240) + (parts.length > 1 ? " · Part " + (partNumber + 1) : "") : "";
   const saved = records.find(row => row.source_ids.includes(source?.id || "") && row.title === title && row.script.segments[0]?.text === passage);
 
   useEffect(() => {
     alive.current = true;
-    return () => { alive.current = false; worker.current?.terminate(); };
+    return () => { alive.current = false; releaseVoice(); };
   }, []);
   useEffect(() => {
     let current = true;
@@ -79,6 +85,7 @@ export default function HostedChapterReader({ notebookId, sources, token }: Prop
 
   async function listen() {
     if (!source || !passage || !loaded || locked.current) return;
+    clearTimeout(idleTimer.current);
     locked.current = true;
     setBusy(true);
     setPlayer(undefined);
@@ -88,9 +95,11 @@ export default function HostedChapterReader({ notebookId, sources, token }: Prop
         setStatus("Preparing the narration voice. The first download can take a few minutes.");
         const { TTSWorkerManager } = await import("@/lib/tts/ttsWorker");
         if (!alive.current) return;
-        const voice = new TTSWorkerManager();
+        const voice = worker.current ?? new TTSWorkerManager();
         worker.current = voice;
-        await voice.initialize();
+        await voice.initialize(message => {
+          if (alive.current && message.startsWith("Downloading")) setStatus(message);
+        });
         if (!alive.current) return;
         setStatus("Reading this passage aloud…");
         const speech = await voice.synthesize(passage, "af_heart", 1);
@@ -114,10 +123,10 @@ export default function HostedChapterReader({ notebookId, sources, token }: Prop
         setStatus("Ready to play. Your recording is saved in this notebook.");
       }
     } catch (error) {
+      releaseVoice();
       if (alive.current) setStatus(error instanceof Error ? error.message : "The recording could not be opened. Try again.");
     } finally {
-      worker.current?.terminate();
-      worker.current = null;
+      if (alive.current && worker.current) idleTimer.current = setTimeout(releaseVoice, 120_000);
       locked.current = false;
       if (alive.current) setBusy(false);
     }

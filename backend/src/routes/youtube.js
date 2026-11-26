@@ -1,3 +1,4 @@
+import { parseTimedCaptionXml } from '../services/timedCaptionXml.js';
 import express from 'express';
 import { AppError } from '../middleware/errorHandler.js';
 import { getDatabase, dbHelpers } from '../db/database.js';
@@ -67,78 +68,6 @@ function decodeHtmlEntities(text) {
     .trim();
 }
 
-// ─── XML Captions Parser ─────────────────────────────────────────────────────
-
-function parseXmlCaptions(xmlText) {
-  const result = [];
-  if (!xmlText) return result;
-  
-  // Try <text> tags first (srv1/srv2/srv3 formats)
-  const textRegex = /<text\s+([^>]*?)>([\s\S]*?)<\/text>/gi;
-  let match;
-  while ((match = textRegex.exec(xmlText)) !== null) {
-    const attrs = match[1];
-    const content = match[2];
-    
-    // Strip nested tags, CDATA, decode entities
-    const text = decodeHtmlEntities(content.replace(/<!\[CDATA\[([\s\S]*?)\]\]>/g, '$1').replace(/<[^>]+>/g, '')).trim();
-    
-    const startMatch = attrs.match(/start="([\d.]+)"/);
-    const durMatch = attrs.match(/dur="([\d.]+)"/);
-    
-    if (text.length > 0) {
-      result.push({
-        text,
-        offset: startMatch ? parseFloat(startMatch[1]) * 1000 : result.length * 3000,
-        duration: durMatch ? parseFloat(durMatch[1]) * 1000 : 3000,
-        timingSource: startMatch ? 'provider' : 'inferred',
-      });
-    }
-  }
-  
-  if (result.length > 0) return result;
-
-  // Try <p> tags next (timed text/srv3 formats)
-  const pRegex = /<p\s+([^>]*?)>([\s\S]*?)<\/p>/gi;
-  while ((match = pRegex.exec(xmlText)) !== null) {
-    const attrs = match[1];
-    const content = match[2];
-    
-    const text = decodeHtmlEntities(content.replace(/<!\[CDATA\[([\s\S]*?)\]\]>/g, '$1').replace(/<[^>]+>/g, '')).trim();
-    
-    const tMatch = attrs.match(/t="([\d.]+)"/);
-    const dMatch = attrs.match(/d="([\d.]+)"/);
-    
-    if (text.length > 0) {
-      result.push({
-        text,
-        offset: tMatch ? parseFloat(tMatch[1]) : result.length * 3000,
-        duration: dMatch ? parseFloat(dMatch[1]) : 3000,
-        timingSource: tMatch ? 'provider' : 'inferred',
-      });
-    }
-  }
-
-  if (result.length > 0) return result;
-  
-  // Last resort: simple regex match of anything inside tags if the formats above didn't match
-  const fallbackTextRegex = /<text[^>]*>([\s\S]*?)<\/text>/gi;
-  let fallbackMatch;
-  while ((fallbackMatch = fallbackTextRegex.exec(xmlText)) !== null) {
-    const text = decodeHtmlEntities(fallbackMatch[1].replace(/<[^>]+>/g, '')).trim();
-    if (text.length > 0) {
-      result.push({
-        text,
-        offset: result.length * 3000,
-        duration: 3000,
-        timingSource: 'inferred',
-      });
-    }
-  }
-
-  return result;
-}
-
 // ─── Caption URL Builder ────────────────────────────────────────────────────
 // YouTube's caption baseUrls contain ip=0.0.0.0&ipbits=0 tokens that are
 // IP-session-bound. On Vercel (AWS datacenter), any IP-specific fmt like srv3
@@ -152,7 +81,7 @@ async function recoverCaptionTracks(tracks, preferredLanguage, headers) {
       return response.ok ? response.text() : null;
     },
     parseJson: parseJson3Captions,
-    parseXml: parseXmlCaptions,
+    parseXml: xml => parseTimedCaptionXml(xml, { includeTimingSource: true }),
   });
 }
 

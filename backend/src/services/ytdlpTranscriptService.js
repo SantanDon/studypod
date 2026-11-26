@@ -1,3 +1,4 @@
+import { decodeYouTubeCaptionEntities } from './youtubeUnderstandingService.js';
 import { execFile } from 'node:child_process';
 import { mkdtemp, readFile, readdir, rm } from 'node:fs/promises';
 import os from 'node:os';
@@ -14,12 +15,7 @@ const DEFAULT_TRANSCRIPT_TIMEOUT_MS = 90_000;
 let discoveredCommandPromise = null;
 
 function decodeBasicEntities(value = '') {
-  return String(value || '')
-    .replace(/&amp;/g, '&')
-    .replace(/&lt;/g, '<')
-    .replace(/&gt;/g, '>')
-    .replace(/&quot;/g, '"')
-    .replace(/&#39;|&apos;/g, "'")
+  return decodeYouTubeCaptionEntities(value)
     .replace(/\s+/g, ' ')
     .trim();
 }

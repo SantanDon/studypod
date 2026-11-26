@@ -3,6 +3,9 @@
  * YouTube may still restrict datacenter requests or have no captions available.
  */
 
+import { parseTimedCaptionXml } from '../backend/src/services/timedCaptionXml.js';
+import { decodeYouTubeCaptionEntities } from '../backend/src/services/youtubeUnderstandingService.js';
+
 export const config = { runtime: 'edge' };
 
 const YOUTUBE_INNERTUBE_API_KEY = process.env.YOUTUBE_INNERTUBE_API_KEY || '';
@@ -24,14 +27,6 @@ function corsHeaders(origin) {
   };
 }
 
-function decodeHtmlEntities(text) {
-  if (!text) return '';
-  return text
-    .replace(/&amp;/g, '&').replace(/&lt;/g, '<').replace(/&gt;/g, '>')
-    .replace(/&#39;/g, "'").replace(/&apos;/g, "'").replace(/&quot;/g, '"')
-    .replace(/&#x27;/g, "'").replace(/&#x2F;/g, '/').replace(/\n/g, ' ').trim();
-}
-
 function parseJson3Captions(jsonText) {
   const result = [];
   let data;
@@ -39,61 +34,13 @@ function parseJson3Captions(jsonText) {
   const events = Array.isArray(data?.events) ? data.events : [];
   for (const event of events) {
     if (!Array.isArray(event?.segs) || event.segs.length === 0) continue;
-    const text = decodeHtmlEntities(
+    const text = decodeYouTubeCaptionEntities(
       event.segs.map(s => typeof s?.utf8 === 'string' ? s.utf8 : '').join('').replace(/\n/g, ' ')
     ).trim();
     if (text.length > 0) {
       result.push({ text, offset: event.tStartMs || 0, duration: event.dDurationMs || 3000 });
     }
   }
-  return result;
-}
-
-function parseXmlCaptions(xmlText) {
-  const result = [];
-  if (!xmlText) return result;
-  
-  // Try <text> tags first (srv1/srv2/srv3 formats)
-  let textRegex = /<text\s+([^>]*?)>([\s\S]*?)<\/text>/gi;
-  let match;
-  while ((match = textRegex.exec(xmlText)) !== null) {
-    const attrs = match[1];
-    const content = match[2];
-    const text = decodeHtmlEntities(
-      content.replace(/<!\[CDATA\[([\s\S]*?)\]\]>/g, '$1').replace(/<[^>]+>/g, '')
-    ).trim();
-    const startMatch = attrs.match(/start="([\d.]+)"/);
-    const durMatch = attrs.match(/dur="([\d.]+)"/);
-    if (text.length > 0 && startMatch) {
-      result.push({
-        text,
-        offset: parseFloat(startMatch[1]) * 1000,
-        duration: durMatch ? parseFloat(durMatch[1]) * 1000 : 3000,
-      });
-    }
-  }
-  
-  if (result.length > 0) return result;
-
-  // Try <p> tags next (timed text/srv3 formats used by Android client)
-  const pRegex = /<p\s+([^>]*?)>([\s\S]*?)<\/p>/gi;
-  while ((match = pRegex.exec(xmlText)) !== null) {
-    const attrs = match[1];
-    const content = match[2];
-    const text = decodeHtmlEntities(
-      content.replace(/<!\[CDATA\[([\s\S]*?)\]\]>/g, '$1').replace(/<[^>]+>/g, '')
-    ).trim();
-    const tMatch = attrs.match(/\bt="([\d.]+)"/);
-    const dMatch = attrs.match(/\bd="([\d.]+)"/);
-    if (text.length > 0 && tMatch) {
-      result.push({
-        text,
-        offset: parseFloat(tMatch[1]),
-        duration: dMatch ? parseFloat(dMatch[1]) : 3000,
-      });
-    }
-  }
-
   return result;
 }
 
@@ -147,7 +94,7 @@ async function recoverCaptions(data, language, userAgent, watchUrl) {
         const body = await response.text();
         // The service can return XML even when JSON was requested (and vice versa).
         const transcript = parseJson3Captions(body);
-        const parsed = transcript.length ? transcript : parseXmlCaptions(body);
+        const parsed = transcript.length ? transcript : parseTimedCaptionXml(body, { requireTiming: true });
         if (parsed.length) return { transcript: parsed, language: track.languageCode || null };
       } catch {
         // A blocked format or malformed response must not stop the next attempt.
