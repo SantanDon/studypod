@@ -240,6 +240,11 @@ describe("audiobookBookService", () => {
     );
   });
 
+  it("keeps inline chapter text, block breaks, and literal entity examples intact", () => {
+    const fragment = '<h2>Field guide</h2><p>The <em>rain</em> gauge.<br>Read &amp;lt; as printed.</p><style>p { color: green }</style><script>setup()</script>';
+    expect(stripHtmlToText(fragment)).toBe("Field guide\nThe rain gauge.\nRead &lt; as printed.");
+  });
+
   it("splits long text files by headings and synthetic size", () => {
     const text = `Preface\n\n${"intro ".repeat(350)}\n\nCHAPTER 1: Start\n${"body ".repeat(2600)}\n\nCHAPTER 2: Continue\n${"next ".repeat(2600)}`;
     const chapters = splitTextIntoChapters(text, "Sample");

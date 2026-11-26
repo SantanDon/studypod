@@ -178,8 +178,15 @@ const ConceptMapView: React.FC<ConceptMapViewProps> = ({
         <Controls className="concept-map-controls rounded-lg border border-border bg-background/95 shadow-xl backdrop-blur-md overflow-hidden" />
         
         <Panel position="top-right" className="flex gap-2 m-4">
-          <Button variant="outline" size="icon" onClick={toggleFullscreen} className="bg-background/80 backdrop-blur-sm shadow-sm ring-1 ring-white/10">
-            {isFullscreen ? <i className="fi fi-rr-compress"></i> : <i className="fi fi-rr-expand"></i>}
+          <Button
+            variant="outline"
+            size="icon"
+            aria-label="Fullscreen concept map"
+            aria-pressed={isFullscreen}
+            onClick={toggleFullscreen}
+            className="bg-background/80 backdrop-blur-sm shadow-sm ring-1 ring-white/10"
+          >
+            <i aria-hidden="true" className={isFullscreen ? 'fi fi-rr-compress' : 'fi fi-rr-expand'} />
           </Button>
         </Panel>
 

@@ -36,6 +36,9 @@ export interface SynthesisResult {
 
 export type ProgressCallback = (message: string, percentage: number) => void;
 
+const STARTUP_IDLE_MS = 120_000;
+const STARTUP_LIMIT_MS = 15 * 60_000;
+
 class TTSWorkerManager {
   private worker: Worker | null = null;
   private isReady = false;
@@ -49,7 +52,8 @@ class TTSWorkerManager {
   private initialization: {
     resolve: () => void;
     reject: (error: Error) => void;
-    timer: ReturnType<typeof setTimeout>;
+    idleTimer: ReturnType<typeof setTimeout>;
+    limitTimer: ReturnType<typeof setTimeout>;
     onProgress?: ProgressCallback;
   } | null = null;
   private webgpuAvailable: boolean | null = null;
@@ -95,12 +99,12 @@ class TTSWorkerManager {
     };
 
     const promise = new Promise<void>((resolve, reject) => {
-      const timer = setTimeout(() => {
+      const limitTimer = setTimeout(() => {
         if (this.worker === worker) {
-          this.disposeWorker(new Error('Worker initialization timeout - model loading took too long. This may be due to slow network or large model size.'));
+          this.disposeWorker(new Error('Worker initialization timeout - the voice took over 15 minutes to load. Please retry.'));
         }
-      }, 120000);
-      this.initialization = { resolve, reject, timer, onProgress };
+      }, STARTUP_LIMIT_MS);
+      this.initialization = { resolve, reject, idleTimer: this.startIdleTimer(worker), limitTimer, onProgress };
     });
     this.initPromise = promise;
     try {
@@ -109,6 +113,14 @@ class TTSWorkerManager {
       this.disposeWorker(this.asError(error));
     }
     return promise;
+  }
+
+  private startIdleTimer(worker: Worker) {
+    return setTimeout(() => {
+      if (this.worker === worker) {
+        this.disposeWorker(new Error('Worker initialization timeout - voice loading made no progress for two minutes. Please retry.'));
+      }
+    }, STARTUP_IDLE_MS);
   }
 
   private asError(error: unknown): Error {
@@ -120,7 +132,8 @@ class TTSWorkerManager {
     if (!initialization) return;
     this.initialization = null;
     this.initPromise = null;
-    clearTimeout(initialization.timer);
+    clearTimeout(initialization.idleTimer);
+    clearTimeout(initialization.limitTimer);
     if (error) initialization.reject(error);
     else initialization.resolve();
   }
@@ -191,7 +204,11 @@ class TTSWorkerManager {
         break;
       case 'progress':
         if (id) this.progressCallbacks.get(id)?.(message || '', percentage || 0);
-        else this.initialization?.onProgress?.(message || '', percentage || 0);
+        else if (this.initialization && this.worker) {
+          clearTimeout(this.initialization.idleTimer);
+          this.initialization.idleTimer = this.startIdleTimer(this.worker);
+          this.initialization.onProgress?.(message || '', percentage || 0);
+        }
         break;
       case 'webgpu-status':
         this.webgpuAvailable = webgpuAvailable || false;

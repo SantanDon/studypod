@@ -100,6 +100,29 @@ describe('TTS worker operation settlement', () => {
     expect(vi.getTimerCount()).toBe(0);
   });
 
+  it('keeps an advancing cold download alive beyond two minutes and clears both deadlines when ready', async () => {
+    const pending = manager.initialize();
+    for (let i = 1; i <= 4; i++) {
+      await vi.advanceTimersByTimeAsync(90_000);
+      current().emit({ type: 'progress', percentage: i * 10 });
+    }
+    current().emit({ type: 'ready' });
+    await pending;
+    expect(manager.isWorkerReady()).toBe(true);
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
+  it('ends initialization even with continuous progress after fifteen minutes', async () => {
+    const rejection = expect(manager.initialize()).rejects.toThrow('15 minutes');
+    for (let i = 0; i < 15; i++) {
+      current().emit({ type: 'progress', percentage: i });
+      await vi.advanceTimersByTimeAsync(60_000);
+    }
+    await rejection;
+    expect(current().terminate).toHaveBeenCalledOnce();
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
   it('times out initialization and ignores queued ready/audio callbacks from the old worker', async () => {
     const pending = manager.initialize();
     const old = current();
@@ -146,5 +169,33 @@ describe('TTS worker operation settlement', () => {
     await expect(manager.synthesize('Sentence.', 'af_heart')).rejects.toThrow('transport closed');
     expect(manager.isWorkerReady()).toBe(false);
     expect(vi.getTimerCount()).toBe(0);
+  });
+});
+describe('voice download progress', () => {
+  it('only forwards advancing bytes and accounts for multiple files', async () => {
+    vi.useFakeTimers();
+    const worker = { postMessage: vi.fn(), onmessage: undefined as undefined | ((event: { data: object }) => Promise<void>) };
+    vi.stubGlobal('self', worker);
+    vi.doMock('kokoro-js', () => ({ KokoroTTS: {
+      from_pretrained: async (_id: string, options: { progress_callback: (event: object) => void }) => {
+        for (const [file, loaded] of [['config', 100], ['model', 1_000_000], ['model', 1_000_000], ['model', 900_000], ['model', 2_000_000]]) {
+          vi.advanceTimersByTime(2000);
+          options.progress_callback({ status: 'progress', file, loaded });
+        }
+        return {};
+      },
+    } }));
+    try {
+      await import('@/lib/tts/ttsWorkerScript');
+      await worker.onmessage!({ data: { type: 'init' } });
+      const downloads = worker.postMessage.mock.calls.map(([event]) => event.message)
+        .filter((message: string) => message.startsWith('Downloading the voice model'));
+      expect(downloads).toHaveLength(3);
+      expect(downloads.at(-1)).toContain('2.0 MB received');
+    } finally {
+      vi.doUnmock('kokoro-js');
+      vi.unstubAllGlobals();
+      vi.useRealTimers();
+    }
   });
 });

@@ -3,6 +3,7 @@ import path from "path";
 import { createHash, randomUUID } from "crypto";
 import { EPub } from "epub";
 import mammoth from "mammoth";
+import { load } from "cheerio";
 import {
   narrationCleanupStats,
   prepareNarrationText,
@@ -185,21 +186,11 @@ export function cleanPlainText(input = "") {
 }
 
 export function stripHtmlToText(html = "") {
-  return cleanPlainText(
-    html
-      .replace(/<script[\s\S]*?<\/script>/gi, " ")
-      .replace(/<style[\s\S]*?<\/style>/gi, " ")
-      .replace(/<br\s*\/?>/gi, "\n")
-      .replace(/<\/(p|div|h[1-6]|li|section|article|chapter)>/gi, "\n")
-      .replace(/<[^>]*>/g, " ")
-      .replace(/&nbsp;/gi, " ")
-      .replace(/&amp;/gi, "&")
-      .replace(/&quot;/gi, '"')
-      .replace(/&#39;/gi, "'")
-      .replace(/&apos;/gi, "'")
-      .replace(/&lt;/gi, "<")
-      .replace(/&gt;/gi, ">"),
-  );
+  const $ = load(String(html), {}, false);
+  $("script, style, template").remove();
+  $("br").replaceWith("\n");
+  $("p, div, h1, h2, h3, h4, h5, h6, li, section, article, chapter").append("\n");
+  return cleanPlainText($.root().text().replaceAll("\u00a0", " "));
 }
 
 export async function parseEpub(filePath) {
@@ -616,8 +607,9 @@ function extractSectionTitle(pages, startIndex, endIndex) {
 function sectionId(label, index) {
   const slug = String(label || `section-${index + 1}`)
     .toLowerCase()
-    .replace(/[^a-z0-9]+/g, "-")
-    .replace(/^-+|-+$/g, "")
+    .split(/[^a-z0-9]+/)
+    .filter(Boolean)
+    .join("-")
     .slice(0, 64);
   return slug || `section-${index + 1}`;
 }

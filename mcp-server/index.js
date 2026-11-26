@@ -7,6 +7,7 @@
  * STUDYPODLM_API_KEY. It never asks an agent for the user's password.
  */
 
+import { readArxivMetadata } from "./arxiv.js";
 import { Server } from "@modelcontextprotocol/sdk/server/index.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import {
@@ -516,25 +517,7 @@ async function handleToolCall({ params: { name, arguments: args } }) {
             }),
           };
         const html = await pageRes.text();
-        const titleMatch = html.match(/<title>([\s\S]*?)<\/title>/i);
-        let title = titleMatch
-          ? titleMatch[1]
-              .replace(/\s*\[\s*arXiv.*$/i, "")
-              .replace(/\s*-\s*arXiv.*$/i, "")
-              .trim()
-          : `arXiv:${args.arxivId}`;
-        if (!title) title = `arXiv:${args.arxivId}`;
-        const abstractMatch = html.match(
-          /<blockquote[^>]*class="abstract[^"]*"[^>]*>([\s\S]*?)<\/blockquote>/i,
-        );
-        let abstract = abstractMatch
-          ? abstractMatch[1]
-              .replace(/<[^>]+>/g, "")
-              .replace(/\s+/g, " ")
-              .trim()
-          : "";
-        if (abstract.toLowerCase().startsWith("abstract:"))
-          abstract = abstract.slice(9).trim();
+        const { title, abstract } = readArxivMetadata(html, args.arxivId);
         const content = abstract
           ? `# ${title}\n\nSource: ${absUrl}\n\n## Abstract\n\n${abstract}`
           : `# ${title}\n\nSource: ${absUrl}`;

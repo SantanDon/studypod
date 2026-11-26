@@ -81,13 +81,29 @@ async function initializeKokoro(): Promise<void> {
       percentage: 40,
     });
 
-    const options: { dtype: 'fp32' | 'fp16' | 'q8' | 'q4' | 'q4f16'; device: 'wasm' | 'webgpu' | 'cpu' } = {
+    const received = new Map<string, number>();
+    let totalReceived = 0;
+    let lastReport = 0;
+    kokoroInstance = await KokoroTTS.from_pretrained('onnx-community/Kokoro-82M-v1.0-ONNX', {
       dtype,
       device,
-    };
+      progress_callback: (event) => {
+        if (event.status !== 'progress' || !Number.isFinite(event.loaded)) return;
+        const previous = received.get(event.file) || 0;
+        if (event.loaded <= previous) return;
+        received.set(event.file, event.loaded);
+        totalReceived += event.loaded - previous;
+        const now = Date.now();
+        if (now - lastReport < 1000) return;
+        lastReport = now;
+        postResponse({
+          type: 'progress',
+          message: `Downloading the voice model (${(totalReceived / 1_000_000).toFixed(1)} MB received)…`,
+          percentage: 40,
+        });
+      },
+    });
 
-    kokoroInstance = await KokoroTTS.from_pretrained('onnx-community/Kokoro-82M-v1.0-ONNX', options);
-    
     // List available voices for debugging
     try {
       const voices = kokoroInstance.list_voices?.() || [];

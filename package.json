@@ -126,7 +126,7 @@
         "@vitejs/plugin-react": "^5.1.4",
         "@vitest/ui": "^4.1.10",
         "autoprefixer": "^10.4.20",
-        "concurrently": "^9.2.1",
+        "concurrently": "^9.2.5",
         "drizzle-kit": "^0.31.10",
         "eslint": "^9.9.0",
         "eslint-plugin-react-hooks": "^5.1.0-rc.0",
