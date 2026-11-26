@@ -196,6 +196,12 @@ router.post(
       if (error.code === "MISSION_ALREADY_RUNNING") {
         return res.status(409).json({ error: error.message });
       }
+      if (error.code === "GROUNDING_UNAVAILABLE") {
+        return res.status(422).json({
+          code: error.code,
+          error: "The report could not be verified against your sources. Try a more specific goal or add supporting material.",
+        });
+      }
       if (error.code === "NO_USABLE_SOURCES") {
         return res.status(422).json({ error: error.message });
       }

@@ -393,7 +393,7 @@ const PodcastView: React.FC<PodcastViewProps> = ({ notebookId, onOpenSource }) =
           setFinalAudio("webspeech_fallback", safeNotebookId, ownedScript.title || "Audio Overview");
           toast({
             title: "Playback only",
-            description: "This episode can play with browser speech, but no downloadable audio was created. Regenerate the overview to retry audio generation.",
+            description: "You can listen now with browser speech or retry recording this script for download.",
           });
           return;
         }
@@ -1296,9 +1296,14 @@ const PodcastView: React.FC<PodcastViewProps> = ({ notebookId, onOpenSource }) =
           <h3 id="studypod-current-listen-heading">Current episode</h3>
           <p>
             {finalAudioUrl === "webspeech_fallback"
-              ? "Browser speech can play this episode here, but it is not a downloadable audio file. Regenerate the overview to retry audio generation."
+              ? "Listen here with browser speech. To save an audio file, retry recording this episode."
               : "Play your episode or download it to listen offline."}
           </p>
+          {finalAudioUrl === "webspeech_fallback" && script?.segments.length && usePodcastGenerationStore.getState().sourceIds.length > 0 ? (
+            <button type="button" className="footer-btn" onClick={handleRestartRecording} disabled={isStarting}>
+              <FontAwesomeIcon icon={faArrowsRotate} /> Retry recording for download
+            </button>
+          ) : null}
         </div>
       <AudioPlayer
         audioUrl={finalAudioUrl!}
@@ -1377,7 +1382,7 @@ const PodcastView: React.FC<PodcastViewProps> = ({ notebookId, onOpenSource }) =
             <FontAwesomeIcon icon={faSliders} /> Set up podcast
           </button>
           <button className="footer-btn" onClick={() => { void handleGenerate(); }} disabled={cannotCreateAudio || isStarting} aria-describedby="studypod-audio-regenerate-scope">
-            <FontAwesomeIcon icon={faArrowsRotate} /> {finalAudioUrl === "webspeech_fallback" ? "Retry downloadable audio" : "Regenerate overview"}
+            <FontAwesomeIcon icon={faArrowsRotate} /> Regenerate overview
           </button>
           <button className="footer-btn" onClick={() => setIsSettingsOpen(true)}>
             <FontAwesomeIcon icon={faGear} /> Browser voice settings

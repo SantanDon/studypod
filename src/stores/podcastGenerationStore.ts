@@ -183,7 +183,9 @@ export const usePodcastGenerationStore = create<PodcastGenerationState>(
         notebookId: notebookId || state.notebookId,
         isGenerating: false,
         finalizingScript: null,
-        script: title ? { title, segments: [] } : state.script,
+        script: audioUrl === "webspeech_fallback" && state.notebookId === notebookId
+          ? state.script
+          : title ? { title, segments: [] } : state.script,
       }));
       // Final clear of intermediate state as it's now in history
       localStorage.removeItem(

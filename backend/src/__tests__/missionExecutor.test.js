@@ -91,6 +91,7 @@ describe("agent mission execution", () => {
           expect.objectContaining({ id: "note-1" }),
           expect.objectContaining({ id: "note-2" }),
         ],
+        message: mission.goal,
         callerType: "mission",
         responseStyle: "dense",
         allowWebFallback: false,

@@ -1796,7 +1796,7 @@ After your answer, append a final block headed exactly "CITATIONS:" on its own l
 
 ${styleInstruction}
 
-Caller: ${callerType}`;
+Caller: ${callerType}${callerType === "mission" ? "\nWrite a research report answering the mission goal. Cite the strongest evidence and identify material contradictions, missing evidence, and source-grounded next steps where relevant." : ""}`;
 }
 
 /**

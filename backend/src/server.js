@@ -37,6 +37,7 @@ import aiRoutes from "./routes/ai.js";
 import { initializeDatabase } from "./db/database.js";
 import { errorHandler } from "./middleware/errorHandler.js";
 import { authenticateToken, requireScope } from "./middleware/auth.js";
+import { isAllowedBrowserOrigin, protectBrowserWrites } from "./middleware/browserWrites.js";
 import { normalizeBodyKeys } from "./middleware/normalizeKeys.js";
 import { logger, requestLogger } from "./utils/logger.js";
 
@@ -184,7 +185,7 @@ const allowedOrigins =
 
 if (process.env.CORS_ORIGIN) {
   process.env.CORS_ORIGIN.split(",").forEach((origin) => {
-    const trimmed = origin.trim();
+    const trimmed = origin.trim().replace(/\/$/, "");
     if (trimmed && !allowedOrigins.includes(trimmed))
       allowedOrigins.push(trimmed);
   });
@@ -195,11 +196,7 @@ app.use(
     origin: (origin, callback) => {
       const isAllowed =
         !origin ||
-        allowedOrigins.includes(origin) ||
-        allowedOrigins.includes(origin.replace(/\/$/, "")) ||
-        (process.env.NODE_ENV !== "production" &&
-          (origin.startsWith("http://localhost:") ||
-            origin.startsWith("http://127.0.0.1:")));
+        isAllowedBrowserOrigin(origin, allowedOrigins, process.env.NODE_ENV !== "production");
 
       if (isAllowed) {
         callback(null, true);
@@ -222,6 +219,7 @@ const structuredBodyLimit = process.env.STRUCTURED_BODY_LIMIT || "20mb";
 app.use(express.json({ limit: structuredBodyLimit }));
 app.use(express.urlencoded({ extended: true, limit: structuredBodyLimit }));
 app.use(cookieParser());
+app.use(protectBrowserWrites(allowedOrigins, process.env.NODE_ENV !== "production"));
 app.use(requestLogger);
 app.use(normalizeBodyKeys);
 app.use(oauthRoutes);

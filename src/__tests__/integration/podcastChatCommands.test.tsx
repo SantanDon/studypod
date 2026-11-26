@@ -68,6 +68,20 @@ describe('chat -> existing Podcast Studio handler (mocked providers, real compon
         expect(usePodcastGenerationStore.getState().sourceIds).toEqual(['selected']);
     });
 
+    it('retries a browser-speech episode with the original script and sources', async () => {
+        render(<PodcastView notebookId="notebook-a"/>);
+        act(() => {
+            const store = usePodcastGenerationStore.getState();
+            store.startGeneration('notebook-a', script(), { sourceIds: ['selected'] });
+            store.setFinalAudio('webspeech_fallback', 'notebook-a', 'Fixture podcast');
+        });
+        fireEvent.click(await screen.findByRole('button', { name: 'Retry recording for download' }));
+        await waitFor(() => expect(mock.start).toHaveBeenCalledTimes(1));
+        expect(mock.script).not.toHaveBeenCalled();
+        expect(mock.start.mock.calls[0][0]).toEqual(script());
+        expect(usePodcastGenerationStore.getState().sourceIds).toEqual(['selected']);
+    });
+
     it('generates once in StrictMode from exactly the confirmed sources and focus', async () => {
         render(<StrictMode><PodcastView notebookId="notebook-a"/></StrictMode>);
         act(() => { command('Make a podcast about planetary orbits'); });
