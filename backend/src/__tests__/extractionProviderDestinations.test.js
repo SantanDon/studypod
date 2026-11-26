@@ -61,6 +61,42 @@ describe("source extraction destinations", () => {
     }
   });
 
+  it("keeps aborted resolver work in the shared capacity limit until it settles", async () => {
+    const pendingDns = Array.from({ length: 8 }, () => Promise.withResolvers());
+    const controllers = pendingDns.map(() => new AbortController());
+    const timeout = vi.spyOn(AbortSignal, "timeout");
+    const addresses = [{ address: "8.8.8.8", family: 4 }];
+    for (const [index, pending] of pendingDns.entries()) {
+      lookup.mockReturnValueOnce(pending.promise);
+      timeout.mockReturnValueOnce(controllers[index].signal);
+    }
+    request.mockResolvedValue({ status: 200 });
+
+    try {
+      const attempts = controllers.map((_, index) =>
+        index % 2 === 0 ? fetchPublicUrl("https://example.com") : extractWebSource("https://example.com"),
+      );
+      const results = Promise.allSettled(attempts);
+      controllers.forEach((controller) => controller.abort(new Error("Extraction deadline")));
+      expect((await results).every(({ status, reason }) =>
+        status === "rejected" && reason.message === "Extraction deadline",
+      )).toBe(true);
+
+      await expect(extractWebSource("https://example.org")).rejects.toThrow("External DNS is busy");
+      await expect(fetchPublicUrl("https://example.org")).rejects.toThrow("External DNS is busy");
+      expect(lookup).toHaveBeenCalledTimes(8);
+      expect(request).not.toHaveBeenCalled();
+
+      pendingDns[0].reject(new Error("Late resolver failure"));
+      await Promise.resolve();
+      await expect(fetchPublicUrl("https://example.org")).resolves.toEqual({ status: 200 });
+      expect(lookup).toHaveBeenCalledTimes(9);
+    } finally {
+      timeout.mockRestore();
+      pendingDns.forEach(({ resolve }) => resolve(addresses));
+    }
+  });
+
   it("fetches GitHub metadata, trees and nested file paths from their designated providers", async () => {
     request.mockResolvedValueOnce({ ok: true, json: async () => ({ default_branch: "study/guide" }) })
       .mockResolvedValueOnce({ ok: true, json: async () => ({ tree: [{ type: "blob", path: "notes/week 1.md" }] }) })

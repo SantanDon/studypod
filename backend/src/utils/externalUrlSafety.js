@@ -70,10 +70,42 @@ export function parseExternalHttpsUrl(value) {
   return parsed;
 }
 
-export async function assertSafeExternalHttpsUrl(value) {
+const MAX_OUTSTANDING_LOOKUPS = 8;
+let outstandingLookups = 0;
+
+async function resolveExternalHost(host) {
+  if (outstandingLookups >= MAX_OUTSTANDING_LOOKUPS) {
+    throw new Error('External DNS is busy. Try again shortly.');
+  }
+  outstandingLookups += 1;
+  try {
+    return await lookup(host, { all: true, verbatim: true });
+  } finally {
+    // An aborted caller does not cancel Node's system resolver work.
+    outstandingLookups -= 1;
+  }
+}
+
+export async function lookupExternalHost(host, signal) {
+  if (!signal) return resolveExternalHost(host);
+  signal.throwIfAborted();
+
+  let onAbort;
+  const deadline = new Promise((_, reject) => {
+    onAbort = () => reject(signal.reason);
+    signal.addEventListener('abort', onAbort, { once: true });
+  });
+  try {
+    return await Promise.race([resolveExternalHost(host), deadline]);
+  } finally {
+    signal.removeEventListener('abort', onAbort);
+  }
+}
+
+export async function assertSafeExternalHttpsUrl(value, signal) {
   const parsed = parseExternalHttpsUrl(value);
   if (!isIP(stripIpv6Brackets(parsed.hostname))) {
-    const addresses = await lookup(parsed.hostname, { all: true, verbatim: true });
+    const addresses = await lookupExternalHost(parsed.hostname, signal);
     if (!addresses.length || addresses.some(({ address }) => !isPublicIpAddress(address))) {
       throw new Error('Webhook hostname does not resolve exclusively to public addresses.');
     }

@@ -1,10 +1,9 @@
 import fetch from "node-fetch";
-import { lookup } from "node:dns/promises";
 import { Agent } from "node:https";
 import { isIP } from "node:net";
 import * as cheerio from "cheerio";
 import { logger } from "../utils/logger.js";
-import { assertSafeExternalHttpsUrl, isPublicIpAddress, parseExternalHttpsUrl } from "../utils/externalUrlSafety.js";
+import { assertSafeExternalHttpsUrl, isPublicIpAddress, lookupExternalHost, parseExternalHttpsUrl } from "../utils/externalUrlSafety.js";
 
 // Cheerio keeps the serverless extraction pass lightweight and ESM-compatible.
 
@@ -19,21 +18,6 @@ const MAX_SOURCE_BYTES = 8 * 1024 * 1024;
 
 class ExternalDestinationError extends Error {}
 
-async function lookupBeforeDeadline(host, signal) {
-  signal.throwIfAborted();
-  let onAbort;
-  const deadline = new Promise((_, reject) => {
-    onAbort = () => reject(signal.reason);
-    signal.addEventListener("abort", onAbort, { once: true });
-  });
-  try {
-    // The system resolver may finish later. The race still handles its rejection.
-    return await Promise.race([lookup(host, { all: true, verbatim: true }), deadline]);
-  } finally {
-    signal.removeEventListener("abort", onAbort);
-  }
-}
-
 export async function fetchPublicUrl(url, { headers, timeout = 15000 } = {}, fetchImpl = fetch) {
   // One deadline covers DNS, the redirect chain and reading the decoded body.
   const signal = AbortSignal.timeout(timeout);
@@ -46,7 +30,7 @@ export async function fetchPublicUrl(url, { headers, timeout = 15000 } = {}, fet
       target = parseExternalHttpsUrl(currentUrl);
       const host = target.hostname.replace(/^\[|\]$/g, "");
       if (!isIP(host)) {
-        const addresses = await lookupBeforeDeadline(host, signal);
+        const addresses = await lookupExternalHost(host, signal);
         if (!addresses.length || addresses.some(({ address }) => !isPublicIpAddress(address))) {
           throw new Error("Hostname must resolve exclusively to public addresses.");
         }
@@ -507,7 +491,7 @@ async function extractGitHubRepo(url) {
 }
 
 export async function extractWebSource(url) {
-  url = await assertSafeExternalHttpsUrl(url);
+  url = await assertSafeExternalHttpsUrl(url, AbortSignal.timeout(15000));
   const { hostname: logHost, pathname } = new URL(url);
   const route = pathname.split("/").filter(Boolean);
   const isGitHubRepo =

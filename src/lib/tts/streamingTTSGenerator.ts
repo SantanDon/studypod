@@ -91,15 +91,7 @@ interface GeneratedAudio {
 
 class StreamingTTSGenerator {
   private isGenerating = false;
-  private shouldCancel = false;
-  /**
-   * Execution identity for the current run. `shouldCancel` alone is not enough: it is a
-   * single shared boolean that a new start resets, so a superseded run that is still
-   * inside an `await` can wake up believing it is still the active run and write its
-   * late audio/progress into the new one. Every run takes a new id; `cancel()` and a
-   * new start both invalidate the previous one, and callbacks tagged with a stale id
-   * are dropped.
-   */
+  // Invalidating the run prevents late provider responses from modifying a replacement.
   private runId = 0;
   private generatedAudios: GeneratedAudio[] = [];
   private currentScript: PodcastScript | null = null;
@@ -177,7 +169,6 @@ class StreamingTTSGenerator {
     onAudioReady = tagRun(onAudioReady);
 
     this.isGenerating = true;
-    this.shouldCancel = false;
     this.discardGeneratedAudio();
     this.currentScript = script;
     this.audioElements = [];
@@ -199,10 +190,13 @@ class StreamingTTSGenerator {
       }
     }
 
+    if (!isCurrentRun()) return;
     const fullConfig = { ...DEFAULT_CONFIG, ...config };
     this.currentConfig = fullConfig;
 
     // Determine which TTS to use
+    const useKokoro = !fullConfig.forceWebSpeech && fullConfig.useKokoro && await this.isKokoroAvailable();
+    if (!isCurrentRun()) return;
     if (fullConfig.forceWebSpeech) {
       console.log("Using Web Speech API (forced)");
       this.usingKokoro = false;
@@ -211,8 +205,9 @@ class StreamingTTSGenerator {
         fullConfig,
         onProgress,
         onAudioReady,
+        isCurrentRun,
       );
-    } else if (fullConfig.useKokoro && (await this.isKokoroAvailable())) {
+    } else if (useKokoro) {
       console.log("Using Kokoro TTS via Web Worker");
       this.usingKokoro = true;
       await this.generateWithKokoroWorker(
@@ -220,6 +215,7 @@ class StreamingTTSGenerator {
         fullConfig,
         onProgress,
         onAudioReady,
+        isCurrentRun,
       );
     } else {
       console.log("Falling back to Web Speech API");
@@ -229,6 +225,7 @@ class StreamingTTSGenerator {
         fullConfig,
         onProgress,
         onAudioReady,
+        isCurrentRun,
       );
     }
   }
@@ -241,10 +238,12 @@ class StreamingTTSGenerator {
     config: StreamingConfig,
     onProgress: ProgressCallback,
     onAudioReady: AudioReadyCallback,
+    isCurrentRun: () => boolean,
   ): Promise<void> {
     try {
       // Get or create worker manager (lazy loaded)
       const workerManager = await this.getWorkerManager();
+      if (!isCurrentRun()) return;
 
       onProgress({
         phase: "loading",
@@ -271,10 +270,7 @@ class StreamingTTSGenerator {
         });
       }
 
-      if (this.shouldCancel) {
-        this.cleanup("cancelled", onProgress);
-        return;
-      }
+      if (!isCurrentRun()) return;
 
       // Optimize segments
       const optimizedSegments = this.optimizeSegments(script.segments)
@@ -295,10 +291,7 @@ class StreamingTTSGenerator {
       const startTime = Date.now();
 
       for (let i = 0; i < optimizedSegments.length; i++) {
-        if (this.shouldCancel) {
-          this.cleanup("cancelled", onProgress);
-          return;
-        }
+        if (!isCurrentRun()) return;
 
         const segment = optimizedSegments[i];
         const voice =
@@ -344,14 +337,13 @@ class StreamingTTSGenerator {
                 usingKokoro: true,
               });
             },
+            isCurrentRun,
           );
 
-          if (this.shouldCancel) {
+          if (!isCurrentRun()) {
             if (result.audioUrl?.startsWith('blob:') && typeof URL.revokeObjectURL === 'function') {
               URL.revokeObjectURL(result.audioUrl);
             }
-            this.discardGeneratedAudio();
-            this.cleanup('cancelled', onProgress);
             return;
           }
           // Store the generated audio
@@ -394,11 +386,13 @@ class StreamingTTSGenerator {
           // Small yield not needed when using worker - keeping loop tight for background performance
           // await new Promise(r => setTimeout(r, config.yieldDuration));
         } catch (error) {
+          if (!isCurrentRun()) return;
           console.error(`Failed to generate segment ${i}:`, error);
           throw error;
         }
       }
 
+      if (!isCurrentRun()) return;
       // Mark generation as complete BEFORE calling final callbacks
       // This ensures isRunning() returns false when handleAudioReady checks it
       this.isGenerating = false;
@@ -424,10 +418,7 @@ class StreamingTTSGenerator {
         segmentsReady: this.generatedAudios.length,
       });
     } catch (error) {
-      if (this.shouldCancel) {
-        this.cleanup("cancelled", onProgress);
-        return;
-      }
+      if (!isCurrentRun()) return;
 
       console.error("Kokoro worker generation failed:", error);
 
@@ -440,6 +431,7 @@ class StreamingTTSGenerator {
         config,
         onProgress,
         onAudioReady,
+        isCurrentRun,
       );
     }
   }
@@ -452,6 +444,7 @@ class StreamingTTSGenerator {
     config: StreamingConfig,
     onProgress: ProgressCallback,
     onAudioReady: AudioReadyCallback,
+    isCurrentRun: () => boolean,
   ): Promise<void> {
     onProgress({
       phase: "loading",
@@ -465,10 +458,7 @@ class StreamingTTSGenerator {
 
     await new Promise((r) => setTimeout(r, 100));
 
-    if (this.shouldCancel) {
-      this.cleanup("cancelled", onProgress);
-      return;
-    }
+    if (!isCurrentRun()) return;
 
     const optimizedSegments = this.optimizeSegments(script.segments);
 
@@ -483,10 +473,7 @@ class StreamingTTSGenerator {
     });
 
     for (let i = 0; i < optimizedSegments.length; i++) {
-      if (this.shouldCancel) {
-        this.cleanup("cancelled", onProgress);
-        return;
-      }
+      if (!isCurrentRun()) return;
 
       const segment = optimizedSegments[i];
       const cleanText = AudioContentCleaner.cleanSegment(segment.text);
@@ -542,6 +529,7 @@ class StreamingTTSGenerator {
       await new Promise((r) => setTimeout(r, 20));
     }
 
+    if (!isCurrentRun()) return;
     // Mark generation as complete BEFORE calling final callbacks
     this.isGenerating = false;
 
@@ -570,7 +558,8 @@ class StreamingTTSGenerator {
    * Cancel generation
    */
   cancel(): void {
-    this.shouldCancel = true;
+    this.isGenerating = false;
+    this.discardGeneratedAudio();
     // Invalidate the current run's execution identity so a result that is already
     // inside an `await` cannot resume and report into a later run.
     this.runId++;
@@ -1087,8 +1076,6 @@ class StreamingTTSGenerator {
   }
 
   reset(): void {
-    // A reset requests cancellation but does not release the one-run guard
-    // until the outstanding provider promise has actually settled.
     if (this.isGenerating) this.cancel();
     else this.stopPlayback();
     this.discardGeneratedAudio();
@@ -1172,6 +1159,7 @@ class StreamingTTSGenerator {
     speed: number,
     onProgress: (message: string, percentage: number) => void,
     onRetry: () => void,
+    isCurrentRun: () => boolean,
   ): Promise<SynthesisResult> {
     let lastError: unknown;
     let synthesisAttempts = 0;
@@ -1185,18 +1173,18 @@ class StreamingTTSGenerator {
             throw new Error("Worker initialization completed without becoming ready");
           }
         } catch (error) {
-          if (this.shouldCancel) throw error;
+          if (!isCurrentRun()) throw error;
           lastError = error;
           if (initializationRetries >= 1) throw error;
           initializationRetries += 1;
           onRetry();
           await new Promise((resolve) => setTimeout(resolve, 250));
-          if (this.shouldCancel) throw error;
+          if (!isCurrentRun()) throw error;
           continue;
         }
       }
 
-      if (this.shouldCancel) throw new Error("Cancelled");
+      if (!isCurrentRun()) throw new Error("Cancelled");
       synthesisAttempts += 1;
       try {
         // A timeout or worker-level failure disposes the worker. Recreate it
@@ -1205,12 +1193,12 @@ class StreamingTTSGenerator {
       } catch (error) {
         // Cancellation rejects the pending worker request. Never retry that run,
         // including when cancellation arrives during the retry backoff.
-        if (this.shouldCancel) throw error;
+        if (!isCurrentRun()) throw error;
         lastError = error;
         if (synthesisAttempts < 2) {
           onRetry();
           await new Promise((resolve) => setTimeout(resolve, 250));
-          if (this.shouldCancel) throw error;
+          if (!isCurrentRun()) throw error;
         }
       }
     }
@@ -1252,22 +1240,7 @@ class StreamingTTSGenerator {
     return Math.round(avgTimePerSegment * remaining);
   }
 
-  private cleanup(
-    reason: "cancelled" | "error",
-    onProgress: ProgressCallback,
-  ): void {
-    if (reason === "cancelled") this.discardGeneratedAudio();
-    this.isGenerating = false;
-    onProgress({
-      phase: reason,
-      currentSegment: 0,
-      totalSegments: 0,
-      percentage: 0,
-      message:
-        reason === "cancelled" ? "Generation cancelled" : "Generation failed",
-      canPlay: this.generatedAudios.length > 0,
-    });
-  }
+
 }
 
 // Singleton

@@ -26,6 +26,8 @@ function forms(token) {
 
 // Attribute questions often name the property while the passage gives only its value.
 const properties = [
+  { prompt: /^(?:what|which) (?:wind )?direction\b/i, omit: [],
+    evidence: /\b(?:was|is|pointed|points)\s+(?:due\s+)?(?:(?:north(?:east|west)?|south(?:east|west)?|east|west)(?:erly|ward(?:s)?)?\b|clockwise\b|counterclockwise\b|anticlockwise\b|left\b|right\b|\d{1,3}(?:\.\d+)?\s*(?:°|degrees?\b))/i },
   { prompt: /^what (?:colou?r|shade)\b/i, omit: ["color", "colour", "shade"],
     evidence: /\b(?:colou?r|black|white|gr[ae]y|red|orange|yellow|green|blue|purple|brown|pink|violet|turquoise|indigo|silver|gold|cyan|magenta|teal|navy|maroon|amber)\b/i },
   { prompt: /^what (?:temperature|heat)\b/i, omit: ["temperature", "heat"],

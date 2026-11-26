@@ -8,13 +8,12 @@ import WhatsHappening from "@/components/dashboard/WhatsHappening";
 import GoalsPulse from "@/components/dashboard/GoalsPulse";
 import { useNotebooks } from "@/hooks/useNotebooks";
 import { useAuth } from "@/hooks/useAuth";
-import { useVisualEffectsStore } from "@/stores/visualEffectsStore";
+import "@/components/notebook/AudioTitles.css";
 import { FEATURE_FLAGS } from "@/config/featureFlags";
 
 const Dashboard = () => {
   const { user, loading: authLoading, error: authError } = useAuth();
   const { notebooks, isLoading, error, isError } = useNotebooks();
-  const { useCustomFonts } = useVisualEffectsStore();
   const hasNotebooks = notebooks && notebooks.length > 0;
   const recentAudio = useRecentSavedPodcast(isLoading || isError ? [] : notebooks.map((notebook: { id: string }) => notebook.id));
   const episodeNotebook = notebooks.find((notebook: { id: string }) => notebook.id === recentAudio.episode?.notebook_id);
@@ -119,7 +118,7 @@ const Dashboard = () => {
       <main className={`max-w-7xl mx-auto px-4 sm:px-6 py-8 ${hasNotebooks ? '' : 'min-h-[calc(100dvh-8rem)] flex items-center justify-center'}`}>
         {hasNotebooks ? (
           <>
-            <h1 className={`mb-6 text-3xl font-semibold tracking-tight text-foreground ${useCustomFonts ? 'font-heading' : ''}`}>Your research workspace</h1>
+            <h1 className="workspace-display-heading mb-6 text-balance text-3xl font-semibold tracking-tight text-foreground">Your research workspace</h1>
             <div className="grid grid-cols-1 lg:grid-cols-4 gap-8 items-start">
             <div id="dashboard-notebooks" tabIndex={-1} className="lg:col-span-3">
               <NotebookGrid />

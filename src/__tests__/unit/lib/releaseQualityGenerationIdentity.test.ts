@@ -33,9 +33,7 @@ vi.mock("@/lib/tts/ttsWorker", () => ({
   }),
 }));
 
-// The generator is a module-level singleton, and a cancelled run only clears
-// `isGenerating` once its in-flight segment unwinds. Reset the module registry so each
-// test gets a genuinely fresh instance instead of inheriting a stuck run.
+// Each scenario starts with a fresh generator singleton.
 const loadGenerator = async () => {
   vi.resetModules();
   const mod = await import("@/lib/tts/streamingTTSGenerator");
@@ -107,25 +105,33 @@ describe("a superseded generation run cannot report into a newer run", () => {
     expect(ready).toEqual([]);
   });
 
-  it('holds the run guard through reset and discards a late provider result before internal storage', async () => {
+  it.each(['worker', 'fallback'])('allows immediate retry while cancelled %s generation unwinds', async provider => {
     const generator = await loadGenerator();
-    mocks.synthesize.mockImplementation(() => new Promise(resolve => { resolveSynthesize = resolve; }));
-    const ready = vi.fn();
-    const config = { useKokoro: true, forceWebSpeech: false, host1Voice: 'am_onyx', host2Voice: 'af_nova' };
-    const running = generator.startStreaming(script, config, vi.fn(), ready);
-    await vi.waitFor(() => expect(mocks.synthesize).toHaveBeenCalled());
-    generator.reset();
-    expect(generator.isRunning()).toBe(true);
-    await expect(generator.startStreaming(script, config, vi.fn(), vi.fn())).rejects.toThrow(/already running/i);
-    resolveSynthesize({ audioUrl: 'blob:discard-late', audioBlob: new Blob(['fixture']), duration: 1 });
-    await running;
+    let releaseOld: (value: unknown) => void = () => {};
+    let releaseNew: (value: unknown) => void = () => {};
+    const config = { useKokoro: true, host1Voice: 'am_onyx', host2Voice: 'af_nova' };
+    if (provider === 'worker') {
+      mocks.synthesize.mockImplementationOnce(() => new Promise(resolve => { releaseOld = resolve; }));
+    }
+    mocks.synthesize.mockImplementationOnce(() => new Promise(resolve => { releaseNew = resolve; }));
+    const oldReady = vi.fn();
+    const oldProgress = vi.fn();
+    const old = generator.startStreaming(script, { ...config, forceWebSpeech: provider === 'fallback' }, oldProgress, oldReady);
+    await vi.waitFor(() => expect(provider === 'worker' ? mocks.synthesize : oldProgress).toHaveBeenCalled());
+    generator.cancel();
     expect(generator.isRunning()).toBe(false);
+    const replacement = generator.startStreaming(script, config, vi.fn(), vi.fn());
+    await vi.waitFor(() => expect(mocks.synthesize).toHaveBeenCalledTimes(provider === 'worker' ? 2 : 1));
+    const result = (url: string) => ({ audioUrl: url, audioBlob: new Blob(['fixture']), duration: 1 });
+    releaseOld(result('blob:obsolete'));
+    await old;
+    expect(generator.isRunning()).toBe(true);
     expect(generator.getGeneratedSegments()).toEqual([]);
-    expect(ready).not.toHaveBeenCalled();
-    expect(URL.revokeObjectURL).toHaveBeenCalledWith('blob:discard-late');
-    mocks.synthesize.mockResolvedValue({ audioUrl: 'blob:next-run', audioBlob: new Blob(['fixture']), duration: 1 });
-    await generator.startStreaming(script, config, vi.fn(), vi.fn());
-    expect(generator.getGeneratedSegments().map(item => item.url)).toEqual(['blob:next-run']);
+    expect(oldReady).not.toHaveBeenCalled();
+    if (provider === 'worker') expect(URL.revokeObjectURL).toHaveBeenCalledWith('blob:obsolete');
+    releaseNew(result('blob:replacement'));
+    await replacement;
+    expect(generator.getGeneratedSegments().map(segment => segment.url)).toEqual(['blob:replacement']);
     generator.reset();
   });
 

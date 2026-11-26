@@ -12,7 +12,7 @@ const SovereignChatIntro: React.FC<SovereignChatIntroProps> = ({ onPromptClick, 
     <section className="mx-auto w-full max-w-3xl px-4 pb-3 pt-3 sm:px-8 sm:pb-4 sm:pt-8" aria-label="Suggested questions">
       <div className="mb-2 sm:mb-5">
         <p className="hidden text-xs font-medium uppercase sm:block tracking-[0.18em] text-muted-foreground">Study chat</p>
-        <h2 className="text-base font-semibold sm:mt-2 sm:text-2xl tracking-tight text-foreground">
+        <h2 className="workspace-display-heading text-balance text-xl font-semibold tracking-tight text-foreground sm:mt-2 sm:text-2xl">
           {username ? `Where should we start, ${username}?` : 'Start with your sources'}
         </h2>
         <p className="mt-2 hidden max-w-2xl sm:block text-sm leading-6 text-muted-foreground">

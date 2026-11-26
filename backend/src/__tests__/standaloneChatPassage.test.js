@@ -88,6 +88,7 @@ describe("standalone chat during a provider outage", () => {
     ["Who approves the annual budget?", "The annual budget is approved by Morgan."],
     ["Who tallies the visitor slips?", "Visitor slips are tallied by Gabriela."],
     ["What shade is the fabric swatch?", "The fabric swatch is navy."],
+    ["What wind direction was recorded on Tuesday?", "The wind direction recorded on Tuesday was northeast."],
     ["What temperature is the drying oven?", "The drying oven is maintained at 80 degrees Celsius."],
     ["What material is the exhibit plaque made from?", "The exhibit plaque is brass."],
     ["How long does the training session last?", "The training session lasts five hours."],
@@ -99,6 +100,9 @@ describe("standalone chat during a provider outage", () => {
   });
   it.each([
     ["What shade is the fabric swatch?", "The fabric swatch is on display."],
+    ["What wind direction was recorded on Tuesday?", "The wind direction was recorded on Tuesday."],
+    ["What wind direction was recorded on Tuesday?", "The west shed log shows the wind direction was recorded on Tuesday."],
+    ["What wind direction was recorded on Tuesday?", "The rain gauge is inspected on Tuesday.\nThe wind direction recorded on Monday was northeast."],
     ["What shade is the fabric swatch?", "The fabric swatch is on display. The floor is navy."],
     ["What material is the exhibit plaque made from?", "The exhibit plaque is missing."],
     ["How long does the training session last?", "The training session lasts until the vote."],

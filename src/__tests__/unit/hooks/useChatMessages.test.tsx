@@ -538,6 +538,7 @@ describe('signed-in chat failure and retry', () => {
 
   it.each([
     [503, 'PROVIDER_UNAVAILABLE', 'AI providers are temporarily unavailable.', 'AI Temporarily Unavailable', true],
+    [422, 'GROUNDING_UNAVAILABLE', 'The answer could not be verified.', "Couldn't Verify an Answer", false],
     [503, 'DATABASE_TEMPORARILY_UNAVAILABLE', 'The notebook database is temporarily unavailable.', 'Notebook Temporarily Unavailable', true],
     [503, 'OTHER_SERVICE_UNAVAILABLE', 'Another service is unavailable.', 'Temporarily Unavailable', true],
     [503, undefined, 'Service temporarily unavailable.', 'Temporarily Unavailable', true],
@@ -550,6 +551,7 @@ describe('signed-in chat failure and retry', () => {
     const toast = mocks.toast.mock.calls.at(-1)![0];
     expect(toast.title).toBe(title);
     expect(!!toast.action).toBe(retry);
+    if (code === 'PROVIDER_UNAVAILABLE' || code === 'GROUNDING_UNAVAILABLE') expect(toast.description).toContain('Open Sources');
     if (title !== 'AI Temporarily Unavailable') expect(toast.description).not.toContain('AI providers are currently unreachable');
     expect(mocks.send).toHaveBeenCalledTimes(1);
   });

@@ -199,9 +199,9 @@ export function ProfileMenu() {
     <>
       <DropdownMenu>
         <DropdownMenuTrigger asChild>
-          <Button variant="ghost" className="relative h-10 w-10 rounded-full">
+          <Button variant="ghost" aria-label="Open profile menu" className="relative h-10 w-10 rounded-full">
             <Avatar className="h-10 w-10">
-              <AvatarFallback className="bg-primary text-primary-foreground">
+              <AvatarFallback className="bg-slate-800 text-white dark:bg-slate-200 dark:text-slate-900">
                 {userInitials}
               </AvatarFallback>
             </Avatar>

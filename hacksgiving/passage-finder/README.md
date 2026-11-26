@@ -12,4 +12,4 @@ The agent reads one fixed public file. Its default requests go through the Sprit
 
 ## Check the answers locally
 
-With Node 22 or newer, run `npm ci` from the repository root to install the test dependencies. From this folder, run `node --test match.test.mjs server.test.mjs`. The tests use the included guide and a simulated connector response. They check weekday questions, unrelated questions, and whether the HTTP answer quotes the exact line and revision in its link. To check the real connector, open the hosted Sprite, ask the Friday question, and compare the displayed quote with the highlighted line on GitHub.
+With Node 22 or newer, run `npm ci` from the repository root to install the test dependencies. From this folder, run `node --test`. The tests use the included guide and a simulated connector response. They check weekday questions, unrelated questions, and whether the HTTP answer quotes the exact line and revision in its link. To check the real connector, open the hosted Sprite, ask the Friday question, and compare the displayed quote with the highlighted line on GitHub.

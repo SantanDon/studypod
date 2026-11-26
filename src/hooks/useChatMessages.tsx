@@ -580,6 +580,7 @@ ${evidence}` },
       const isProviderUnavailable = errorCode === 'PROVIDER_UNAVAILABLE'
         || (!errorCode && msg.includes('PROVIDER_UNAVAILABLE'));
       const isDatabaseUnavailable = errorCode === 'DATABASE_TEMPORARILY_UNAVAILABLE';
+      const isUnverified = errorCode === 'GROUNDING_UNAVAILABLE';
       const isLocalChatUnsupported = errorCode === 'LOCAL_CHAT_NOT_SUPPORTED';
       const canRetry = isTrueOffline || isProviderUnavailable || isDatabaseUnavailable || httpStatus === 503
         || (!!pendingLocalTurn.current && pendingLocalTurn.current.key === localTurnKey(variables));
@@ -588,7 +589,9 @@ ${evidence}` },
       const description = isTrueOffline
         ? "You appear to be offline. Your draft is saved — retry when your connection is restored."
         : isProviderUnavailable
-          ? "AI providers are currently unreachable. Your draft is still available, so you can retry when the connection recovers."
+          ? "Your draft is still available. Open Sources to read the material, or retry when AI is available."
+          : isUnverified
+            ? "StudyPod couldn't verify an answer. Open Sources to check the passage, or ask a more specific question."
           : isDatabaseUnavailable
             ? "The notebook database is temporarily unavailable. Your draft is still available. Please retry shortly."
           : isImageBlock
@@ -599,6 +602,7 @@ ${evidence}` },
         title: isLocalChatUnsupported ? "Local Chat Not Available Yet"
           : isTrueOffline ? "You're Offline"
           : isProviderUnavailable ? "AI Temporarily Unavailable"
+            : isUnverified ? "Couldn't Verify an Answer"
             : isDatabaseUnavailable ? "Notebook Temporarily Unavailable"
               : httpStatus === 503 ? "Temporarily Unavailable"
                 : isImageBlock ? "Attachment Not Supported" : "Error",
