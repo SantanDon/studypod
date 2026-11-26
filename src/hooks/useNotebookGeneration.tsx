@@ -287,11 +287,6 @@ export const useNotebookGeneration = () => {
       // Also invalidate sources to ensure UI is updated
       queryClient.invalidateQueries({ queryKey: ["sources", data.notebookId] });
 
-      toast({
-        title: "Content Generated",
-        description:
-          "Notebook title and description have been generated successfully.",
-      });
     },
     onError: (error: unknown) => {
       console.error("Notebook generation failed:", error);

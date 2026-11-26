@@ -61,6 +61,26 @@ describe("standalone chat during a provider outage", () => {
   ])("keeps the retry error when no single reliable match is available", (message, sources) => {
     expect(() => recoverStandalonePassage(error, message, sources)).toThrow(error);
   });
+  it.each([
+    ["Where are the field journals kept?", "The field journals are stored beside the entrance."],
+    ["When does chamber inspection begin?", "Chamber inspections start at dawn."],
+    ["How many spare batteries are required?", "The workshop needs six spare batteries."],
+    ["How many sample boxes are there in the archive?", "The archive contains 13 sample boxes."],
+  ])("finds a uniquely supported paraphrase: %s", (prompt, line) => {
+    const result = recoverStandalonePassage(error, prompt, [{ ...source, content: "Overview\n" + line }]);
+    expect(result.citations[0]).toMatchObject({ excerpt: line, chunk_lines_from: 2, chunk_lines_to: 2 });
+  });
+  it.each([
+    ["How many spare batteries are required?", "The workshop needs six chargers for spare batteries."],
+    ["How many crates are in the east shed?", "The east shed contains two crates and the west shed contains six crates."],
+    ["Where are the field journals kept?", "Field journals are never stored by the entrance."],
+    ["Where are the field journals kept?", "Field journals are stored upstairs.\nField journals are kept in the basement."],
+    ["How many sample boxes are in the archive?", "The archive contains 2-6 sample boxes."],
+    ["Where are the field journals kept?", "The field journalist is kept busy every day."],
+    ["When did its inspection begin?", "Its inspection started Tuesday."],
+  ])("declines an ambiguous or unsupported paraphrase: %s", (prompt, line) => {
+    expect(() => recoverStandalonePassage(error, prompt, [{ ...source, content: line }])).toThrow(error);
+  });
   it.each(["PERSONAL_PROVIDER_UNAVAILABLE", "DATABASE_TEMPORARILY_UNAVAILABLE", "GROUNDING_UNAVAILABLE", "CHAT_TIMEOUT"])(
     "preserves %s", code => {
       const original = Object.assign(new Error(code), { code });
