@@ -1,9 +1,30 @@
 <!doctype html>
-<html lang="en"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Passage Finder | StudyPod</title>
-<style>*{box-sizing:border-box}body{margin:0;background:#faf8f1;color:#18372e;font:18px/1.55 system-ui}main{max-width:44rem;margin:10vh auto;padding:1.4rem}header{font-weight:700;color:#35684e}h1{font:clamp(2.8rem,8vw,5rem)/1.05 Georgia;margin:1.2rem 0}form{display:grid;gap:.6rem;margin:2rem 0}input,button{font:inherit;padding:.65rem .85rem;border:1px solid #586e61;border-radius:.5rem}button{background:#214f3a;color:white;cursor:pointer;justify-self:start}a{color:#205a42}blockquote{margin:1rem 0;padding-left:1rem;border-left:3px solid #517858}*:focus-visible{outline:3px solid #8a4114;outline-offset:3px}</style>
-<main><header>StudyPod</header><h1>Passage Finder</h1><p>Ask the weekly revision guide a question. Follow the answer back to the exact line.</p>
-<form><label for="question">Your question</label><input id="question" name="q" maxlength="240" required value="What should I do on Friday?"><button>Find passage</button></form>
-<section aria-live="polite"><strong id="status"></strong><blockquote hidden></blockquote><a hidden>Open exact line on GitHub</a></section></main>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Passage Finder | StudyPod</title>
+<style>
+  * { box-sizing: border-box }
+  body { margin: 0; background: #f8f6ee; color: #18372e; font: 1.05rem/1.6 system-ui, sans-serif }
+  main { width: min(100%, 46rem); margin: clamp(1.5rem, 7vh, 5rem) auto; padding: 0 clamp(1rem, 5vw, 3rem) 3rem }
+  header { border-bottom: 2px solid #244936; padding-bottom: .65rem; font-weight: 750 }
+  h1 { font: clamp(2.7rem, 9vw, 5rem)/1.1 Georgia, serif; margin: 1.35rem 0 .55rem }
+  p { margin: 0; max-width: 48ch }
+  form { display: grid; gap: .6rem; margin: 1.65rem 0 }
+  label { font-weight: 650 }
+  input, button { font: inherit; padding: .7rem .9rem; border: 1px solid #586e61; border-radius: .45rem }
+  input { width: 100%; color: inherit; background: #fffefa }
+  button { background: #214f3a; color: white; cursor: pointer; justify-self: start; font-weight: 650 }
+  button:disabled { opacity: .7; cursor: wait }
+  section:not(:empty) { scroll-margin: 1rem }
+  section:has(strong:not(:empty)) { background: #fffefa; border: 1px solid #bccec0; padding: 1rem clamp(1rem, 4vw, 1.6rem); border-radius: .5rem }
+  blockquote { margin: .7rem 0; padding-left: .85rem; border-left: 3px solid #517858; font: 1.25rem/1.5 Georgia, serif }
+  a { color: #205a42; display: inline-block; padding: .5rem 0; text-underline-offset: .18em }
+  [hidden] { display: none }
+  :focus-visible { outline: 3px solid #8a4114; outline-offset: 3px }
+</style></head><body>
+<main><header>StudyPod</header><h1>Passage Finder</h1><p>Ask the weekly revision guide about a study day or activity. Each answer links to the line it came from.</p>
+<form><label for="question">Your question</label><input id="question" name="q" list="examples" maxlength="240" required value="What should I do on Friday?">
+<datalist id="examples"><option value="When do I revisit mistakes?"></option><option value="What should I do on Tuesday?"></option><option value="When do I take a practice quiz?"></option></datalist>
+<button>Find passage</button></form>
+<section aria-label="Answer" aria-live="polite" aria-atomic="true"><strong id="status"></strong><blockquote hidden></blockquote><a hidden>Open exact line on GitHub</a></section></main>
 <script>
 const form = document.querySelector('form');
 const statusText = document.querySelector('#status');
@@ -22,9 +43,11 @@ form.addEventListener('submit', async event => {
     if (passage) {
       quote.textContent = passage.quote;
       link.href = passage.url;
+      const line = new URL(passage.url).hash.match(/^#L(\d+)$/);
+      link.textContent = line ? 'Open line ' + line[1] + ' on GitHub' : 'Open exact line on GitHub';
       quote.hidden = link.hidden = false;
     }
   } catch { statusText.textContent = 'The guide is unavailable. Please try again.'; }
   finally { form.querySelector('button').disabled = false; }
 });
-</script></html>
+</script></body></html>

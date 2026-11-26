@@ -39,6 +39,16 @@ describe("audio control accessibility", () => {
     expect(screen.getByRole("slider", { name: "Volume" })).toHaveAttribute("tabindex", "0");
   });
 
+  it("offers working playback controls when only browser speech is available", () => {
+    render(<AudioPlayer audioUrl="webspeech_fallback" title="Cedar conversation" />);
+    expect(screen.getByRole("button", { name: "Play" })).toBeEnabled();
+    expect(screen.getByRole("slider", { name: /playback position/ })).toBeEnabled();
+    expect(screen.queryByRole("button", { name: "Download" })).toBeNull();
+    expect(screen.queryByTitle("Playback speed")).toBeNull();
+    expect(screen.queryByRole("slider", { name: "Volume" })).toBeNull();
+    expect(screen.queryByRole("button", { name: /audio options/ })).toBeNull();
+  });
+
   it("names the icon-only audio options trigger", () => {
     render(<AudioPlayer audioUrl="/synthetic.wav" title="Cedar conversation" />);
     expect(screen.getByRole("button", { name: "Cedar conversation audio options" }))

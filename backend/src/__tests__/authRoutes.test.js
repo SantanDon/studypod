@@ -9,6 +9,7 @@ import {
 } from "vitest";
 import http from "node:http";
 import express from "express";
+import { protectBrowserWrites } from "../middleware/browserWrites.js";
 import cookieParser from "cookie-parser";
 
 // JWT_SECRET is captured at module-load time by the auth middleware, so set it
@@ -66,6 +67,7 @@ beforeAll(async () => {
   const app = express();
   app.use(express.json());
   app.use(cookieParser());
+  app.use(protectBrowserWrites([], false));
   app.use("/api/auth", authRouter);
   app.use(errorHandler);
 

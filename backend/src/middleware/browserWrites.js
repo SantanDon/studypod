@@ -16,8 +16,8 @@ export function protectBrowserWrites(allowedOrigins, development) {
   return (req, res, next) => {
     if (readMethods.has(req.method)) return next();
     const usesSession = req.cookies?.accessToken || req.cookies?.refreshToken;
-    const setsSession = /^\/api\/auth\/(?:signup|signin|refresh|mfa\/verify|reset-passphrase)\/?$/i.test(req.path);
-    if (!usesSession && !setsSession) return next();
+    const changesSession = /^\/api\/auth\/(?:signup|signin|signout|refresh|mfa\/verify|reset-passphrase)\/?$/i.test(req.path);
+    if (!usesSession && !changesSession) return next();
 
     const reject = () => res.status(403).json({ error: "Request origin could not be verified." });
     const origin = req.get("origin");

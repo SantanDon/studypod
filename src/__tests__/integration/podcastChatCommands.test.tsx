@@ -234,6 +234,9 @@ describe('customizing another saved overview', () => {
         const { rerender } = render(<PodcastView notebookId="notebook-a" />);
         fireEvent.click(screen.getByRole('button', { name: 'Set up podcast' }));
         mock.history = [{ id: 'restored-episode' }];
+        expect(screen.getByRole('dialog', { name: 'Episode settings' })).toHaveAccessibleDescription(
+            'Choose one narrator or two hosts, then set how much of your sources to cover.',
+        );
         fireEvent.click(screen.getByRole('button', { name: 'Close audio customization' }));
         rerender(<PodcastView notebookId="notebook-a" />);
         fireEvent.click(screen.getByRole('button', { name: 'Play saved fixture' }));

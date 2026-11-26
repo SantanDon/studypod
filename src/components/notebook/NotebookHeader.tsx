@@ -1,3 +1,4 @@
+import './AudioTitles.css';
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -100,7 +101,7 @@ const NotebookHeader = ({ title, notebookId }: NotebookHeaderProps) => {
   };
 
   return (
-    <header className="bg-background border-b border-border px-3 sm:px-6 py-3 sm:py-4">
+    <header className="notebook-topbar bg-background border-b border-border px-3 sm:px-6 py-3 sm:py-4">
       <div className="flex items-center justify-between gap-2">
         <div className="flex min-w-0 flex-1 items-center space-x-4">
           <div className="flex min-w-0 items-center space-x-2">
@@ -120,7 +121,7 @@ const NotebookHeader = ({ title, notebookId }: NotebookHeaderProps) => {
                 onChange={(e) => setEditedTitle(e.target.value)}
                 onKeyDown={handleKeyDown}
                 onBlur={handleBlur}
-                className="text-base sm:text-lg font-medium text-foreground border-none shadow-none p-0 h-auto focus-visible:ring-0 min-w-0 w-full bg-transparent"
+                className="notebook-document-title text-foreground border-none shadow-none p-0 h-auto focus-visible:ring-0 min-w-0 w-full bg-transparent"
                 autoFocus
                 disabled={isUpdating}
               />
@@ -128,7 +129,7 @@ const NotebookHeader = ({ title, notebookId }: NotebookHeaderProps) => {
               <button
                 ref={titleButtonRef}
                 type="button"
-                className="min-w-0 truncate text-left text-base sm:text-lg font-medium text-foreground hover:bg-accent rounded px-2 py-1 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-600"
+                className="notebook-document-title min-w-0 truncate text-left text-foreground hover:bg-accent rounded px-2 py-1 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-600"
                 onClick={handleTitleClick}
                 disabled={!notebookId}
                 aria-label={`Edit notebook title: ${displayTitle}`}

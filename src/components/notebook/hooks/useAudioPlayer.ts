@@ -319,38 +319,32 @@ export function useAudioPlayer({
     }
   }, [audioUrl, autoRetryInProgress, isWebSpeech]);
 
+  // Browser speech resumes at the start of a segment.
+  const playSpeechFrom = (time: number) => {
+    const generator = getStreamingTTSGenerator();
+    let elapsed = 0;
+    const starts = generator.getGeneratedSegments().map((segment) => {
+      const start = elapsed;
+      elapsed += segment.duration;
+      return start;
+    });
+    const nextIndex = starts.findIndex((start) => start > time);
+    const index = nextIndex === -1 ? starts.length - 1 : nextIndex - 1;
+    setIsPlaying(true);
+    generator.playAll(Math.max(0, index), (currentIndex) => {
+      currentTimeRef.current = starts[currentIndex];
+      setCurrentTime(starts[currentIndex]);
+    }, completePlayback);
+  };
+
   const togglePlayPause = () => {
     if (isWebSpeech) {
-      const generator = getStreamingTTSGenerator();
       if (isPlaying) {
-        generator.stopPlayback();
+        getStreamingTTSGenerator().stopPlayback();
         setIsPlaying(false);
+        persistPlayback();
       } else {
-        setIsPlaying(true);
-        const segments = generator.getGeneratedSegments();
-
-        let accumulated = 0;
-        let startIndex = 0;
-        for (let i = 0; i < segments.length; i++) {
-          if (accumulated + segments[i].duration >= currentTime) {
-            startIndex = i;
-            break;
-          }
-          accumulated += segments[i].duration;
-        }
-
-        generator.playAll(
-          startIndex,
-          (index) => {
-            const prevDuration = segments
-              .slice(0, index)
-              .reduce((sum, s) => sum + s.duration, 0);
-            setCurrentTime(prevDuration);
-          },
-          () => {
-            completePlayback();
-          },
-        );
+        playSpeechFrom(currentTime);
       }
       return;
     }
@@ -380,34 +374,7 @@ export function useAudioPlayer({
     persistPlayback(time);
 
     if (isWebSpeech) {
-      if (isPlaying) {
-        const generator = getStreamingTTSGenerator();
-        generator.stopPlayback();
-        const segments = generator.getGeneratedSegments();
-
-        let accumulated = 0;
-        let startIndex = 0;
-        for (let i = 0; i < segments.length; i++) {
-          if (accumulated + segments[i].duration >= time) {
-            startIndex = i;
-            break;
-          }
-          accumulated += segments[i].duration;
-        }
-
-        generator.playAll(
-          startIndex,
-          (index) => {
-            const prevDuration = segments
-              .slice(0, index)
-              .reduce((sum, s) => sum + s.duration, 0);
-            setCurrentTime(prevDuration);
-          },
-          () => {
-            completePlayback();
-          },
-        );
-      }
+      if (isPlaying) playSpeechFrom(time);
       return;
     }
 
@@ -433,23 +400,7 @@ export function useAudioPlayer({
     if (resolvedMediaId) clearPlaybackCheckpoint(resolvedMediaId);
 
     if (isWebSpeech) {
-      const generator = getStreamingTTSGenerator();
-      generator.stopPlayback();
-      if (isPlaying) {
-        const segments = generator.getGeneratedSegments();
-        generator.playAll(
-          0,
-          (index) => {
-            const prevDuration = segments
-              .slice(0, index)
-              .reduce((sum, s) => sum + s.duration, 0);
-            setCurrentTime(prevDuration);
-          },
-          () => {
-            completePlayback();
-          },
-        );
-      }
+      if (isPlaying) playSpeechFrom(0);
       return;
     }
 

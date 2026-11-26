@@ -130,7 +130,7 @@ export const GuestBanner = () => {
           variant="link" 
           size="sm" 
           onClick={handleSignUpClick}
-          className="text-primary hover:text-primary/80"
+          className="text-primary hover:text-primary/80 dark:text-blue-300 dark:hover:text-blue-200"
         >
           Sign up for free →
         </Button>

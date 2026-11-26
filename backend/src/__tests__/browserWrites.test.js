@@ -22,6 +22,8 @@ describe("browser write origin policy", () => {
     [{ "sec-fetch-site": "same-site" }, 403],
     [{ "content-type": "application/x-www-form-urlencoded" }, 403],
     [{ cookies: {}, path: "/api/auth/signin", origin: "https://other.example" }, 403],
+    [{ cookies: {}, path: "/api/auth/signout", origin: "https://other.example" }, 403],
+    [{ cookies: {}, path: "/api/auth/signout", origin: "https://demo.example" }, 200],
     [{ cookies: {}, path: "/api/auth/pair/complete" }, 200],
     [{ cookies: {}, path: "/oauth/token" }, 200],
     [{ cookies: {}, path: "/mcp", authorization: "Bearer fixture" }, 200],

@@ -11,10 +11,13 @@ test('HTTP answers cite the exact revision and line returned by the connector', 
   const sha = 'a'.repeat(40);
   const guide = await readFile(new URL('./guide.md', import.meta.url), 'utf8');
   const calls = [];
+  let available = false;
+  const warning = t.mock.method(console, 'warn', () => {});
   t.mock.method(globalThis, 'fetch', async url => {
     const path = new URL(url);
     assert.equal(path.origin, 'https://api.sprites.dev');
     assert.ok(path.pathname.startsWith('/v1/gateway/github/test-connector/repos/SantanDon/studypod/'));
+    if (!available) return new Response(null, { status: 429 });
     calls.push(path);
     return Response.json(path.pathname.includes('/commits')
       ? [{ sha }]
@@ -27,10 +30,18 @@ test('HTTP answers cite the exact revision and line returned by the connector', 
   const base = 'http://127.0.0.1:' + server.address().port;
   const home = await request(base);
   const html = (await home.text()).replace(/\r\n/g, '\n');
-  const scripts = [...html.matchAll(/<script>([\s\S]*?)<\/script>/g)];
+  const scripts = [...html.matchAll(/<script\b([^>]*)>([\s\S]*?)<\/script\s*>/gi)];
   assert.equal(scripts.length, 1);
-  const digest = createHash('sha256').update(scripts[0][1]).digest('base64');
-  assert.ok(home.headers.get('content-security-policy').split(';').map(value => value.trim()).includes(`script-src 'sha256-${digest}'`));
+  assert.equal(scripts[0][1].trim(), '', 'the demo must serve one plain inline script');
+  const digest = createHash('sha256').update(scripts[0][2]).digest('base64');
+  const scriptDirectives = home.headers.get('content-security-policy').split(';')
+    .map(value => value.trim()).filter(value => /^script-src(?:\s|$)/i.test(value));
+  assert.deepEqual(scriptDirectives, [`script-src 'sha256-${digest}'`]);
+  const unavailable = await request(base + '/answer?q=Friday');
+  assert.equal(unavailable.status, 503);
+  assert.equal(await unavailable.text(), '');
+  assert.deepEqual(warning.mock.calls[0].arguments, ['[Passage Finder] Connector HTTP 429']);
+  available = true;
   const response = await request(base + '/answer?q=Friday');
   assert.equal(response.status, 200);
   const { passage } = await response.json();

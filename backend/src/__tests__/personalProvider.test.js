@@ -72,7 +72,7 @@ describe('personal cloud provider request isolation', () => {
   it('keeps concurrent Groq and Gemini credentials and models isolated', async () => {
     const fetchMock = vi.fn(async (url, options) => {
       await Promise.resolve();
-      const expected = url.includes('googleapis.com') ? gemini : groq;
+      const expected = (new URL(url).origin === 'https://generativelanguage.googleapis.com') ? gemini : groq;
       expect(options.headers.Authorization).toBe(`Bearer ${expected.key}`);
       expect(JSON.parse(options.body).model).toBe(expected.model);
       return response({ choices: [{ message: { content: expected.provider } }], usage: { total_tokens: 7 } });

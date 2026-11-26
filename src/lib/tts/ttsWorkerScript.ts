@@ -98,7 +98,7 @@ async function initializeKokoro(): Promise<void> {
         lastReport = now;
         postResponse({
           type: 'progress',
-          message: `Downloading the voice model (${(totalReceived / 1_000_000).toFixed(1)} MB received)…`,
+          message: `Downloading the voice model (${(totalReceived / 1_000_000).toFixed(1)} MB received)...`,
           percentage: 40,
         });
       },

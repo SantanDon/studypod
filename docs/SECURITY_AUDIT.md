@@ -61,3 +61,7 @@ This release passed the complete automated, browser, API, storage, and deploymen
 3. Run a secret-pattern scan and `git diff --check` before every release commit.
 4. Never commit environment files, generated uploads, databases, local model caches, audio outputs, Vercel state, or QA artifacts.
 5. Rotate signing secrets and provider credentials after any suspected exposure and remove compatibility aliases once migrations are complete.
+
+## Review branch update, November 26, 2026
+
+CodeQL alert #84 flags separator normalization in PDF.js 5.4.394 when it reads an embedded attachment filename. The checked-in worker matches the installed upstream worker byte for byte (SHA-256 `cee92175925a2a7a43f3450a99e583fcbecc2685509e1dc270a03a186861592f`). StudyPod's extractor loads the package worker and reads page text. A source search found no call to `getAttachments()` in the frontend or backend. The review found no filesystem write from this filename. The alert remains open. Revisit this path before adding PDF attachment downloads or server-side attachment extraction.

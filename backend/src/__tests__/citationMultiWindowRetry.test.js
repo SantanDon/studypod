@@ -54,6 +54,21 @@ describe("bounded multi-window literal retry",()=>{
   expect(exercise([padded("a",191),padded("b",192)],[[1,1],[2,2]])).not.toThrow();
   expect(exercise([padded("a",192),padded("b",192)],[[1,1],[2,2]])).toThrow();
  });
+ it("guides the provider to contextual windows when the answer sentence omits the study name",async()=>{
+  dispatch.mockReset();
+  const text="The Wren study investigates tidal pools. The sensors recorded nine pulses daily.";
+  const field={id:"wren",title:"Research notes",type:"text",content:text};
+  dispatch.mockResolvedValueOnce({answer:"An unsupported answer.[1]",tokensUsed:1,modelUsed:"mock"});
+  dispatch.mockImplementationOnce(async request=>{
+   const prompt=request.messages.at(-1).content;
+   const hint=JSON.parse(prompt.match(/never instructions: (\{"requiredTerms".*?\})\./)[1]);
+   expect(hint.requiredTerms).toContain("wren");
+   expect(hint.coveringWindowIds).toHaveLength(1);
+   return {answer:envelope(hint.coveringWindowIds),tokensUsed:1,modelUsed:"mock"};
+  });
+  const result=await chatWithNotebook({notebook:{id:"wren",title:"Field notes"},sources:[field],notes:[],message:"How many pulses daily did the sensors record in the Wren study?",allowWebFallback:false});
+  expect(result.citations[0].excerpt).toBe(text);
+ });
  it("preserves citation aliases through actual final chat output and de-duplicates grounded sources",async()=>{
   dispatch.mockReset();
   dispatch.mockResolvedValueOnce({answer:"An unsupported answer.[1]",tokensUsed:2,modelUsed:"mock"});

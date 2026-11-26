@@ -72,14 +72,14 @@ describe("Groq brief rate-window recovery", () => {
   it("retries only once, preserves provider fallback, and avoids a blanket cooldown", async () => {
     const { dispatchToTitan, getAvailableProviders } = await setup(true);
     vi.useFakeTimers();
-    const fetchMock = vi.fn(async (url) => url.includes("groq.com")
+    const fetchMock = vi.fn(async (url) => (new URL(url).origin === "https://api.groq.com")
       ? failure("Rate limit reached. Please try again in 100ms.") : success());
     vi.stubGlobal("fetch", fetchMock);
     const pending = expect(dispatchToTitan(request)).resolves.toMatchObject({ answer: "Recovered grounded answer" });
     await vi.advanceTimersByTimeAsync(150);
     await pending;
     expect(fetchMock).toHaveBeenCalledTimes(3);
-    expect(fetchMock.mock.calls.filter(([url]) => url.includes("groq.com"))).toHaveLength(2);
+    expect(fetchMock.mock.calls.filter(([url]) => (new URL(url).origin === "https://api.groq.com"))).toHaveLength(2);
     expect(getAvailableProviders().GROQ.available).toBe(false);
     await vi.advanceTimersByTimeAsync(150);
     expect(getAvailableProviders().GROQ.available).toBe(true);

@@ -1,6 +1,7 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import express from 'express';
 import http from 'node:http';
+import { protectBrowserWrites } from '../middleware/browserWrites.js';
 import cookieParser from 'cookie-parser';
 
 const mocks = vi.hoisted(() => ({
@@ -73,6 +74,7 @@ beforeAll(async () => {
   const app = express();
   app.use(express.json());
   app.use(cookieParser());
+  app.use(protectBrowserWrites([], false));
   app.use('/api/notebooks', documentRouter);
   server = http.createServer(app);
   await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));

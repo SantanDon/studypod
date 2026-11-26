@@ -87,9 +87,11 @@ const AudioPlayer = ({
     formatTime,
   } = handlers;
 
+  const hasRecording = audioUrl !== "webspeech_fallback";
+
   return (
     <Card className="p-4 space-y-4">
-      <audio ref={audioRef} src={audioUrl === "webspeech_fallback" ? undefined : audioUrl} preload="metadata" />
+      <audio ref={audioRef} src={hasRecording ? audioUrl : undefined} preload="metadata" />
 
       <div className="flex flex-wrap items-center gap-2">
         <div className="min-w-32 flex-1">
@@ -101,11 +103,13 @@ const AudioPlayer = ({
             </p>
           )}
         </div>
-        <Button variant="outline" size="sm" className="min-h-11 gap-2" onClick={downloadAudio} disabled={loading || !!audioError || isDownloading}>
-          {isDownloading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Download className="h-4 w-4" />}
-          {isDownloading ? "Downloading..." : "Download"}
-        </Button>
-        {allowDelete && (
+        {hasRecording && (
+          <Button variant="outline" size="sm" className="min-h-11 gap-2" onClick={downloadAudio} disabled={loading || !!audioError || isDownloading}>
+            {isDownloading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Download className="h-4 w-4" />}
+            {isDownloading ? "Downloading..." : "Download"}
+          </Button>
+        )}
+        {allowDelete && hasRecording && (
         <DropdownMenu>
           <DropdownMenuTrigger asChild>
             <Button variant="ghost" size="sm" className="min-h-11 min-w-11" disabled={isDeleting} aria-label={`${title} audio options`}>
@@ -209,43 +213,47 @@ const AudioPlayer = ({
             )}
           </Button>
 
-          <DropdownMenu>
-            <DropdownMenuTrigger asChild>
-              <Button
-                variant="ghost"
-                size="sm"
-                aria-description="Change playback speed" title="Playback speed"
-                className="min-h-11 w-16 px-1 text-xs font-mono"
-              >
-                {playbackRate}x
-              </Button>
-            </DropdownMenuTrigger>
-            <DropdownMenuContent align="start" className="w-20">
-              {[0.5, 0.75, 1, 1.25, 1.5, 2].map((rate) => (
-                <DropdownMenuItem
-                  key={rate}
-                  onClick={() => handlePlaybackRateChange(rate)}
-                  className={playbackRate === rate ? "min-h-11 bg-accent" : "min-h-11"}
+          {hasRecording && (
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  aria-description="Change playback speed" title="Playback speed"
+                  className="min-h-11 w-16 px-1 text-xs font-mono"
                 >
-                  {rate}x
-                </DropdownMenuItem>
-              ))}
-            </DropdownMenuContent>
-          </DropdownMenu>
+                  {playbackRate}x
+                </Button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="start" className="w-20">
+                {[0.5, 0.75, 1, 1.25, 1.5, 2].map((rate) => (
+                  <DropdownMenuItem
+                    key={rate}
+                    onClick={() => handlePlaybackRateChange(rate)}
+                    className={playbackRate === rate ? "min-h-11 bg-accent" : "min-h-11"}
+                  >
+                    {rate}x
+                  </DropdownMenuItem>
+                ))}
+              </DropdownMenuContent>
+            </DropdownMenu>
+          )}
         </div>
 
         {/* Volume Control */}
-        <div className="flex items-center space-x-2 w-24">
-          <Volume2 className="h-4 w-4 text-gray-500" />
-          <Slider
-            value={[volume]}
-            max={1}
-            step={0.1}
-            onValueChange={handleVolumeChange}
-            className="min-h-11 flex-1"
-            aria-label="Volume"
-          />
-        </div>
+        {hasRecording && (
+          <div className="flex items-center space-x-2 w-24">
+            <Volume2 className="h-4 w-4 text-gray-500" />
+            <Slider
+              value={[volume]}
+              max={1}
+              step={0.1}
+              onValueChange={handleVolumeChange}
+              className="min-h-11 flex-1"
+              aria-label="Volume"
+            />
+          </div>
+        )}
       </div>
     </Card>
   );

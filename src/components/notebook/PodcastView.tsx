@@ -907,7 +907,6 @@ const PodcastView: React.FC<PodcastViewProps> = ({ notebookId, onOpenSource }) =
               <DialogPrimitive.Content
                 id="studypod-audio-customize"
                 className="audio-lab-overlay podcast-settings-dialog"
-                aria-describedby="podcast-settings-summary"
                 onOpenAutoFocus={event => { event.preventDefault(); customizeHeadingRef.current?.focus(); }}
                 onCloseAutoFocus={event => { event.preventDefault(); requestAnimationFrame(() => customizeAudioRef.current?.focus()); }}
               >
@@ -918,8 +917,8 @@ const PodcastView: React.FC<PodcastViewProps> = ({ notebookId, onOpenSource }) =
                       <DialogPrimitive.Title asChild>
                         <h4 ref={customizeHeadingRef} tabIndex={-1}>Episode settings</h4>
                       </DialogPrimitive.Title>
-                      <DialogPrimitive.Description id="podcast-settings-summary" className="mt-1 text-sm text-muted-foreground">
-                        Choose how your podcast sounds.
+                      <DialogPrimitive.Description className="mt-1 text-sm text-muted-foreground">
+                        Choose one narrator or two hosts, then set how much of your sources to cover.
                       </DialogPrimitive.Description>
                     </div>
                   </div>
@@ -991,7 +990,7 @@ const PodcastView: React.FC<PodcastViewProps> = ({ notebookId, onOpenSource }) =
                 </TabsList>
                 <TabsContent value="brief" className="lab-hint">Fewer complete passages from your sources.</TabsContent>
                 <TabsContent value="standard" className="lab-hint">A standard selection of complete passages. Length depends on your sources.</TabsContent>
-                <TabsContent value="deep-dive" className="lab-hint">Explores the main ideas, reasoning, examples and limitations across your selected text. Substantial chapters aim for about 20–30 minutes.</TabsContent>
+                <TabsContent value="deep-dive" className="lab-hint">Explores the main ideas, reasoning, examples and limitations across your selected text. Substantial chapters aim for about 20 to 30 minutes.</TabsContent>
               </Tabs>
             </div>
 

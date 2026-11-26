@@ -1,11 +1,31 @@
-/* Shared headings for the reading and listening workspaces. */
+@font-face {
+  font-family: "Newsreader";
+  src: url("/fonts/newsreader/newsreader-latin.woff2") format("woff2");
+  font-style: normal;
+  font-weight: 200 800;
+  font-display: swap;
+}
+
+.notebook-document-title,
+.studio-audio-title,
+.studypod-audio-section-heading h3,
+.podcast-settings-dialog .audio-lab-header h4 {
+  font-family: "Newsreader", Georgia, Cambria, serif;
+  font-optical-sizing: auto;
+  font-weight: 560;
+}
+
+.notebook-document-title {
+  font-size: clamp(1.125rem, 1rem + 0.55vw, 1.5rem);
+  line-height: 1.25;
+}
+
 .studio-audio-title,
 .studypod-audio-studio .studypod-audio-section-heading h3,
+.studypod-audio-card .studypod-audio-section-heading h3,
 .podcast-settings-dialog .audio-lab-header h4 {
-  font-family: Georgia, Cambria, serif;
-  font-size: clamp(1.375rem, 1.15rem + 0.7vw, 1.75rem);
-  line-height: 1.18;
-  font-weight: 600;
+  font-size: clamp(1.5rem, 1.25rem + 1vw, 2.125rem);
+  line-height: 1.1;
   letter-spacing: -0.018em;
   text-wrap: balance;
   overflow-wrap: anywhere;
@@ -14,4 +34,23 @@
 .studypod-audio-studio .studypod-audio-section-heading p {
   max-width: 65ch;
   line-height: 1.55;
+}
+
+.podcast-settings-dialog .lab-hint {
+  font-size: 0.875rem;
+  line-height: 1.5;
+}
+
+.podcast-settings-dialog .podcast-settings-fields label {
+  font-size: 0.9375rem;
+  font-weight: 600;
+  letter-spacing: normal;
+  text-transform: none;
+}
+
+.dark .notebook-topbar .bg-primary.text-primary-foreground,
+.dark .studypod-audio-card .podcast-generate-btn,
+.dark .podcast-settings-dialog .podcast-generate-btn,
+.dark [data-testid="audiobook-local-beta"] .bg-primary {
+  background-color: #245cc4;
 }
