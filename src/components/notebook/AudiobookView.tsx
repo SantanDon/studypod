@@ -1,3 +1,4 @@
+import StudyGlyph from "./StudyGlyph";
 import { prepareSourceNarration, sourceMetadata } from '@/lib/audio/sourceNarration';
 import { hasNarrationManifest, useStudioAudioCommands } from '@/lib/audio/studioAudioCommands';
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
@@ -352,6 +353,7 @@ export default function AudiobookView({
   const [providers, setProviders] = useState<Record<string, ProviderDetail>>(
     {},
   );
+  const [availabilityAttempt, setAvailabilityAttempt] = useState(0);
   const [runtimeCapabilities, setRuntimeCapabilities] =
     useState<AudiobookRuntimeCapabilities | null>(null);
   const [gutenbergId, setGutenbergId] = useState("");
@@ -508,7 +510,7 @@ export default function AudiobookView({
       controller.abort();
       window.clearInterval(interval);
     };
-  }, [refreshVoiceProviders]);
+  }, [refreshVoiceProviders, availabilityAttempt]);
 
   useEffect(() => {
     const provider = providers[selectedProvider];
@@ -1226,11 +1228,11 @@ export default function AudiobookView({
           {onClose && (
             <Button
               variant="ghost"
-              size="icon"
+              size="sm"
               onClick={onClose}
               aria-label="Back to Studio"
             >
-              <ArrowLeft />
+              <ArrowLeft aria-hidden="true" /> Studio
             </Button>
           )}
           <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-primary/10 text-primary">
@@ -1299,9 +1301,7 @@ export default function AudiobookView({
               className="border-border bg-card p-5 text-center shadow-none sm:p-6"
               data-testid="audiobook-local-beta"
             >
-              <div className="mx-auto flex h-12 w-12 items-center justify-center rounded-2xl bg-amber-100 text-amber-800 dark:bg-amber-900/50 dark:text-amber-300">
-                <Headphones className="h-5 w-5" />
-              </div>
+              <StudyGlyph kind="audiobook" className="mx-auto h-20 w-20" />
               <h3 className="mt-4 text-base font-semibold">
                 {runtimeCapabilities.localBeta ? "Create an audiobook on your computer" : "Audiobook unavailable"}
               </h3>
@@ -1325,6 +1325,14 @@ export default function AudiobookView({
                 {runtimeCapabilities?.reason ||
                   "This StudyPod setup does not support full-book narration."}
               </p>
+              {!runtimeCapabilities.localBeta && (
+                <Button className="mt-4" onClick={() => {
+                  setRuntimeCapabilities(null);
+                  setAvailabilityAttempt(attempt => attempt + 1);
+                }}>
+                  Check connection again
+                </Button>
+              )}
             </Card>
           ) : ebooks.length === 0 ? (
             <Card className="border-dashed p-6 text-center shadow-none">

@@ -330,9 +330,19 @@ const StudioSidebar = ({
                 <StudyGlyph kind="podcast" className="h-10 w-10 shrink-0" />
                 <StudioSectionHeading
                   title="Audio Overview"
-                  description="Listen to saved overviews or create a new overview from your sources."
+                  description="Make a podcast from your sources or narrate a book by chapter."
                 />
               </div>
+            {!hasOnlyTweets && (
+              <StudioActionCard
+                icon={AudiobookGlyph}
+                title="Audiobook"
+                description="Create chapter-by-chapter audio from books you own or that are public domain."
+                onClick={() => setActiveWorkspace('audiobook')}
+                testId="audiobook-studio-card"
+                badge="Local beta"
+              />
+            )}
               <div data-testid="audio-overview-studio-card">
                 <PodcastView notebookId={notebookId} onOpenSource={onCitationClick} />
               </div>
@@ -353,16 +363,7 @@ const StudioSidebar = ({
               testId="open-document-workspace"
             />
 
-            {!hasOnlyTweets && (
-              <StudioActionCard
-                icon={AudiobookGlyph}
-                title="Audiobook"
-                description="Create chapter-by-chapter audio from books you own or that are public domain."
-                onClick={() => setActiveWorkspace('audiobook')}
-                testId="audiobook-studio-card"
-                badge="Local beta"
-              />
-            )}
+
           </section>
 
           <section className="space-y-3" aria-label="Notes">

@@ -892,15 +892,15 @@ const PodcastView: React.FC<PodcastViewProps> = ({ notebookId, onOpenSource }) =
         )}
         <section className="studypod-create" aria-labelledby="studypod-create-heading">
           <div className="studypod-audio-section-heading">
-            <h3 id="studypod-create-heading">New audio overview</h3>
-            <p>Listen to source readings or explore ideas with a Deep Dive discussion.</p>
+            <h3 id="studypod-create-heading">Create a podcast</h3>
+            <p>Turn passages from your notebook into a solo or two-host episode.</p>
             <p id="studypod-audio-source-scope" role="status" aria-live="polite">{sourceScopeMessage}</p>
           </div>
         {showAudioLab ? (
           <div id="studypod-audio-customize" className="audio-lab-overlay glassmorphism">
             <div className="audio-lab-header">
               <h4 ref={customizeHeadingRef} tabIndex={-1}>
-                <FontAwesomeIcon icon={faFlask} aria-hidden="true" /> Customize audio
+                <FontAwesomeIcon icon={faFlask} aria-hidden="true" /> Episode settings
               </h4>
               <button
                 type="button"
@@ -916,6 +916,27 @@ const PodcastView: React.FC<PodcastViewProps> = ({ notebookId, onOpenSource }) =
             </div>
 
             <fieldset disabled={isStarting} className="min-w-0 border-0 p-0 m-0 disabled:opacity-60">
+            <div className="mb-4">
+            <button
+              className={`podcast-generate-btn ${isStarting ? "loading" : ""}`}
+              onClick={() => { void handleGenerate(); }}
+              disabled={cannotCreateAudio || isStarting}
+              aria-describedby="studypod-audio-source-scope"
+              data-testid="btn-start-production"
+            >
+              {isStarting ? (
+                <>
+                  <FontAwesomeIcon icon={faArrowsRotate} spin />
+                  Preparing script...
+                </>
+              ) : (
+                <>
+                  <FontAwesomeIcon icon={faPlay} />
+                  Create audio overview
+                </>
+              )}
+            </button>
+            </div>
             <div
               className="lab-length-selector"
               style={{ marginBottom: "16px" }}
@@ -949,19 +970,19 @@ const PodcastView: React.FC<PodcastViewProps> = ({ notebookId, onOpenSource }) =
                 aria-describedby="podcast-focus-hint"
                 value={podcastFocus}
                 onChange={(event) => setPodcastFocus(event.target.value)}
-                placeholder="e.g. Book VII: the cave, education, and philosopher-rulers"
+                placeholder="e.g. The allegory of the cave"
                 className="lab-input"
                 maxLength={500}
               />
               <p className="lab-hint" id="podcast-focus-hint">
-                Optional. Name a book, chapter, concept, or question to help select
-                passages. A long source may be covered only in part.
+                Optional. Give your episode a topic or question to focus its
+                selection of passages.
               </p>
             </div>
 
             <div className="lab-length-selector">
               <Label>
-                <FontAwesomeIcon icon={faHourglassHalf} /> How much of your sources to cover
+                <FontAwesomeIcon icon={faHourglassHalf} /> Source coverage
               </Label>
               <Tabs
                 value={podcastType}
@@ -1114,25 +1135,7 @@ const PodcastView: React.FC<PodcastViewProps> = ({ notebookId, onOpenSource }) =
               </div>
             </details>
 
-            <button
-              className={`podcast-generate-btn ${isStarting ? "loading" : ""}`}
-              onClick={() => { void handleGenerate(); }}
-              disabled={cannotCreateAudio || isStarting}
-              aria-describedby="studypod-audio-source-scope"
-              data-testid="btn-start-production"
-            >
-              {isStarting ? (
-                <>
-                  <FontAwesomeIcon icon={faArrowsRotate} spin />
-                  Preparing script...
-                </>
-              ) : (
-                <>
-                  <FontAwesomeIcon icon={faPlay} />
-                  Create audio overview
-                </>
-              )}
-            </button>
+
             </fieldset>
 
           </div>
