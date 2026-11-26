@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import { once } from 'node:events';
@@ -24,6 +25,12 @@ test('HTTP answers cite the exact revision and line returned by the connector', 
   await once(server, 'listening');
   t.after(() => new Promise(resolve => server.close(resolve)));
   const base = 'http://127.0.0.1:' + server.address().port;
+  const home = await request(base);
+  const html = (await home.text()).replace(/\r\n/g, '\n');
+  const scripts = [...html.matchAll(/<script>([\s\S]*?)<\/script>/g)];
+  assert.equal(scripts.length, 1);
+  const digest = createHash('sha256').update(scripts[0][1]).digest('base64');
+  assert.ok(home.headers.get('content-security-policy').split(';').map(value => value.trim()).includes(`script-src 'sha256-${digest}'`));
   const response = await request(base + '/answer?q=Friday');
   assert.equal(response.status, 200);
   const { passage } = await response.json();

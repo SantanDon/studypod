@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-import { readFileSync, writeFileSync, existsSync } from "fs";
+import { chmodSync, readFileSync, writeFileSync, existsSync } from "fs";
 import { join, dirname } from "path";
 import { fileURLToPath } from "url";
 import dotenv from "dotenv";
@@ -19,7 +19,7 @@ if (!PIN || PIN.length !== 6 || !/^\d{6}$/.test(PIN)) {
 }
 
 async function main() {
-  console.log(`\n[kilo] Pairing with code [${PIN}]...`);
+  console.log(`\n[kilo] Exchanging pairing code...`);
   const pairRes = await fetch(`${API_BASE}/auth/pair/complete`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -40,6 +40,7 @@ async function main() {
   // Safely merge env variables:
   let existingEnv = {};
   if (existsSync(ENV_PATH)) {
+    chmodSync(ENV_PATH, 0o600);
     const fileLines = readFileSync(ENV_PATH, "utf-8").split("\n");
     for (const line of fileLines) {
       const trimmed = line.trim();
@@ -60,7 +61,7 @@ async function main() {
       .map(([k, v]) => `${k}=${v}`)
       .join("\n") + "\n";
 
-  writeFileSync(ENV_PATH, newEnvContent, "utf-8");
+  writeFileSync(ENV_PATH, newEnvContent, { encoding: "utf-8", mode: 0o600 });
   console.log(`[kilo] API key saved to ${ENV_PATH}`);
 
   const headers = {

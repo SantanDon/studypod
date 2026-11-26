@@ -21,9 +21,9 @@ The following protocol applies to external agents and ChatGPT connectors.
 
 **Step 2 — Agent exchanges PIN for API key:**
 ```bash
-node backend/scripts/kilo_pair.js <YOUR-6-DIGIT-PIN>
+node agent_demo_kit/pair_and_test.js <YOUR-6-DIGIT-PIN>
 ```
-The script saves a persistent API key (`spm_...`) to `.env.agent`. Keep this file local. For a short-lived pairing check, use the demo from the starter kit below.
+This checks identity and notebook access with a read-only key that expires in one hour. The script holds the key in memory. For an integration that needs a persistent key, use `node backend/scripts/kilo_pair.js <YOUR-6-DIGIT-PIN>` with a fresh code. That script saves the key to `.env.agent` on this machine.
 
 ---
 

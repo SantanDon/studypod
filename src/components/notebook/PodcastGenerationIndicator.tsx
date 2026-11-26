@@ -7,7 +7,7 @@ import React, { useEffect, useState } from 'react';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
 import { faMicrophone, faXmark, faCirclePlay, faCirclePause } from '@fortawesome/free-solid-svg-icons';
 import { usePodcastGenerationStore } from '@/stores/podcastGenerationStore';
-import { getStreamingTTSGenerator } from '@/lib/tts/streamingTTSGenerator';
+import { getStreamingTTSGenerator, podcastStageLabel } from '@/lib/tts/streamingTTSGenerator';
 import './PodcastGenerationIndicator.css';
 
 interface PodcastGenerationIndicatorProps {
@@ -31,7 +31,18 @@ const PodcastGenerationIndicator: React.FC<PodcastGenerationIndicatorProps> = ({
     }
   }, [isGenerating]);
 
+  useEffect(() => {
+    if (!isGenerating) return;
+    const warnBeforeLeaving = (event: BeforeUnloadEvent) => {
+      event.preventDefault();
+      event.returnValue = '';
+    };
+    window.addEventListener('beforeunload', warnBeforeLeaving);
+    return () => window.removeEventListener('beforeunload', warnBeforeLeaving);
+  }, [isGenerating]);
+
   if (!isGenerating) return null;
+  const Info = onNavigateToPodcast ? 'button' : 'div';
 
   const handlePlayPartial = () => {
     const generator = getStreamingTTSGenerator();
@@ -62,12 +73,12 @@ const PodcastGenerationIndicator: React.FC<PodcastGenerationIndicatorProps> = ({
           <div className="indicator-pulse"></div>
         </div>
         
-        <div className="indicator-info" onClick={onNavigateToPodcast}>
-          <span className="indicator-title">Generating Podcast</span>
-          <span className="indicator-progress">
-            {progress?.currentSegment || 0}/{progress?.totalSegments || 0} · {progress?.percentage || 0}%
+        <Info className="indicator-info text-left" onClick={onNavigateToPodcast}>
+          <span className="indicator-title">Generating podcast · Keep this tab open</span>
+          <span className="indicator-progress" aria-live="polite" aria-atomic="true">
+            {podcastStageLabel(progress)}
           </span>
-        </div>
+        </Info>
 
         <div className="indicator-actions">
           {canPlayPartial && (
