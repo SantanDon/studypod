@@ -1,6 +1,12 @@
 import { act, cleanup, renderHook, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 const mocks = vi.hoisted(() => ({ add: vi.fn(), update: vi.fn(), upload: vi.fn(), process: vi.fn(), toast: vi.fn(), guest: false, notebookOwner: 'guest-a', increment: vi.fn() }));
+const dropbox = vi.hoisted(() => ({ list: vi.fn(), download: vi.fn(), delete: vi.fn(), invalidateQueries: vi.fn() }));
+vi.mock('@tanstack/react-query', () => ({ useQueryClient: () => dropbox }));
+vi.mock('@/hooks/useAuth', () => ({ useAuth: () => ({ session: { access_token: 'test-session' } }) }));
+vi.mock('@/services/apiService', () => ({ default: {
+  getPendingAgentUploads: dropbox.list, downloadAgentUpload: dropbox.download, deleteAgentUpload: dropbox.delete,
+} }));
 vi.mock('@/services/localStorageService', () => ({ localStorageService: { getNotebook: (id: string) => ({ id, user_id: mocks.notebookOwner }) } }));
 vi.mock('@/hooks/useSources', () => ({ useSources: () => ({ sources: [{ id: 'existing' }], addSourceAsync: mocks.add, updateSourceAsync: mocks.update }) }));
 vi.mock('@/hooks/useFileUpload', () => ({ useFileUpload: () => ({ uploadFile: mocks.upload, ownerId: 'owner-a' }) }));
@@ -12,6 +18,7 @@ vi.mock('@/hooks/useYoutubeProcessing', () => ({ useYoutubeProcessing: () => ({ 
 vi.mock('@/hooks/useGuest', () => ({ useGuest: () => ({ isGuest: mocks.guest, guestId: 'guest-a', incrementUsage: mocks.increment }), useNotebookLimits: () => ({ canAddSource: true, sourcesRemaining: 20 }) }));
 vi.mock('@/hooks/use-toast', () => ({ useToast: () => ({ toast: mocks.toast }) }));
 import { useAddSourcesHandlers } from '@/components/notebook/hooks/useAddSourcesHandlers';
+import { useAgentIngestion } from '@/hooks/useAgentIngestion';
 import { clearUploadInterruption, hasActiveSourceUploads, readRecoverableUploadInterruptions, readUploadInterruptions, recordUploadInterruption } from '@/lib/sources/sourceUploadInterruption';
 const scope = { ownerId: 'owner-a', notebookId: 'notebook' };
 beforeEach(() => {
@@ -23,6 +30,38 @@ beforeEach(() => {
   mocks.upload.mockResolvedValue({ success: false, error: 'Save unavailable', failureCode: 'SOURCE_SAVE_FAILED', failureStage: 'saving' });
 });
 afterEach(cleanup);
+describe('agent Dropbox ingestion', () => {
+  beforeEach(() => {
+    dropbox.list.mockResolvedValue({ success: true, pendingUploads: [{ id: 'raw-file', file_name: 'lecture.txt', mime_type: 'text/plain' }] });
+    dropbox.download.mockResolvedValue(new Blob(['Synthetic Cedar facts']));
+    dropbox.delete.mockResolvedValue(undefined);
+  });
+
+  it('waits for the matching terminal save before removing the raw file', async () => {
+    mocks.upload.mockResolvedValue({ success: true, content: 'Synthetic Cedar facts', filePath: 'synthetic.txt' });
+    let acknowledge!: (result: unknown) => void;
+    mocks.process.mockReturnValue(new Promise(resolve => { acknowledge = resolve; }));
+    const { rerender } = renderHook(() => useAgentIngestion('notebook'));
+    await waitFor(() => expect(mocks.process).toHaveBeenCalledOnce());
+    rerender();
+    expect(dropbox.list).toHaveBeenCalledOnce();
+    expect(dropbox.delete).not.toHaveBeenCalled();
+    await act(async () => { acknowledge({ sourceId: 'source', status: 'degraded' }); });
+    await waitFor(() => expect(dropbox.delete).toHaveBeenCalledExactlyOnceWith('raw-file', 'test-session'));
+  });
+
+  it.each(['creation rejected', 'different terminal source'])('retains the raw file when import cannot be confirmed: %s', async failure => {
+    if (failure === 'creation rejected') {
+      mocks.add.mockRejectedValueOnce(new Error('offline'));
+    } else {
+      mocks.upload.mockResolvedValue({ success: true, content: 'Synthetic Cedar facts', filePath: 'synthetic.txt' });
+      mocks.process.mockResolvedValue({ sourceId: 'other-source', status: 'completed' });
+    }
+    renderHook(() => useAgentIngestion('notebook'));
+    await waitFor(() => expect(dropbox.invalidateQueries).toHaveBeenCalledOnce());
+    expect(dropbox.delete).not.toHaveBeenCalled();
+  });
+});
 async function upload() {
   const { result } = renderHook(() => useAddSourcesHandlers('notebook', vi.fn(), false));
   await act(async () => { await result.current.handleFileUpload([new File(['synthetic'], 'lecture.txt', { type: 'text/plain' })]); });

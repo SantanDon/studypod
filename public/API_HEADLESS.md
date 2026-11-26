@@ -18,7 +18,7 @@ For a connector that needs to reconnect after a restart, **Generate New API Key*
    ```
 4. The demo uses a one-hour key in memory, verifies identity, and reports the number of accessible notebooks. To create a sample note in a specific test notebook, pass `--write-note <NOTEBOOK-ID>`. The default demo makes no notebook changes.
 
-For an integration that needs to retain a key across runs, generate a new PIN and run `node backend/scripts/kilo_pair.js <6-DIGIT-PIN>`. The pairing utility saves the key to the local `.env.agent` file.
+For multiple runs within an hour, `node backend/scripts/kilo_pair.js <6-DIGIT-PIN>` saves the paired key in the local `.env.agent` file. For longer access, the account owner can generate a separate API key under **Profile → Agent Pairing**.
 
 To pair directly, send `POST /api/auth/pair/complete` with `Content-Type: application/json` and a fresh code. This example requests read access for one hour.
 

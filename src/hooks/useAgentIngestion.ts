@@ -1,9 +1,11 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
 import { useAuth } from '@/hooks/useAuth';
 import apiService from '../services/apiService';
 import { useAddSourcesHandlers } from '../components/notebook/hooks/useAddSourcesHandlers';
 import { shouldReportNetworkError } from '@/lib/utils/networkError';
+
+const ignoreModalChange = () => {};
 
 /**
  * A hook that checks for unencrypted raw files uploaded by CLI agents
@@ -17,53 +19,66 @@ export const useAgentIngestion = (notebookId: string | undefined) => {
   const [ingestionStatus, setIngestionStatus] = useState<string | null>(null);
 
   // Hook into the main file upload pipeline, ignoring the UI modal states
-  const { handleFileUpload } = useAddSourcesHandlers(notebookId, () => {}, false);
+  const { handleFileUpload } = useAddSourcesHandlers(notebookId, ignoreModalChange, false);
+  const uploadHandler = useRef(handleFileUpload);
+  const persistedUploads = useRef(new Set<string>());
+  const accessToken = session?.access_token;
 
   useEffect(() => {
-    if (!notebookId || !session?.access_token) return;
+    uploadHandler.current = handleFileUpload;
+  }, [handleFileUpload]);
+
+  useEffect(() => {
+    setIsIngesting(false);
+    setIngestionStatus(null);
+    if (!notebookId || !accessToken) return;
 
     const controller = new AbortController();
+    let inFlight = false;
     const checkAndProcessPendingUploads = async () => {
+      if (inFlight || controller.signal.aborted) return;
+      inFlight = true;
       try {
-        const { success, pendingUploads } = await apiService.getPendingAgentUploads(notebookId, session.access_token, controller.signal);
+        const { success, pendingUploads } = await apiService.getPendingAgentUploads(notebookId, accessToken, controller.signal);
+        if (controller.signal.aborted) return;
         
         if (success && pendingUploads && pendingUploads.length > 0) {
           console.log(`🤖 Agent Ingestion: Found ${pendingUploads.length} pending files.`);
           setIsIngesting(true);
 
           for (const upload of pendingUploads) {
+            if (controller.signal.aborted) break;
             setIngestionStatus(`Processing agent file: ${upload.file_name}...`);
             try {
-              // 1. Download the raw blob securely
-              const fileBlob = await apiService.downloadAgentUpload(upload.id, session.access_token);
-              
-              // 2. Synthesize a File object for the document processor
-              const syntheticFile = new File([fileBlob], upload.file_name, {
-                type: upload.mime_type || 'application/octet-stream',
-              });
+              if (!persistedUploads.current.has(upload.id)) {
+                const fileBlob = await apiService.downloadAgentUpload(upload.id, accessToken);
+                if (controller.signal.aborted) break;
+                const syntheticFile = new File([fileBlob], upload.file_name, {
+                  type: upload.mime_type || 'application/octet-stream',
+                });
+                const persistedCount = await uploadHandler.current([syntheticFile], { waitForProcessing: true });
+                if (persistedCount !== 1) continue;
+                persistedUploads.current.add(upload.id);
+              }
 
-              // 3. Process, encrypt, and push to E2EE Database natively
-              await handleFileUpload([syntheticFile]);
-
-              // 4. Delete the raw file from the backend agent dropbox
-              await apiService.deleteAgentUpload(upload.id, session.access_token);
+              if (controller.signal.aborted) break;
+              await apiService.deleteAgentUpload(upload.id, accessToken);
+              persistedUploads.current.delete(upload.id);
               console.log(`✅ Agent Ingestion: Successfully processed and secured ${upload.file_name}`);
             } catch (err) {
               console.error(`❌ Agent Ingestion: Failed to process ${upload.file_name}`, err);
             }
           }
           
-          setIngestionStatus(null);
-          
-          // Force refresh sources list once all pending files are handled
-          if (notebookId) {
-            console.log("🤖 Agent Ingestion: All files processed, invalidating sources query...");
+          if (!controller.signal.aborted) {
+            setIngestionStatus(null);
             queryClient.invalidateQueries({ queryKey: ["sources", notebookId] });
           }
         }
       } catch (err) {
         if (shouldReportNetworkError(err, controller.signal)) console.error("Error during agent ingestion polling:", err);
       } finally {
+        inFlight = false;
         if (!controller.signal.aborted) setIsIngesting(false);
       }
     };
@@ -76,7 +91,7 @@ export const useAgentIngestion = (notebookId: string | undefined) => {
       controller.abort();
       clearInterval(interval);
     };
-  }, [notebookId, session, handleFileUpload, queryClient]);
+  }, [notebookId, accessToken, queryClient]);
 
   return { isIngesting, ingestionStatus };
 };

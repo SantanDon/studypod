@@ -23,7 +23,7 @@ The following protocol applies to external agents and ChatGPT connectors.
 ```bash
 node agent_demo_kit/pair_and_test.js <YOUR-6-DIGIT-PIN>
 ```
-This checks identity and notebook access with a read-only key that expires in one hour. The script holds the key in memory. For an integration that needs a persistent key, use `node backend/scripts/kilo_pair.js <YOUR-6-DIGIT-PIN>` with a fresh code. That script saves the key to `.env.agent` on this machine.
+This checks identity and notebook access with a read-only key that expires in one hour. The script holds the key in memory. To reuse a one-hour key across local processes, run `node backend/scripts/kilo_pair.js <YOUR-6-DIGIT-PIN>` with a fresh code. For longer access, the account owner can generate a separate API key under **Profile → Agent Pairing**.
 
 ---
 

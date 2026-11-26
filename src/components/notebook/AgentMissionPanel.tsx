@@ -1,7 +1,6 @@
-import { FormEvent, useCallback, useEffect, useState } from "react";
+import { FormEvent, useCallback, useEffect, useId, useState } from "react";
 import {
   AlertTriangle,
-  Bot,
   CheckCircle2,
   FileText,
   Loader2,
@@ -41,6 +40,7 @@ function resultSummary(mission: AgentMission) {
 }
 
 const AgentMissionPanel = ({ notebookId }: AgentMissionPanelProps) => {
+  const missionInputId = useId();
   const { session } = useAuth();
   const { toast } = useToast();
   const queryClient = useQueryClient();
@@ -239,47 +239,20 @@ const AgentMissionPanel = ({ notebookId }: AgentMissionPanelProps) => {
 
   return (
     <div className="space-y-3 rounded-xl border border-indigo-100 bg-indigo-50/30 p-3 dark:border-indigo-900/50 dark:bg-indigo-950/20">
-      <div className="flex items-start gap-2">
-        <div className="rounded-lg bg-indigo-100 p-2 text-indigo-700 dark:bg-indigo-900/60 dark:text-indigo-300">
-          <Bot className="h-4 w-4" aria-hidden="true" />
-        </div>
-        <div className="min-w-0 flex-1">
-          <h3 className="text-sm font-semibold text-foreground">
-            Agent Missions
-          </h3>
-          <p className="mt-0.5 text-[11px] leading-relaxed text-muted-foreground">
-            Give StudyPod a research task. It reads this notebook, checks its
-            sources, and saves a cited report as a note.
-          </p>
-        </div>
-        <Button
-          type="button"
-          variant="ghost"
-          size="icon"
-          className="h-7 w-7"
-          onClick={() => void loadMissions()}
-          disabled={loading}
-          aria-label="Refresh missions"
-        >
-          <RefreshCw
-            className={`h-3.5 w-3.5 ${loading ? "animate-spin" : ""}`}
-          />
-        </Button>
-      </div>
-
       <form className="space-y-2" onSubmit={handleCreateAndRun}>
+        <label htmlFor={missionInputId} className="block text-sm font-semibold text-foreground">Research mission</label>
         <Textarea
+          id={missionInputId}
           value={goal}
           onChange={(event) => setGoal(event.target.value)}
-          placeholder="e.g. Compare the authors' central claims, identify contradictions, and recommend what I should study next."
-          className="min-h-24 resize-y bg-background text-xs"
+          placeholder="For example, where do these sources disagree?"
+          className="min-h-24 resize-y bg-background text-sm"
           maxLength={4000}
-          aria-label="Research mission"
         />
         <Button
           type="submit"
           size="sm"
-          className="w-full gap-2"
+          className="min-h-11 w-full gap-2"
           disabled={!goal.trim() || creating || Boolean(runningId)}
         >
           {creating ? (
@@ -291,6 +264,22 @@ const AgentMissionPanel = ({ notebookId }: AgentMissionPanelProps) => {
         </Button>
       </form>
 
+      <div className="flex items-center justify-between border-t border-border pt-2">
+        <h3 className="text-sm font-semibold text-foreground">Mission history</h3>
+        <Button
+          type="button"
+          variant="ghost"
+          size="icon"
+          className="h-11 w-11"
+          onClick={() => void loadMissions()}
+          disabled={loading}
+          aria-label="Refresh missions"
+        >
+          <RefreshCw
+            className={`h-3.5 w-3.5 ${loading ? "animate-spin" : ""}`}
+          />
+        </Button>
+      </div>
       {loading ? (
         <div className="flex items-center justify-center gap-2 py-5 text-xs text-muted-foreground">
           <Loader2 className="h-4 w-4 animate-spin" />

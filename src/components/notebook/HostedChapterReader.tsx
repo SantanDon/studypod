@@ -59,6 +59,20 @@ export default function HostedChapterReader({ notebookId, sources, token }: Prop
   const [player, setPlayer] = useState<{ id: string; url: string }>();
   const alive = useRef(false);
   const locked = useRef(false);
+  const generation = useRef(0);
+  const canCancel = useRef(false);
+  const [cancellable, setCancellable] = useState(false);
+  function cancelNarration() {
+    if (!canCancel.current) return;
+    generation.current += 1;
+    canCancel.current = false;
+    locked.current = false;
+    releaseVoice();
+    setBusy(false);
+    setCancellable(false);
+    setDownloadAmount("");
+    setStatus("Narration cancelled. You can try this part again.");
+  }
   const worker = useRef<TTSWorkerManager | null>(null);
   const idleTimer = useRef<ReturnType<typeof setTimeout>>();
   function releaseVoice() {
@@ -72,7 +86,7 @@ export default function HostedChapterReader({ notebookId, sources, token }: Prop
 
   useEffect(() => {
     alive.current = true;
-    return () => { alive.current = false; releaseVoice(); };
+    return () => { alive.current = false; generation.current += 1; releaseVoice(); };
   }, []);
   useEffect(() => {
     let current = true;
@@ -86,6 +100,8 @@ export default function HostedChapterReader({ notebookId, sources, token }: Prop
 
   async function listen() {
     if (!source || !passage || !loaded || locked.current) return;
+    const current = ++generation.current;
+    const active = () => alive.current && current === generation.current;
     clearTimeout(idleTimer.current);
     locked.current = true;
     setBusy(true);
@@ -93,21 +109,25 @@ export default function HostedChapterReader({ notebookId, sources, token }: Prop
     try {
       let record = saved;
       if (!record) {
+        canCancel.current = true;
+        setCancellable(true);
         setStatus("Preparing the narration voice. The first download can take a few minutes.");
         const { TTSWorkerManager } = await import("@/lib/tts/ttsWorker");
-        if (!alive.current) return;
+        if (!active()) return;
         const voice = worker.current ?? new TTSWorkerManager();
         worker.current = voice;
         await voice.initialize(message => {
           const amount = message.match(/\b([\d.]+) MB received\b/);
-          if (alive.current && amount && Number(amount[1]) > 0) setDownloadAmount(amount[0]);
+          if (active() && amount && Number(amount[1]) > 0) setDownloadAmount(amount[0]);
         });
-        if (!alive.current) return;
+        if (!active()) return;
         setDownloadAmount("");
         setStatus("Reading this passage aloud…");
         const speech = await voice.synthesize(passage, "af_heart", 1);
         URL.revokeObjectURL(speech.audioUrl);
-        if (!alive.current) return;
+        if (!active()) return;
+        canCancel.current = false;
+        setCancellable(false);
         setStatus("Saving this chapter to your notebook…");
         const key = JSON.stringify([source.id, title, passage]);
         const id = stableIds.current.get(key) || crypto.randomUUID();
@@ -116,22 +136,28 @@ export default function HostedChapterReader({ notebookId, sources, token }: Prop
           id, title, blob: speech.audioBlob, sourceIds: [source.id],
           script: { title, recordingKind: "audiobook-chapter", segments: [{ speaker: "Narrator", text: passage }] },
         });
-        if (!alive.current) return;
+        if (!active()) return;
         setRecords(rows => [record!, ...rows.filter(row => row.id !== record!.id)]);
       }
       setStatus("Opening the saved recording…");
       const blob = await api.audio(record.id);
-      if (alive.current) {
+      if (active()) {
         setPlayer({ id: record.id, url: URL.createObjectURL(blob) });
         setStatus("Ready to play. Your recording is saved in this notebook.");
       }
     } catch (error) {
+      if (!active()) return;
       releaseVoice();
-      if (alive.current) setStatus(error instanceof Error ? error.message : "The recording could not be opened. Try again.");
+      setStatus(error instanceof Error ? error.message : "The recording could not be opened. Try again.");
     } finally {
-      if (alive.current && worker.current) idleTimer.current = setTimeout(releaseVoice, 120_000);
-      locked.current = false;
-      if (alive.current) { setDownloadAmount(""); setBusy(false); }
+      if (active()) {
+        if (worker.current) idleTimer.current = setTimeout(releaseVoice, 120_000);
+        locked.current = false;
+        canCancel.current = false;
+        setCancellable(false);
+        setDownloadAmount("");
+        setBusy(false);
+      }
     }
   }
 
@@ -153,6 +179,7 @@ export default function HostedChapterReader({ notebookId, sources, token }: Prop
       </div>}
       <blockquote className="rounded-lg border-l-4 border-primary bg-muted/40 p-3 text-sm leading-6 break-words">{passage}</blockquote>
       {(!player || player.id !== saved?.id) && <Button className="min-h-11" disabled={busy || !loaded} onClick={listen}>{busy ? "Working…" : saved ? "Open saved recording" : "Generate chapter audio"}</Button>}
+      {cancellable && <Button variant="outline" className="min-h-11" onClick={cancelNarration}>Cancel narration</Button>}
       {player && player.id === saved?.id && <div className="flex flex-wrap items-center gap-2 rounded-xl border bg-muted/30 p-3"><audio className="min-w-0 basis-48 flex-1" aria-label={title} controls src={player.url}
         onLoadedMetadata={e => { const time = storedPosition("studypod:chapter-time:" + player.id); if (time < e.currentTarget.duration) e.currentTarget.currentTime = time; }}
         onPause={e => rememberPosition("studypod:chapter-time:" + player.id, e.currentTarget.currentTime)}

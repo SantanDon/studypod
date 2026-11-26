@@ -72,3 +72,29 @@ it("only offers part navigation for a source with more than one part", async () 
   expect(screen.getByText("Part 1 of 2")).toBeVisible();
   view.unmount();
 });
+
+it("can cancel a pending voice and retry before its callbacks finish", async () => {
+  vi.spyOn(URL, "createObjectURL").mockReturnValue("blob:chapter");
+  vi.spyOn(URL, "revokeObjectURL").mockImplementation(() => {});
+  let finishOld!: () => void;
+  let finishRetry!: () => void;
+  voice.initialize.mockImplementationOnce(() => new Promise<void>(resolve => { finishOld = resolve; }))
+    .mockImplementationOnce(() => new Promise<void>(resolve => { finishRetry = resolve; }));
+  voice.synthesize.mockResolvedValue({audioBlob: new Blob(["audio"]), audioUrl: "blob:voice"});
+  const sources = [{id: "field", title: "Field notes", content: "Read the scale.", notebook_id: "field-book"}] as Source[];
+  const view = render(<HostedChapterReader notebookId="field-book" sources={sources} />);
+  await act(async () => {});
+  fireEvent.click(screen.getByRole("button", {name: "Generate chapter audio"}));
+  await act(async () => {});
+  fireEvent.click(screen.getByRole("button", {name: "Cancel narration"}));
+  expect(screen.getByRole("status")).toHaveTextContent("Narration cancelled");
+  expect(voice.terminate).toHaveBeenCalled();
+  fireEvent.click(screen.getByRole("button", {name: "Generate chapter audio"}));
+  await act(async () => finishOld());
+  expect(screen.getByRole("button", {name: "Cancel narration"})).toBeVisible();
+  expect(screen.getByRole("status")).toHaveTextContent("Preparing");
+  await act(async () => finishRetry());
+  expect(await screen.findByText(/Ready to play/)).toBeVisible();
+  expect(screen.queryByRole("button", {name: "Cancel narration"})).toBeNull();
+  view.unmount();
+});

@@ -1106,11 +1106,22 @@ router.post("/pair/complete", authLimiter, async (req, res) => {
         .json({ error: "A valid pairing code is required" });
     }
 
-    const normalized = normalizeKeyOptions(req.body, "Paired Agent");
+    // Pairing grants last at most one hour. Longer-lived keys require a human session.
+    const lifetime = req.body.expiresInHours ?? 1;
+    const hours = Number(lifetime);
+    if (
+      !["string", "number"].includes(typeof lifetime) ||
+      !Number.isFinite(hours) || hours < 1 / 3600 || hours > 1
+    ) {
+      return res.status(400).json({
+        error: "Paired keys must expire between one second and one hour.",
+      });
+    }
+    const normalized = normalizeKeyOptions({ ...req.body, expiresInHours: 1 }, "Paired Agent");
     if (normalized.error) {
       return res.status(400).json({ error: normalized.error });
     }
-    const { label, scopes, notebookIds, expiresInHours, rateLimit } =
+    const { label, scopes, notebookIds, rateLimit } =
       normalized.value;
 
     const record = await dbHelpers.getPairingCode(code);
@@ -1136,9 +1147,7 @@ router.post("/pair/complete", authLimiter, async (req, res) => {
       return res.status(401).json({ error: "Invalid or expired pairing code" });
     }
 
-    const expiresAt = expiresInHours
-      ? new Date(Date.now() + expiresInHours * 60 * 60 * 1000)
-      : null;
+    const expiresAt = new Date(Date.now() + hours * 60 * 60 * 1000);
 
     // Valid code! Generate persistent API key
     const rawKey = "spm_" + crypto.randomBytes(32).toString("hex");

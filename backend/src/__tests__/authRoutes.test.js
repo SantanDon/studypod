@@ -222,7 +222,15 @@ describe("POST /api/auth/pair/complete", () => {
     expect(mockDb.createApiKey).not.toHaveBeenCalled();
   });
 
-  it("issues an spm_ API key for a valid code + scopes", async () => {
+  it.each([2, 8760, 0, -1, true])("rejects invalid pairing lifetime %s before consuming the code", async (expiresInHours) => {
+    const { status } = await request("/api/auth/pair/complete", {
+      body: { code: "333333", expiresInHours },
+    });
+    expect(status).toBe(400);
+    expect(mockDb.consumePairingCode).not.toHaveBeenCalled();
+  });
+
+  it.each([undefined, null, 1, 0.25])("issues a time-limited paired key for requested lifetime %s", async (expiresInHours) => {
     const record = {
       code: "333333",
       userId: "u-human",
@@ -236,12 +244,18 @@ describe("POST /api/auth/pair/complete", () => {
       body: {
         code: "333333",
         label: "Research Bot",
+        expiresInHours,
         scopes: ["notebooks:read", "notes:create"],
       },
     });
 
     expect(status).toBe(201);
     expect(body.key).toMatch(/^spm_[0-9a-f]+$/);
+    const expectedMs = (expiresInHours ?? 1) * 3_600_000;
+    const remainingMs = Date.parse(body.expiresAt) - Date.now();
+    expect(remainingMs).toBeLessThanOrEqual(expectedMs);
+    expect(remainingMs).toBeGreaterThan(expectedMs - 10_000);
+    expect(mockDb.createApiKey.mock.calls[0][7].toISOString()).toBe(body.expiresAt);
     expect(body.label).toBe("Research Bot");
     expect(body.scopes).toEqual(["notebooks:read", "notes:create"]);
     expect(mockDb.createApiKey).toHaveBeenCalledTimes(1);

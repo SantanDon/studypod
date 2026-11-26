@@ -23,7 +23,7 @@ async function main() {
   const pairRes = await fetch(`${API_BASE}/auth/pair/complete`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ code: PIN, label: "KiloPaired" }),
+    body: JSON.stringify({ code: PIN, label: "KiloPaired", expiresInHours: 1 }),
   });
 
   if (!pairRes.ok) {
@@ -32,10 +32,10 @@ async function main() {
     process.exit(1);
   }
 
-  const { key, prefix, id } = await pairRes.json();
+  const { key, expiresAt, id } = await pairRes.json();
   console.log(`[kilo] Paired successfully!`);
   console.log(`       Key ID: ${id}`);
-  console.log(`       Prefix: ${prefix}`);
+  console.log(`       Expires: ${expiresAt}`);
 
   // Safely merge env variables:
   let existingEnv = {};
@@ -76,7 +76,7 @@ async function main() {
   console.log(`       Type: ${me.accountType || me.account_type}`);
 
   console.log(
-    `\n[kilo] Pairing complete. Use AGENT_API_KEY from .env.agent for all subsequent requests.`,
+    `\n[kilo] Pairing complete. Use AGENT_API_KEY from .env.agent until the expiry shown above.`,
   );
 }
 

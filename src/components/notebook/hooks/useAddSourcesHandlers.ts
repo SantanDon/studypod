@@ -50,7 +50,7 @@ export function useAddSourcesHandlers(
   }, [open]);
 
   const handleFileUpload = useCallback(
-    async (selectedFiles: File[]) => {
+    async (selectedFiles: File[], { waitForProcessing = false } = {}) => {
       const { accepted: files, rejected } = validateSourceFiles(selectedFiles);
       if (rejected.length > 0) {
         const details = rejected
@@ -165,12 +165,13 @@ export function useAddSourcesHandlers(
 
           // The sidebar may be unmounted by an error boundary. Release the
           // reload guard here only after this source's terminal save is acknowledged.
-          if (interruptionScope && processingResult.sourceId === sourceId &&
-            (processingResult.status === "completed" || processingResult.status === "degraded")) {
+          const persisted = processingResult.sourceId === sourceId &&
+            (processingResult.status === "completed" || processingResult.status === "degraded");
+          if (interruptionScope && persisted) {
             clearUploadInterruption(interruptionScope, sourceId);
           }
 
-          return { filePath, sourceType: fileType };
+          return { filePath, sourceType: fileType, persisted };
         } catch (error) {
           console.error("File processing failed for:", file.name, error);
           try {
@@ -264,12 +265,13 @@ export function useAddSourcesHandlers(
           variant: creationFailures.length > 0 ? "destructive" : "default",
         });
 
-        void (async () => {
+        const completion = (async () => {
           let enrichmentSource: {
             filePath: string;
             sourceType: UploadSourceType;
           } | null = null;
           let failed = 0;
+          let persistedCount = 0;
           for (let index = 0; index < createdSources.length; index += 3) {
             const batch = createdSources.slice(index, index + 3);
             const results = await Promise.allSettled(
@@ -280,9 +282,12 @@ export function useAddSourcesHandlers(
             failed += results.filter(
               (result) => result.status === "rejected",
             ).length;
+            persistedCount += results.filter(
+              (result) => result.status === "fulfilled" && result.value.persisted,
+            ).length;
             if (!enrichmentSource) {
               const firstCompleted = results.find(
-                (result) => result.status === "fulfilled",
+                (result) => result.status === "fulfilled" && result.value.persisted,
               );
               if (firstCompleted?.status === "fulfilled") {
                 enrichmentSource = firstCompleted.value;
@@ -307,7 +312,9 @@ export function useAddSourcesHandlers(
               variant: "destructive",
             });
           }
+          return persistedCount;
         })();
+        if (waitForProcessing) return await completion;
       } catch (error) {
         console.error("Error creating sources:", error);
         setIsLocallyProcessing(false);

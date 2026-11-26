@@ -458,9 +458,8 @@ const StudioSidebar = ({
               <StudioToolTrigger
                 icon={Bot}
                 title="Agent Missions"
-                description="Give StudyPod a research task using this notebook's sources."
+                description="Investigate a question and save a cited report to this notebook."
                 open={isAgentMissionsSectionOpen}
-                badge="Agent"
               />
               <CollapsibleContent className="pt-2">
                 <div className="max-h-[520px] overflow-y-auto pr-1">
