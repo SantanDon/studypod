@@ -677,8 +677,7 @@ for (const scenario of [
       receipt.phase = 'download'; progress();
       const downloadEvent = page.waitForEvent('download');
       if (kind === 'podcast') {
-        await player.getByRole('button', { name: / audio options$/ }).click();
-        await page.getByRole('menuitem', { name: 'Download', exact: true }).click();
+        await player.getByRole('button', { name: 'Download', exact: true }).click();
       } else await page.getByRole('button', { name: /^Download full / }).click();
       const download = await downloadEvent; expect(await download.failure()).toBeNull();
       const output = resolve(directory, 'generated-audio.bin'); await download.saveAs(output);
@@ -979,8 +978,7 @@ for (const scenario of [
           }
 
           const freshDownload = freshPage.waitForEvent('download');
-          await freshPlayer.getByRole('button', { name: / audio options$/ }).click();
-          await freshPage.getByRole('menuitem', { name: 'Download', exact: true }).click();
+          await freshPlayer.getByRole('button', { name: 'Download', exact: true }).click();
           const downloaded = await freshDownload;
           expect(await downloaded.failure()).toBeNull();
           const freshOutput = resolve(directory, 'fresh-owner-podcast.wav');

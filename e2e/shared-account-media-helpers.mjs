@@ -76,8 +76,7 @@ export async function verifyPlayback(player, expect) {
 export async function downloadPodcast(page, player, outputPath, expectedSha256, expect) {
   if (!/^[a-f0-9]{64}$/i.test(expectedSha256)) throw new Error('Expected persisted media SHA-256 required');
   const downloadEvent = page.waitForEvent('download');
-  await player.getByRole('button', { name: / audio options$/ }).click();
-  await page.getByRole('menuitem', { name: 'Download', exact: true }).click();
+  await player.getByRole('button', { name: 'Download', exact: true }).click();
   const download = await downloadEvent;
   expect(await download.failure()).toBeNull();
   await download.saveAs(outputPath);
